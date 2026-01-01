@@ -1,0 +1,105 @@
+{
+  "docker": [
+    {
+      "args": [
+        "pull",
+        "ghcr.io/github/github-mcp-server"
+      ],
+      "cwd": "isolated",
+      "executable": "docker",
+      "id": "docker-pull",
+      "kind": "run",
+      "network": true,
+      "timeoutMs": 600000
+    },
+    {
+      "client": "cursor",
+      "file": ".cursor/mcp.json",
+      "id": "config-cursor-project",
+      "kind": "config-patch",
+      "path": [
+        "mcpServers",
+        "github"
+      ],
+      "scope": "project",
+      "value": {
+        "args": [
+          "run",
+          "-i",
+          "--rm",
+          "-e",
+          "GITHUB_PERSONAL_ACCESS_TOKEN",
+          "ghcr.io/github/github-mcp-server"
+        ],
+        "command": "docker",
+        "env": {
+          "GITHUB_PERSONAL_ACCESS_TOKEN": "${env:GITHUB_PERSONAL_ACCESS_TOKEN}"
+        }
+      }
+    }
+  ],
+  "npx": [
+    {
+      "client": "claude-code",
+      "file": ".mcp.json",
+      "id": "config-claude-code-project",
+      "kind": "config-patch",
+      "path": [
+        "mcpServers",
+        "memory"
+      ],
+      "scope": "project",
+      "value": {
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-memory"
+        ],
+        "command": "npx"
+      }
+    }
+  ],
+  "uvx": [
+    {
+      "client": "claude-code",
+      "file": ".mcp.json",
+      "id": "config-claude-code-project",
+      "kind": "config-patch",
+      "path": [
+        "mcpServers",
+        "postgres"
+      ],
+      "scope": "project",
+      "value": {
+        "args": [
+          "postgres-mcp",
+          "--access-mode=restricted"
+        ],
+        "command": "uvx",
+        "env": {
+          "DATABASE_URI": "${DATABASE_URI}"
+        }
+      }
+    },
+    {
+      "client": "codex",
+      "file": ".codex/config.toml",
+      "id": "config-codex-project",
+      "kind": "config-patch",
+      "path": [
+        "mcp_servers",
+        "postgres"
+      ],
+      "scope": "project",
+      "value": {
+        "args": [
+          "postgres-mcp",
+          "--access-mode=restricted"
+        ],
+        "command": "uvx",
+        "env_vars": [
+          "DATABASE_URI"
+        ]
+      }
+    }
+  ]
+}

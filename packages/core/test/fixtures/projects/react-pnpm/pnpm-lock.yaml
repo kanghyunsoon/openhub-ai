@@ -1,0 +1,8 @@
+lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      react:
+        specifier: ^19.1.0
+        version: 19.1.0

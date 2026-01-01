@@ -1,0 +1,13 @@
+# Catalog Metadata v1 (D-035): Registry Tool의 등록일(addedAt)을 적는 유일한 출처다.
+# addedAt은 YYYY-MM-DD 또는 null이다. null은 "legacy / 등록일 미상"이며 NEW FOR YOUR PROJECT에서 제외된다.
+# 아래 Tool들은 실제 Registry 수용일을 신뢰할 수 있게 복원하지 못해 null이다. 새 Tool은 사람이 수용한 날짜를 적는다.
+schemaVersion: 1
+kind: openhub-registry-catalog
+tools:
+  chrome-devtools-mcp: { addedAt: null }
+  context7: { addedAt: null }
+  github-mcp-server: { addedAt: null }
+  memory-mcp: { addedAt: null }
+  playwright-mcp: { addedAt: null }
+  postgres-mcp: { addedAt: null }
+  serena: { addedAt: null }

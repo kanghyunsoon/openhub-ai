@@ -1,0 +1,263 @@
+name: Release
+
+# Release dry-run과 draft Release(TASK-072, D-034·D-037 §13).
+# - 기본은 dry-run이다. workflow_dispatch(dry_run 기본 true, publish 기본 false)와 tag v* push는 산출물을 만들고 검증해
+#   workflow artifact로만 올린다. GitHub Release는 release job만 draft로 만들고 공개는 사람이 한다. npm registry 배포 step은 없다.
+# - 쓰는 secret은 job 기본 GITHUB_TOKEN(github.token)뿐이다. 서명 인증서·signing action은 없다(Windows NSIS unsigned).
+# - Electron 버전은 dependency SBOM·패키징된 앱 runtime(process.versions)·공식 Electron 배포본 provenance로 확인한다(D-037).
+#   Syft는 native·runtime inventory이며 Electron 이름 식별은 요구하지 않는다.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "산출물만 만들고 검증한다(Release를 만들지 않음)"
+        type: boolean
+        default: true
+      publish:
+        description: "dry_run=false이고 SemVer tag에서 실행할 때만 draft Release를 만든다"
+        type: boolean
+        default: false
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SYFT_VERSION: v1.54.1
+  SYFT_SHA256_LINUX: c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47
+  SYFT_SHA256_WINDOWS: 8b56e8285e295e0bbed26eeea9b16ed51c493be97ccdf42dae6326c84fe8e19f
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: 포함 metadata snapshot 수집(공개 GitHub 메타데이터, job 기본 token)
+        run: pnpm openhub collect --out release-out/metadata.json
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: metadata
+          path: release-out/metadata.json
+          if-no-files-found: error
+
+  cli:
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - uses: actions/download-artifact@v4
+        with:
+          name: metadata
+          path: release-in
+      - name: Syft 설치(고정 버전·checksum 검증)
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/syft.tar.gz" "https://github.com/anchore/syft/releases/download/${SYFT_VERSION}/syft_${SYFT_VERSION#v}_linux_amd64.tar.gz"
+          echo "${SYFT_SHA256_LINUX}  $RUNNER_TEMP/syft.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/syft.tar.gz" -C "$RUNNER_TEMP" syft
+          echo "SYFT=$RUNNER_TEMP/syft" >> "$GITHUB_ENV"
+      - run: pnpm pack:cli --metadata release-in/metadata.json
+      - run: pnpm release artifact-sbom --dir release-out/openhub-ai-*.tgz --name openhub-cli --kind cli --count-only --report release-out/reports/cli.json
+      - run: pnpm release notices --kind cli --tgz release-out/openhub-ai-*.tgz --artifact cli --report release-out/reports/cli.json
+      - run: pnpm release smoke-cli --tgz release-out/openhub-ai-*.tgz --report release-out/reports/cli.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli
+          path: |
+            release-out/openhub-ai-*.tgz
+            release-out/cli.metafile.json
+            release-out/reports/cli.json
+          if-no-files-found: error
+
+  windows:
+    needs: metadata
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: metadata
+          path: release-in
+      - name: Syft 설치(고정 버전·checksum 검증)
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP "syft.zip"
+          Invoke-WebRequest -UseBasicParsing "https://github.com/anchore/syft/releases/download/$env:SYFT_VERSION/syft_$($env:SYFT_VERSION.TrimStart('v'))_windows_amd64.zip" -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne $env:SYFT_SHA256_WINDOWS) { throw "Syft checksum 불일치" }
+          Expand-Archive $zip (Join-Path $env:RUNNER_TEMP "syft")
+          "SYFT=$(Join-Path $env:RUNNER_TEMP 'syft\syft.exe')" >> $env:GITHUB_ENV
+      - run: pnpm pack:desktop --metadata release-in/metadata.json
+      - name: Electron provenance(공식 archive checksum + runtime file byte 비교)
+        run: pnpm release electron-provenance --dir release-out/desktop/win-unpacked --report release-out/reports/windows.json
+      - run: pnpm release artifact-sbom --dir release-out/desktop/win-unpacked --name openhub-windows --kind windows --out release-out/openhub-windows-artifact.cdx.json --report release-out/reports/windows.json
+      - run: pnpm release notices --kind desktop --dir release-out/desktop/win-unpacked --artifact windows --report release-out/reports/windows.json
+      - run: pnpm release smoke-unpacked --dir release-out/desktop/win-unpacked --report release-out/reports/windows.json
+      - name: NSIS silent 설치 → --smoke → 제거
+        shell: pwsh
+        run: pnpm release smoke-nsis --installer (Get-ChildItem release-out/desktop/OpenHub-AI-Setup-*-x64.exe).FullName --report release-out/reports/windows.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            release-out/desktop/OpenHub-AI-Setup-*-x64.exe
+            release-out/openhub-windows-artifact.cdx.json
+            release-out/reports/windows.json
+          if-no-files-found: error
+
+  linux:
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: AppImage 실행 의존성(xvfb·GTK·NSS)
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0t64 libnss3 libxss1 libasound2t64 libgbm1 libnotify4 libsecret-1-0
+      - uses: actions/download-artifact@v4
+        with:
+          name: metadata
+          path: release-in
+      - name: Syft 설치(고정 버전·checksum 검증)
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/syft.tar.gz" "https://github.com/anchore/syft/releases/download/${SYFT_VERSION}/syft_${SYFT_VERSION#v}_linux_amd64.tar.gz"
+          echo "${SYFT_SHA256_LINUX}  $RUNNER_TEMP/syft.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/syft.tar.gz" -C "$RUNNER_TEMP" syft
+          echo "SYFT=$RUNNER_TEMP/syft" >> "$GITHUB_ENV"
+      - run: pnpm pack:desktop --metadata release-in/metadata.json
+      - run: pnpm release artifact-sbom --dir release-out/desktop/linux-unpacked --name openhub-linux --kind linux --count-only --report release-out/reports/linux.json
+      - name: AppImage를 풀어 고지 파일 확인
+        run: |
+          appimage="$(ls release-out/desktop/OpenHub-AI-*-x86_64.AppImage)"
+          chmod +x "$appimage"
+          mkdir -p "$RUNNER_TEMP/appimage" && cd "$RUNNER_TEMP/appimage" && "$GITHUB_WORKSPACE/$appimage" --appimage-extract > /dev/null
+          cd "$GITHUB_WORKSPACE" && pnpm release notices --kind desktop --dir "$RUNNER_TEMP/appimage/squashfs-root" --artifact linux --report release-out/reports/linux.json
+      - name: AppImage --smoke(xvfb)
+        run: xvfb-run -a pnpm release smoke-appimage --file "$(ls release-out/desktop/OpenHub-AI-*-x86_64.AppImage)" --report release-out/reports/linux.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            release-out/desktop/OpenHub-AI-*-x86_64.AppImage
+            release-out/reports/linux.json
+            apps/desktop/dist/metafile.json
+          if-no-files-found: error
+
+  sbom:
+    needs: [cli, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli
+          path: release-in/cli
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
+          path: release-in/linux
+      - name: Layer A dependency SBOM(+Electron runtime component)·검증·semantic 결정론·bundle inventory
+        run: pnpm release deps-sbom --out release-out/sbom --cli-metafile release-in/cli/cli.metafile.json --desktop-metafile release-in/linux/apps/desktop/dist/metafile.json --report release-out/reports/sbom.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: |
+            release-out/sbom/*.cdx.json
+            release-out/sbom/sbom-semantic.json
+            release-out/reports/sbom.json
+          if-no-files-found: error
+
+  verify:
+    needs: [cli, windows, linux, sbom]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-in
+      - name: 공식 산출물·SBOM·보고서 모으기
+        run: |
+          mkdir -p dist reports
+          find release-in -type f \( -name 'openhub-ai-*.tgz' -o -name 'OpenHub-AI-Setup-*-x64.exe' -o -name 'OpenHub-AI-*-x86_64.AppImage' -o -name 'openhub-*.cdx.json' \) -exec cp {} dist/ \;
+          find release-in -path '*reports*' -name '*.json' -exec cp {} reports/ \;
+          ls -l dist reports
+      - run: pnpm release sums --dir dist
+      - run: pnpm release verify-sums --dir dist
+      - run: pnpm release coverage --dir dist --reports reports
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openhub-release-dry-run
+          path: |
+            dist
+            reports
+          if-no-files-found: error
+
+  release:
+    needs: verify
+    if: github.event_name == 'workflow_dispatch' && inputs.publish == true && inputs.dry_run == false && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: tag가 SemVer이고 package 버전과 같은지 확인
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "SemVer tag가 아닙니다: $tag"; exit 1; }
+          version="$(node -p "require('./apps/cli/package.json').version")"
+          [[ "$tag" == "v$version" ]] || { echo "tag $tag ≠ package v$version"; exit 1; }
+      - uses: actions/download-artifact@v4
+        with:
+          name: openhub-release-dry-run
+          path: release
+      - name: draft GitHub Release 만들기(공개는 사람이 한다)
+        run: gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "OpenHub AI $GITHUB_REF_NAME" --notes-file docs/release-process.md release/dist/*
+        env:
+          GH_TOKEN: ${{ github.token }}

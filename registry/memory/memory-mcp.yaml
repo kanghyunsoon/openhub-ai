@@ -1,0 +1,30 @@
+schemaVersion: 1
+name: memory-mcp
+displayName: Memory MCP
+summary: 지식 그래프에 사실을 저장해 세션 사이의 기억을 유지하는 MCP 레퍼런스 서버
+repository:
+  github: modelcontextprotocol/servers
+category: [memory, mcp]
+capabilities: [knowledge-graph-memory]
+targets: [claude-code, codex, cursor]
+platform: { windows: true, macos: true, linux: true }
+requirements:
+  node: ">=18"
+install:
+  preferredAdapter: npx
+  options:
+    command: "npx -y @modelcontextprotocol/server-memory"
+  fallback:
+    - adapter: npm
+      package: "@modelcontextprotocol/server-memory"
+healthCheck:
+  type: mcp-handshake
+update:
+  source: npm
+rollback:
+  supported: true
+verification: community
+# 추천 메타데이터(D-008): canonical MCP alias는 normalized lowercase, Registry 전체에서 유일
+recommendation:
+  identity: { mcpServerNames: [memory] }
+  source: { type: shared-repo, path: src/memory }

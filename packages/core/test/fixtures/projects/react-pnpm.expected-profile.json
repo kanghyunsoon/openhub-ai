@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "name": "react-pnpm"
+  },
+  "languages": [
+    {
+      "id": "javascript",
+      "name": "JavaScript",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "package.json",
+          "type": "manifest",
+          "value": "package.json"
+        }
+      ]
+    },
+    {
+      "id": "typescript",
+      "name": "TypeScript",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "package.json",
+          "type": "dependency",
+          "value": "typescript"
+        },
+        {
+          "file": "src/App.tsx",
+          "type": "extension-count",
+          "value": ".ts/.tsx 파일 2개"
+        },
+        {
+          "file": "tsconfig.json",
+          "type": "config",
+          "value": "tsconfig.json"
+        }
+      ]
+    }
+  ],
+  "frameworks": [
+    {
+      "id": "react",
+      "name": "React",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "package.json",
+          "type": "dependency",
+          "value": "react"
+        }
+      ]
+    }
+  ],
+  "databases": [],
+  "packageManagers": [
+    {
+      "id": "pnpm",
+      "name": "pnpm",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "package.json",
+          "type": "config",
+          "value": "pnpm@10.18.0"
+        },
+        {
+          "file": "pnpm-lock.yaml",
+          "type": "lockfile",
+          "value": "pnpm-lock.yaml"
+        }
+      ]
+    }
+  ],
+  "infrastructure": [],
+  "aiClients": [],
+  "aiTools": [],
+  "detectors": [
+    {
+      "id": "ai-environment",
+      "status": "ok"
+    },
+    {
+      "id": "databases",
+      "status": "ok"
+    },
+    {
+      "id": "frameworks",
+      "status": "ok"
+    },
+    {
+      "id": "infrastructure",
+      "status": "ok"
+    },
+    {
+      "id": "languages",
+      "status": "ok"
+    },
+    {
+      "id": "package-managers",
+      "status": "ok"
+    }
+  ],
+  "warnings": []
+}

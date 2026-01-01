@@ -1,0 +1,76 @@
+import { contextBridge, ipcRenderer } from "electron";
+
+/** 프로젝트 분석 브리지. 인자를 받지 않는다. 분석 경로는 메인 프로세스의 폴더 선택 결과만 쓴다(TASK-015). */
+const projectBridge = {
+  scanProject: () => ipcRenderer.invoke("project:select-and-scan"),
+};
+
+/** FOR YOU 추천 브리지. 인자를 받지 않는다. 추천 대상은 메인 프로세스가 대화상자로 분석한 프로젝트뿐이다(TASK-026). */
+const recommendBridge = {
+  recommendProject: () => ipcRenderer.invoke("project:recommend"),
+};
+
+/**
+ * 설치 브리지(TASK-036). toolId 하나만 보낸다. Plan·digest·승인을 보내는 API는 없다.
+ * 최종 승인은 main 프로세스의 네이티브 확인 대화상자에서만 만들어진다.
+ */
+const installBridge = {
+  planInstall: (toolId: unknown) => ipcRenderer.invoke("install:plan", String(toolId)),
+  runInstall: (toolId: unknown) => ipcRenderer.invoke("install:run", String(toolId)),
+};
+
+/**
+ * Lifecycle 브리지(TASK-046). state entry id 하나만 보낸다. 경로·Plan·digest·승인을 보내는 API는 없다.
+ * 최종 승인은 main 프로세스의 네이티브 확인 대화상자에서만 만들어진다.
+ */
+const lifecycleBridge = {
+  lifecycleStatus: () => ipcRenderer.invoke("lifecycle:status"),
+  checkLifecycle: (id: unknown) => ipcRenderer.invoke("lifecycle:check", String(id)),
+  planLifecycleUpdate: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-update", String(id)),
+  planLifecycleRollback: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-rollback", String(id)),
+  planLifecycleHealth: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-health", String(id)),
+  runLifecycle: (id: unknown) => ipcRenderer.invoke("lifecycle:run", String(id)),
+};
+
+/**
+ * Release·Impact·Pinokio Preview 브리지(TASK-057). INSTALLED 항목 id, Registry toolId, "owner/repo@commit"·script 경로만 보낸다.
+ * 실행·승인 API는 없다(Pinokio 설치는 CLI 승인 흐름).
+ */
+const releaseBridge = {
+  checkRelease: (id: unknown) => ipcRenderer.invoke("release:check", String(id)),
+  previewPinokio: (toolId: unknown) => ipcRenderer.invoke("pinokio:preview", String(toolId)),
+  inspectPinokio: (ref: unknown, scriptPath: unknown) => ipcRenderer.invoke("pinokio:inspect", String(ref), String(scriptPath)),
+};
+
+/** 화면에 노출하는 기본 API. Node·파일 시스템은 노출하지 않는다. */
+contextBridge.exposeInMainWorld("openhub", {
+  listRegistry: () => ipcRenderer.invoke("registry:list"),
+  ...projectBridge,
+  ...recommendBridge,
+  ...installBridge,
+  ...lifecycleBridge,
+});
+
+/** M6 조회·미리보기 전용 API(실행·승인 없음). 기본 openhub 객체는 바꾸지 않는다. */
+contextBridge.exposeInMainWorld("openhubRelease", releaseBridge);
+
+/** AI Summary 브리지(TASK-063). 항목 id와 model만 보낸다. API key를 주고받는 API는 없다(key는 main process가 클릭 시점에 읽는다). */
+const aiBridge = {
+  aiSummary: (id: unknown, model: unknown) => ipcRenderer.invoke("release:ai-summary", String(id), String(model)),
+};
+contextBridge.exposeInMainWorld("openhubAi", aiBridge);
+
+/**
+ * DISCOVER·상세·Candidate 기여·Adopt·Benchmark 브리지(TASK-070). toolId·Candidate id·INSTALLED 항목 id 하나만 보낸다.
+ * 경로·명령·Plan·digest·승인을 보내는 API와 일반 실행 API는 없다. 승인은 main process 네이티브 대화상자에서만 만들어진다.
+ * 기본 openhub·openhubRelease·openhubAi 객체는 바꾸지 않는다.
+ */
+const discoverBridge = {
+  discoverView: () => ipcRenderer.invoke("discover:view"),
+  toolDetail: (toolId: unknown) => ipcRenderer.invoke("tool:detail", String(toolId)),
+  prepareCandidate: (id: unknown) => ipcRenderer.invoke("candidate:prepare", String(id)),
+  adoptCandidates: () => ipcRenderer.invoke("adopt:candidates"),
+  runAdopt: (id: unknown) => ipcRenderer.invoke("adopt:run", String(id)),
+  runBenchmark: (id: unknown) => ipcRenderer.invoke("benchmark:run", String(id)),
+};
+contextBridge.exposeInMainWorld("openhubDiscover", discoverBridge);

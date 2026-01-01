@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "strict": true,
+    "jsx": "preserve",
+    "moduleResolution": "bundler"
+  },
+  "include": [
+    "app"
+  ]
+}

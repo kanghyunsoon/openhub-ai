@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+  db:
+    image: docker.io/library/postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: FAKE_PG_PASSWORD
+  documents:
+    image: mongo:7
+  cache:
+    image: redis:7

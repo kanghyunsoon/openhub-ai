@@ -1,0 +1,42 @@
+{
+  "name": "openhub-ai",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24.15"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "openhub": "tsx apps/cli/src/main.ts",
+    "registry:validate": "tsx apps/cli/src/main.ts registry validate",
+    "registry:remote": "tsx scripts/registry-remote.ts",
+    "metrics": "tsx scripts/metrics.ts",
+    "pinokio:compat": "tsx scripts/pinokio-compat.ts",
+    "notices": "node scripts/third-party-notices.mjs",
+    "notices:check": "node scripts/third-party-notices.mjs --check",
+    "pack:cli": "tsx scripts/pack-cli.ts",
+    "pack:desktop": "tsx scripts/pack-desktop.ts",
+    "bundle:inventory": "tsx scripts/bundle-inventory.ts",
+    "smoke:desktop-package": "tsx scripts/smoke-desktop-package.ts",
+    "release": "tsx scripts/release.ts",
+    "demo": "tsx scripts/demo.ts",
+    "docs:screenshot": "tsx scripts/docs-screenshot.ts",
+    "desktop": "pnpm --filter @openhub/desktop start",
+    "desktop:smoke": "pnpm --filter @openhub/desktop smoke"
+  },
+  "devDependencies": {
+    "@cyclonedx/cyclonedx-library": "10.3.0",
+    "@types/node": "^26.6.4",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "ajv-formats-draft2019": "1.6.1",
+    "esbuild": "0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "typescript-scanner": "npm:typescript@5.9.3",
+    "vitest": "^5.0.3"
+  }
+}

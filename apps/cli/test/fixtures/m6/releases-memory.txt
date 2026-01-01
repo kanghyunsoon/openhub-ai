@@ -1,0 +1,28 @@
+Memory MCP (memory-mcp) 릴리스
+
+버전 출처   npm · notes github-release
+현재        2025.8.4
+최신        2025.9.25 · 게시 2025-09-25
+포함 릴리스 2025.9.25, 2025.9.1
+
+요약(결정론 분류, 근거 [버전 L줄])
+  Breaking      1
+    - [2025.9.1 L1] BREAKING: renamed open_nodes to read_nodes
+  Security      0
+  Compatibility 1
+    - [2025.9.1 L2] See the migration guide
+  Performance   0
+  Fix           1
+    - [2025.9.25 L3] Fixed entity dedupe
+  Other         1
+    - [2025.9.25 L5] Added search_nodes limit
+
+Release notes 2025.9.25 (원문 일부, 해석하지 않음)
+  | ## What's Changed
+  | ### Bug Fixes
+  | - Fixed entity dedupe
+  | ### Features
+  | - Added search_nodes limit
+  | <script>alert(1)</script>
+
+링크        https://github.com/modelcontextprotocol/servers/releases/tag/2025.9.25

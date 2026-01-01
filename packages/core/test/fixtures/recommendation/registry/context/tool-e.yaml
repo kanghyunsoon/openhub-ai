@@ -1,0 +1,17 @@
+schemaVersion: 1
+name: tool-e
+displayName: Tool E
+summary: synthetic fixture tool-e
+repository: { github: example/tool-e }
+category: [context, mcp]
+capabilities: [library-docs]
+targets: [claude-code, codex, cursor]
+platform: { windows: true, macos: true, linux: true }
+install: { preferredAdapter: npx }
+healthCheck: { type: mcp-handshake }
+update: { source: github-release }
+rollback: { supported: true }
+verification: community
+recommendation:
+  identity: { mcpServerNames: [tool-e] }
+  source: { type: dedicated }

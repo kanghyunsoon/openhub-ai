@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": {
+    "profileSchemaVersion": 1,
+    "taxonomyVersion": 1,
+    "registryDigest": "sha256:038852e3e4e0a85b86fb6df6271037d2307b34844f289c86cf2302d10466f679",
+    "metadataCollectedAt": null
+  },
+  "project": {
+    "name": "identity-strong"
+  },
+  "assessment": {
+    "inspectedScopes": [
+      "project"
+    ],
+    "coverage": [
+      {
+        "detector": "ai-environment",
+        "status": "ok"
+      },
+      {
+        "detector": "databases",
+        "status": "ok"
+      },
+      {
+        "detector": "frameworks",
+        "status": "ok"
+      },
+      {
+        "detector": "infrastructure",
+        "status": "ok"
+      },
+      {
+        "detector": "languages",
+        "status": "ok"
+      },
+      {
+        "detector": "package-managers",
+        "status": "ok"
+      }
+    ],
+    "unresolvedInstalledTools": 1,
+    "warnings": [
+      {
+        "code": "identity-strong-match",
+        "message": "team-memory(project) 서버를 alias 대신 실행 artifact(npm:@modelcontextprotocol/server-memory)로 memory-mcp로 식별했습니다(후보 1개)"
+      }
+    ]
+  },
+  "installedTools": [
+    {
+      "serverName": "ctx",
+      "kind": "mcp-server",
+      "toolId": null,
+      "resolution": "unresolved",
+      "strength": "strong",
+      "scope": "project",
+      "clients": [
+        "claude-code"
+      ],
+      "capabilities": []
+    },
+    {
+      "serverName": "team-memory",
+      "kind": "mcp-server",
+      "toolId": "memory-mcp",
+      "resolution": "resolved",
+      "strength": "strong",
+      "scope": "project",
+      "clients": [
+        "claude-code"
+      ],
+      "capabilities": [
+        "knowledge-graph-memory"
+      ]
+    }
+  ],
+  "needs": [
+    {
+      "capability": "knowledge-graph-memory",
+      "label": "지식 그래프 메모리",
+      "priority": "low",
+      "state": "satisfied",
+      "stateReasons": [
+        "satisfied-by-installed"
+      ],
+      "sources": [
+        {
+          "category": "aiClients",
+          "itemId": "claude-code",
+          "scope": "project",
+          "confidence": 1,
+          "strength": "strong"
+        }
+      ],
+      "satisfiedBy": [
+        {
+          "toolId": "memory-mcp",
+          "serverName": "team-memory",
+          "scope": "project"
+        }
+      ],
+      "candidates": [
+        {
+          "toolId": "memory-mcp",
+          "status": "installed",
+          "excludedBy": [
+            "installed"
+          ]
+        }
+      ],
+      "reasons": []
+    }
+  ],
+  "recommendations": []
+}

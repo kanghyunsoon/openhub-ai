@@ -1,0 +1,17 @@
+schemaVersion: 1
+name: tool-c
+displayName: Tool C
+summary: synthetic fixture tool-c
+repository: { github: example/tool-c }
+category: [browser, mcp]
+capabilities: [browser-automation]
+targets: [claude-code, codex, cursor]
+platform: { windows: true, macos: true, linux: true }
+install: { preferredAdapter: npx }
+healthCheck: { type: mcp-handshake }
+update: { source: github-release }
+rollback: { supported: true }
+verification: community
+recommendation:
+  identity: { mcpServerNames: [tool-c] }
+  source: { type: dedicated }

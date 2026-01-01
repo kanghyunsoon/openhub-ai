@@ -1,0 +1,36 @@
+OpenHub Recommendations — react-pnpm
+
+검사 범위  프로젝트 (사용자 범위 미검사 — --include-host로 확인)
+설치된 MCP  (탐지 안 됨)
+
+추천
+ 1. Chrome DevTools MCP (chrome-devtools-mcp)  [likely-gap · high · 브라우저 자동화]
+    Project Fit 0.89 · OpenScore 0.96
+    Capability  브라우저 자동화, 네트워크 검사, 성능 추적
+    - React이(가) package.json의 의존성(react)에서 탐지됨 → 브라우저 자동화 필요
+    - 브라우저 자동화 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)
+    - React 전용 도구와 프로젝트 스택이 일치
+    … 이유 7개 더 (--json)
+ 2. Playwright MCP (playwright-mcp)  [likely-gap · high · 브라우저 자동화]
+    Project Fit 0.89 · OpenScore 0.96
+    Capability  브라우저 자동화, E2E 테스트
+    - React이(가) package.json의 의존성(react)에서 탐지됨 → 브라우저 자동화 필요
+    - 브라우저 자동화 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)
+    - React 전용 도구와 프로젝트 스택이 일치
+    … 이유 7개 더 (--json)
+ 3. Serena (serena)  [likely-gap · medium · 의미 기반 코드 탐색]
+    Project Fit 0.71 · OpenScore 0.96
+    Capability  코드 편집, 의미 기반 코드 탐색
+    - JavaScript이(가) package.json의 매니페스트(package.json)에서 탐지됨 → 의미 기반 코드 탐색 필요
+    - 의미 기반 코드 탐색 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)
+    - AI Client가 탐지되지 않아 지원 여부 미확인
+    … 이유 6개 더 (--json)
+ 4. Context7 (context7)  [likely-gap · medium · 라이브러리 문서 조회]
+    Project Fit 0.68 · OpenScore 0.96
+    Capability  라이브러리 문서 조회
+    - React이(가) package.json의 의존성(react)에서 탐지됨 → 라이브러리 문서 조회 필요
+    - 라이브러리 문서 조회 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)
+    - AI Client가 탐지되지 않아 지원 여부 미확인
+    … 이유 6개 더 (--json)
+
+OpenScore는 저장소 유지관리·활동성·커뮤니티 신호이며 보안·코드 품질 평가가 아닙니다

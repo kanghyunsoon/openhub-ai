@@ -1,0 +1,44 @@
+{
+  "chrome-devtools-mcp": {
+    "kind": "npm-package",
+    "pinned": false,
+    "preparation": "launch-on-demand",
+    "spec": "chrome-devtools-mcp@latest"
+  },
+  "context7": {
+    "kind": "npm-package",
+    "pinned": false,
+    "preparation": "launch-on-demand",
+    "spec": "@upstash/context7-mcp"
+  },
+  "github-mcp-server": {
+    "kind": "container-image",
+    "pinned": false,
+    "preparation": "pull",
+    "spec": "ghcr.io/github/github-mcp-server"
+  },
+  "memory-mcp": {
+    "kind": "npm-package",
+    "pinned": false,
+    "preparation": "launch-on-demand",
+    "spec": "@modelcontextprotocol/server-memory"
+  },
+  "playwright-mcp": {
+    "kind": "npm-package",
+    "pinned": false,
+    "preparation": "launch-on-demand",
+    "spec": "@playwright/mcp@latest"
+  },
+  "postgres-mcp": {
+    "kind": "python-package",
+    "pinned": false,
+    "preparation": "launch-on-demand",
+    "spec": "postgres-mcp"
+  },
+  "serena": {
+    "kind": "python-package",
+    "pinned": false,
+    "preparation": "launch-on-demand",
+    "spec": "serena-agent"
+  }
+}

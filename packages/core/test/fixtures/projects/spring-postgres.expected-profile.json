@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "name": "spring-postgres"
+  },
+  "languages": [
+    {
+      "id": "java",
+      "name": "Java",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "pom.xml",
+          "type": "manifest",
+          "value": "pom.xml"
+        },
+        {
+          "file": "src/main/java/com/example/App.java",
+          "type": "extension-count",
+          "value": ".java 파일 1개"
+        }
+      ]
+    }
+  ],
+  "frameworks": [
+    {
+      "id": "spring-boot",
+      "name": "Spring Boot",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "pom.xml",
+          "type": "build-plugin",
+          "value": "org.springframework.boot:spring-boot-maven-plugin"
+        },
+        {
+          "file": "pom.xml",
+          "type": "dependency",
+          "value": "org.springframework.boot:spring-boot-starter-data-jpa"
+        },
+        {
+          "file": "pom.xml",
+          "type": "dependency",
+          "value": "org.springframework.boot:spring-boot-starter-parent"
+        },
+        {
+          "file": "pom.xml",
+          "type": "dependency",
+          "value": "org.springframework.boot:spring-boot-starter-web"
+        }
+      ]
+    }
+  ],
+  "databases": [
+    {
+      "id": "postgresql",
+      "name": "PostgreSQL",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "pom.xml",
+          "type": "dependency",
+          "value": "org.postgresql:postgresql"
+        },
+        {
+          "file": "src/main/resources/application.yml",
+          "type": "config",
+          "value": "spring.datasource.url scheme=postgresql"
+        }
+      ]
+    }
+  ],
+  "packageManagers": [
+    {
+      "id": "maven",
+      "name": "Maven",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "pom.xml",
+          "type": "manifest",
+          "value": "pom.xml"
+        }
+      ]
+    }
+  ],
+  "infrastructure": [],
+  "aiClients": [],
+  "aiTools": [],
+  "detectors": [
+    {
+      "id": "ai-environment",
+      "status": "ok"
+    },
+    {
+      "id": "databases",
+      "status": "ok"
+    },
+    {
+      "id": "frameworks",
+      "status": "ok"
+    },
+    {
+      "id": "infrastructure",
+      "status": "ok"
+    },
+    {
+      "id": "languages",
+      "status": "ok"
+    },
+    {
+      "id": "package-managers",
+      "status": "ok"
+    }
+  ],
+  "warnings": []
+}

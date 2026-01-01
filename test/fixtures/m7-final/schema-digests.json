@@ -1,0 +1,11 @@
+{
+  "computedAt": "b8f1fcb (M6 close) and checked equal at TASK-073",
+  "installPlanSchema": "ab953815c9a51b14c21cfef776fc694629e07fc29c0f295e61be0624d7b790d8",
+  "lifecyclePlanSchema": "c3813da5f4cec26c609715fbfd3565227e230cd0cc817cf376fc8050ea3138e3",
+  "lifecycleStateFileSchema": "8269e08e9748b403dd07c115478e539e0c01e85a0c15636fb614c937956929be",
+  "releaseSnapshotSchema": "d57ef6b2efc05efc6eebf44ec266aeea3473cee31fcc60e61ef24f1ba915e5f2",
+  "releaseSummarySchema": "d83397bc27ab0d67423cd42b061e8d90409efc858522edcf254cf45de829eb2b",
+  "updateImpactSchema": "fa4ede85cee393a059ba37818ed6a7681b0f783463a8e8bf91e8cc38304b86c3",
+  "pinokioPlanSchema": "3f06f8d7bdc902024eacfe26d524862b26ad572824472bc71b4c18e22bcb679a",
+  "recommendationReportSchema": "3e98a13383c89af07b84d4480c1d770c041246695e874d5e8a72a8552a100d53"
+}

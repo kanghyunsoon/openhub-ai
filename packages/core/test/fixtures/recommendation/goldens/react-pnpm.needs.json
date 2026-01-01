@@ -1,0 +1,121 @@
+[
+  {
+    "capability": "browser-automation",
+    "label": "브라우저 자동화",
+    "priority": "high",
+    "strength": "strong",
+    "sources": [
+      {
+        "category": "frameworks",
+        "itemId": "react",
+        "scope": "project",
+        "confidence": 1,
+        "strength": "strong"
+      }
+    ]
+  },
+  {
+    "capability": "code-editing",
+    "label": "코드 편집",
+    "priority": "low",
+    "strength": "strong",
+    "sources": [
+      {
+        "category": "languages",
+        "itemId": "javascript",
+        "scope": "project",
+        "confidence": 1,
+        "strength": "strong"
+      },
+      {
+        "category": "languages",
+        "itemId": "typescript",
+        "scope": "project",
+        "confidence": 1,
+        "strength": "strong"
+      }
+    ]
+  },
+  {
+    "capability": "e2e-testing",
+    "label": "E2E 테스트",
+    "priority": "high",
+    "strength": "strong",
+    "sources": [
+      {
+        "category": "frameworks",
+        "itemId": "react",
+        "scope": "project",
+        "confidence": 1,
+        "strength": "strong"
+      }
+    ]
+  },
+  {
+    "capability": "library-docs",
+    "label": "라이브러리 문서 조회",
+    "priority": "medium",
+    "strength": "strong",
+    "sources": [
+      {
+        "category": "frameworks",
+        "itemId": "react",
+        "scope": "project",
+        "confidence": 1,
+        "strength": "strong"
+      }
+    ]
+  },
+  {
+    "capability": "network-inspection",
+    "label": "네트워크 검사",
+    "priority": "medium",
+    "strength": "strong",
+    "sources": [
+      {
+        "category": "frameworks",
+        "itemId": "react",
+        "scope": "project",
+        "confidence": 1,
+        "strength": "strong"
+      }
+    ]
+  },
+  {
+    "capability": "performance-tracing",
+    "label": "성능 추적",
+    "priority": "medium",
+    "strength": "strong",
+    "sources": [
+      {
+        "category": "frameworks",
+        "itemId": "react",
+        "scope": "project",
+        "confidence": 1,
+        "strength": "strong"
+      }
+    ]
+  },
+  {
+    "capability": "semantic-code-navigation",
+    "label": "의미 기반 코드 탐색",
+    "priority": "medium",
+    "strength": "strong",
+    "sources": [
+      {
+        "category": "languages",
+        "itemId": "javascript",
+        "scope": "project",
+        "confidence": 1,
+        "strength": "strong"
+      },
+      {
+        "category": "languages",
+        "itemId": "typescript",
+        "scope": "project",
+        "confidence": 1,
+        "strength": "strong"
+      }
+    ]
+  }
+]

@@ -1,0 +1,216 @@
+import path from "node:path";
+import { cpSync, mkdtempSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import os from "node:os";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import {
+  BUNDLED_METADATA_SNAPSHOT,
+  CANDIDATES_DIR,
+  METADATA_ENV,
+  OPENHUB_CORE_VERSION,
+  REGISTRY_ENV,
+  readOpenAiApiKey,
+  resolveMetadataFileSync,
+  resolveRegistryDir,
+} from "@openhub/core";
+import { registerAdopt } from "./adopt";
+import { registerDiscover, smokeDiscoverCandidates } from "./discover";
+import { InstallSession, registerInstall, smokeInstallDeps } from "./install";
+import { LifecycleSession, registerLifecycle, smokeLifecycleDeps } from "./lifecycle";
+import { AiSummarySession, registerAiSummary } from "./llm";
+import { registerRelease, smokeReleaseDeps } from "./release";
+import { electronDirectoryPicker, fixedDirectory, registerProjectScan, runProjectSmoke } from "./project-scan";
+import { RecommendSession, registerProjectRecommend } from "./recommend";
+import { buildRegistryView } from "./registry-view";
+
+const smoke = process.argv.includes("--smoke");
+// 스모크 모드에서 스크린샷을 요청하면 숨긴 창은 캡처할 수 없으므로 창을 잠깐 띄운다.
+const screenshot = process.env["OPENHUB_SCREENSHOT"] || undefined;
+/** 스모크 설치(TASK-036): --smoke일 때만. 대상 프로젝트는 임시 복사본이고 fake probe·executor·자동 확인 대화상자를 쓴다. */
+const smokeInstall = smoke ? process.env["OPENHUB_SMOKE_INSTALL"] || undefined : undefined;
+/** 스모크에서 [프로젝트 선택] 대신 분석할 폴더(TASK-015). 스모크 설치면 임시 복사본을 쓴다. */
+const smokeProjectSource = process.env["OPENHUB_SMOKE_PROJECT"] || undefined;
+const smokeProject =
+  smokeProjectSource === undefined || smokeInstall === undefined
+    ? smokeProjectSource
+    : (() => {
+        const copy = path.join(mkdtempSync(path.join(os.tmpdir(), "openhub-smoke-install-")), "project");
+        cpSync(smokeProjectSource, copy, { recursive: true });
+        return copy;
+      })();
+/**
+ * 배포 경로(TASK-071, D-036). Registry: OPENHUB_REGISTRY > 패키지 리소스(설치본 resourcesPath/registry,
+ * 개발 실행은 build.mjs가 만든 <app>/resources/registry). metadata: OPENHUB_METADATA > ~/.openhub/cache/metadata.json
+ * (손상 시 경고 후 무시) > 포함 snapshot. repository root를 가정하지 않는다.
+ */
+const resourceRegistry = app.isPackaged ? path.join(process.resourcesPath, "registry") : path.join(app.getAppPath(), "resources", "registry");
+const registryDir = resolveRegistryDir({ env: process.env[REGISTRY_ENV], resource: resourceRegistry, fallback: path.resolve(process.cwd(), "registry") }).dir;
+const metadataChoice = resolveMetadataFileSync({ explicit: process.env[METADATA_ENV], homeDir: os.homedir(), registryDir });
+for (const warning of metadataChoice.warnings) process.stderr.write("경고: " + warning + "\n");
+// 고를 metadata가 없으면 없는 경로를 넘겨 화면이 "metadata 없음"을 보이게 한다.
+const metadataFile = metadataChoice.file ?? path.join(registryDir, BUNDLED_METADATA_SNAPSHOT);
+
+ipcMain.handle("registry:list", () => buildRegistryView(registryDir, metadataFile));
+/** FOR YOU(TASK-026): 대화상자로 분석한 Profile을 기억해 추천에만 쓴다. */
+const recommendSession = new RecommendSession();
+/** 설치(TASK-036): 고른 폴더를 기억하고 FOR YOU 추천 목록의 toolId만 계획·실행한다. 최종 승인은 네이티브 대화상자다. */
+const installSession = new InstallSession();
+const smokeDeps = smokeInstall === undefined ? undefined : smokeInstallDeps();
+registerProjectScan(recommendSession.observe(ipcMain), installSession.trackPicker(smokeProject === undefined ? electronDirectoryPicker(dialog) : fixedDirectory(smokeProject)));
+registerProjectRecommend(ipcMain, recommendSession, { registryDir, metadataFile, platform: process.platform });
+registerInstall(ipcMain, installSession, {
+  registryDir,
+  metadataFile,
+  platform: process.platform,
+  homeDir: smokeProject !== undefined && smokeInstall !== undefined ? path.dirname(smokeProject) : os.homedir(),
+  recommend: recommendSession,
+  dialog: smokeDeps?.dialog ?? { showMessageBox: (options) => dialog.showMessageBox(options) },
+  ...(smokeDeps === undefined ? {} : { probe: smokeDeps.probe, spawner: smokeDeps.spawner }),
+});
+/**
+ * Lifecycle(TASK-046): INSTALLED 카드. 고른 프로젝트의 Version State만 다루고 최종 승인은 네이티브 대화상자다.
+ * 스모크 업데이트는 --smoke + 스모크 설치가 켜졌을 때만이며 fake resolver·Health·executor·자동 확인 대화상자를 쓴다.
+ */
+const smokeUpdate = smokeInstall === undefined ? undefined : process.env["OPENHUB_SMOKE_UPDATE"] || undefined;
+const smokeLifecycle = smokeUpdate === undefined ? undefined : smokeLifecycleDeps();
+registerLifecycle(ipcMain, new LifecycleSession(() => installSession.projectDir), {
+  registryDir,
+  platform: process.platform,
+  homeDir: smokeProject !== undefined && smokeInstall !== undefined ? path.dirname(smokeProject) : os.homedir(),
+  dialog: smokeLifecycle?.dialog ?? { showMessageBox: (options) => dialog.showMessageBox(options) },
+  ...(smokeLifecycle === undefined || smokeDeps === undefined ? {} : { fetch: smokeLifecycle.fetch, runHealth: smokeLifecycle.runHealth, spawner: smokeLifecycle.spawner, probe: smokeDeps.probe }),
+});
+
+/**
+ * Release·Impact·Pinokio Preview(TASK-057). 버튼을 눌렀을 때만 network(GitHub 비인증), timer·polling 없음, 실행 채널 없음.
+ * 스모크 release는 --smoke + 스모크 업데이트가 켜졌을 때만이며 가짜 registry·GitHub 응답을 쓴다.
+ */
+const smokeReleaseTool = smokeUpdate === undefined ? undefined : process.env["OPENHUB_SMOKE_RELEASE"] || undefined;
+const smokeRelease = smokeReleaseTool === undefined ? undefined : smokeReleaseDeps();
+const releaseSession = new LifecycleSession(() => installSession.projectDir);
+/** AI Summary(TASK-063): [릴리스 확인] 결과만 세션 메모리에 둔다. key는 [AI Summary]를 누른 순간에만 읽는다. */
+const aiSession = new AiSummarySession();
+registerAiSummary(ipcMain, aiSession, {
+  readKey: () => readOpenAiApiKey(process.env),
+  confirm: async (lines) =>
+    (await dialog.showMessageBox({ type: "question", buttons: ["보내기", "취소"], defaultId: 1, cancelId: 1, title: "AI Summary", message: "AI Summary 요청", detail: lines.join("\n") })).response === 0,
+});
+registerRelease(ipcMain, releaseSession, {
+  registryDir,
+  homeDir: smokeProject !== undefined && smokeInstall !== undefined ? path.dirname(smokeProject) : os.homedir(),
+  pinokioProbe: { pathEnv: process.env["PATH"] ?? "", platform: process.platform },
+  onSnapshot: (id, snapshot, summary) => aiSession.remember(id, snapshot, summary),
+  ...(smokeRelease === undefined || smokeDeps === undefined ? {} : { fetch: smokeRelease.fetch, probe: smokeDeps.probe }),
+});
+
+/**
+ * DISCOVER·Tool 상세·Candidate 기여 패키지·Adopt·Benchmark(TASK-070). network·timer 없음.
+ * 기여 패키지 폴더는 네이티브 폴더 선택으로만 정하고, Adopt·Benchmark 승인은 네이티브 대화상자에서만 만들어진다.
+ * 스모크(--smoke)는 Candidate만 가짜 데이터로 바꾼다.
+ */
+const desktopHome = smokeProject !== undefined && smokeInstall !== undefined ? path.dirname(smokeProject) : os.homedir();
+registerDiscover(ipcMain, {
+  registryDir,
+  metadataFile,
+  candidatesDir: process.env["OPENHUB_CANDIDATES"] ?? path.resolve(process.cwd(), CANDIDATES_DIR),
+  homeDir: desktopHome,
+  platform: process.platform,
+  recommend: recommendSession,
+  projectDir: () => installSession.projectDir,
+  chooseFolder: async () => {
+    const picked = await dialog.showOpenDialog({ title: "기여 패키지를 저장할 폴더", properties: ["openDirectory", "createDirectory"] });
+    return picked.canceled ? null : (picked.filePaths[0] ?? null);
+  },
+  toolVersion: OPENHUB_CORE_VERSION,
+  ...(smoke ? { candidates: async () => smokeDiscoverCandidates() } : {}),
+});
+registerAdopt(ipcMain, {
+  registryDir,
+  homeDir: desktopHome,
+  platform: process.platform,
+  projectDir: () => installSession.projectDir,
+  dialog: { showMessageBox: (options) => dialog.showMessageBox(options) },
+});
+
+/** 앱 창. TASK-015에서 프로젝트 분석 스모크·스크린샷 대기를, TASK-026에서 FOR YOU 추천 대기를 더했다(파일의 셸 자체는 REQ-005). */
+async function createWindow(): Promise<void> {
+  const win = new BrowserWindow({
+    width: 1120,
+    height: 780,
+    title: "OpenHub AI",
+    show: !smoke || screenshot !== undefined,
+    backgroundColor: "#0f1115",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  win.removeMenu();
+  await win.loadFile(path.join(__dirname, "../renderer/index.html"));
+
+  if (smoke) {
+    // 화면이 Registry를 실제로 그렸는지 확인하고 종료한다(AC-007-01 실행 검증).
+    try {
+      const count = (await win.webContents.executeJavaScript("window.__openhubReady")) as number;
+      // 프로젝트를 고르기 전 onboarding 카드(TASK-070).
+      const onboarding = (await win.webContents.executeJavaScript("window.__openhubOnboarding()")) as { visible: boolean; steps: number };
+      const project = smokeProject === undefined ? undefined : await runProjectSmoke(win.webContents);
+      const recommendations = project === undefined ? undefined : ((await win.webContents.executeJavaScript("window.__openhubRecommend()")) as number);
+      const install =
+        smokeInstall === undefined || recommendations === undefined
+          ? undefined
+          : ((await win.webContents.executeJavaScript("window.__openhubInstall(" + JSON.stringify(smokeInstall) + ")")) as { status: string; stages: string[] });
+      const update =
+        smokeUpdate === undefined || install === undefined
+          ? undefined
+          : ((await win.webContents.executeJavaScript("window.__openhubLifecycle(" + JSON.stringify(smokeUpdate) + ")")) as { status: string; health: string[]; rollbackButton: boolean });
+      const release =
+        smokeReleaseTool === undefined || update === undefined
+          ? undefined
+          : ((await win.webContents.executeJavaScript("window.__openhubRelease(" + JSON.stringify(smokeReleaseTool) + ")")) as { status: string; impact: string; notesText: boolean; innerHtml: number });
+      // DISCOVER 네 탭·Candidate·Tool 상세(TASK-070, 가짜 Candidate).
+      const discover = (await win.webContents.executeJavaScript("window.__openhubDiscover()")) as { status: string; tabs: number; candidates: number; forbiddenButtons: number; badges: boolean; untrustedText: boolean; trendClean: boolean; firstTool: string | null; innerHtml: number };
+      const detail =
+        discover.firstTool === null ? undefined : ((await win.webContents.executeJavaScript("window.__openhubDetail(" + JSON.stringify(discover.firstTool) + ")")) as { status: string; fields: string[]; install: boolean });
+      if (screenshot !== undefined) {
+        // DOM 갱신 뒤 실제로 그려진 프레임을 캡처한다. 문서 스크린샷이 화면 위쪽부터 보이도록 맨 위로 스크롤한다.
+        await win.webContents.executeJavaScript("window.scrollTo(0, 0)");
+        await win.webContents.executeJavaScript("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))");
+        await writeFile(screenshot, (await win.webContents.capturePage()).toPNG());
+      }
+      const installOk = install === undefined || install.status === "succeeded";
+      const updateOk = update === undefined || update.status === "updated";
+      const releaseOk = release === undefined || (release.status === "ok" && release.notesText && release.innerHtml === 0 && (smokeRelease?.authorized ?? 0) === 0);
+      const onboardingOk = onboarding.visible && onboarding.steps === 7;
+      const discoverOk = discover.status === "ok" && discover.tabs === 4 && discover.candidates > 0 && discover.forbiddenButtons === 0 && discover.badges && discover.untrustedText && discover.trendClean && discover.innerHtml === 0 && detail !== undefined && detail.status === "ok";
+      // 실행 중 runtime 정체성(TASK-072, D-037): 패키징된 앱에서 실제 Electron·Chromium 버전과 OpenHub 버전을 남긴다.
+      const runtime = { electronVersion: process.versions.electron ?? null, chromeVersion: process.versions.chrome ?? null, openhubVersion: OPENHUB_CORE_VERSION };
+      process.stdout.write(
+        `OPENHUB_SMOKE ${JSON.stringify({
+          tools: count,
+          runtime,
+          onboarding,
+          ...(project === undefined ? {} : { project, recommendations }),
+          ...(install === undefined ? {} : { install: { ...install, spawned: smokeDeps?.spawned.length ?? 0, dialogs: smokeDeps?.dialogs ?? 0 } }),
+          ...(update === undefined ? {} : { update: { ...update, fetched: smokeLifecycle?.fetched.length ?? 0, healthRuns: smokeLifecycle?.healthRuns ?? 0, spawned: smokeLifecycle?.spawned.length ?? 0, dialogs: smokeLifecycle?.dialogs ?? 0 } }),
+          ...(release === undefined ? {} : { release: { ...release, fetched: smokeRelease?.fetched.length ?? 0, authorized: smokeRelease?.authorized ?? 0 } }),
+          discover,
+          ...(detail === undefined ? {} : { detail }),
+        })}\n`,
+        // pipe로 받는 쪽(release dry-run)이 결과 줄을 놓치지 않도록 stdout에 다 쓴 뒤에 종료한다(TASK-072, Linux AppImage에서 확인).
+        () => app.exit(count > 0 && (project === undefined || project > 0) && installOk && updateOk && releaseOk && onboardingOk && discoverOk ? 0 : 1),
+      );
+    } catch (error) {
+      process.stderr.write(`OPENHUB_SMOKE_FAILED ${String(error)}\n`);
+      app.exit(1);
+    }
+  }
+}
+
+app.whenReady().then(createWindow, (error: unknown) => {
+  process.stderr.write(`${String(error)}\n`);
+  app.exit(1);
+});
+app.on("window-all-closed", () => app.quit());

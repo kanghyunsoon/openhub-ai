@@ -1,0 +1,308 @@
+{
+  "linux": {
+    "chrome-devtools-mcp": {
+      "backend": "npx",
+      "launch": {
+        "args": [
+          "chrome-devtools-mcp@latest"
+        ],
+        "clientSpec": {
+          "args": [
+            "chrome-devtools-mcp@latest"
+          ],
+          "command": "npx"
+        },
+        "envNames": [],
+        "executable": "npx",
+        "platform": "linux"
+      }
+    },
+    "context7": {
+      "backend": "npx",
+      "launch": {
+        "args": [
+          "-y",
+          "@upstash/context7-mcp"
+        ],
+        "clientSpec": {
+          "args": [
+            "-y",
+            "@upstash/context7-mcp"
+          ],
+          "command": "npx"
+        },
+        "envNames": [],
+        "executable": "npx",
+        "platform": "linux"
+      }
+    },
+    "github-mcp-server": {
+      "backend": "docker",
+      "launch": {
+        "args": [
+          "run",
+          "-i",
+          "--rm",
+          "-e",
+          "GITHUB_PERSONAL_ACCESS_TOKEN",
+          "ghcr.io/github/github-mcp-server"
+        ],
+        "clientSpec": {
+          "args": [
+            "run",
+            "-i",
+            "--rm",
+            "-e",
+            "GITHUB_PERSONAL_ACCESS_TOKEN",
+            "ghcr.io/github/github-mcp-server"
+          ],
+          "command": "docker"
+        },
+        "envNames": [
+          "GITHUB_PERSONAL_ACCESS_TOKEN"
+        ],
+        "executable": "docker",
+        "platform": "linux"
+      }
+    },
+    "memory-mcp": {
+      "backend": "npx",
+      "launch": {
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-memory"
+        ],
+        "clientSpec": {
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-memory"
+          ],
+          "command": "npx"
+        },
+        "envNames": [],
+        "executable": "npx",
+        "platform": "linux"
+      }
+    },
+    "playwright-mcp": {
+      "backend": "npx",
+      "launch": {
+        "args": [
+          "@playwright/mcp@latest"
+        ],
+        "clientSpec": {
+          "args": [
+            "@playwright/mcp@latest"
+          ],
+          "command": "npx"
+        },
+        "envNames": [],
+        "executable": "npx",
+        "platform": "linux"
+      }
+    },
+    "postgres-mcp": {
+      "backend": "uvx",
+      "launch": {
+        "args": [
+          "postgres-mcp",
+          "--access-mode=restricted"
+        ],
+        "clientSpec": {
+          "args": [
+            "postgres-mcp",
+            "--access-mode=restricted"
+          ],
+          "command": "uvx"
+        },
+        "envNames": [
+          "DATABASE_URI"
+        ],
+        "executable": "uvx",
+        "platform": "linux"
+      }
+    },
+    "serena": {
+      "backend": "uvx",
+      "launch": {
+        "args": [
+          "--from",
+          "serena-agent",
+          "serena",
+          "start-mcp-server"
+        ],
+        "clientSpec": {
+          "args": [
+            "--from",
+            "serena-agent",
+            "serena",
+            "start-mcp-server"
+          ],
+          "command": "uvx"
+        },
+        "envNames": [],
+        "executable": "uvx",
+        "platform": "linux"
+      }
+    }
+  },
+  "windows": {
+    "chrome-devtools-mcp": {
+      "backend": "npx",
+      "launch": {
+        "args": [
+          "chrome-devtools-mcp@latest"
+        ],
+        "clientSpec": {
+          "args": [
+            "/d",
+            "/c",
+            "npx",
+            "chrome-devtools-mcp@latest"
+          ],
+          "command": "cmd"
+        },
+        "envNames": [],
+        "executable": "npx",
+        "platform": "windows"
+      }
+    },
+    "context7": {
+      "backend": "npx",
+      "launch": {
+        "args": [
+          "-y",
+          "@upstash/context7-mcp"
+        ],
+        "clientSpec": {
+          "args": [
+            "/d",
+            "/c",
+            "npx",
+            "-y",
+            "@upstash/context7-mcp"
+          ],
+          "command": "cmd"
+        },
+        "envNames": [],
+        "executable": "npx",
+        "platform": "windows"
+      }
+    },
+    "github-mcp-server": {
+      "backend": "docker",
+      "launch": {
+        "args": [
+          "run",
+          "-i",
+          "--rm",
+          "-e",
+          "GITHUB_PERSONAL_ACCESS_TOKEN",
+          "ghcr.io/github/github-mcp-server"
+        ],
+        "clientSpec": {
+          "args": [
+            "run",
+            "-i",
+            "--rm",
+            "-e",
+            "GITHUB_PERSONAL_ACCESS_TOKEN",
+            "ghcr.io/github/github-mcp-server"
+          ],
+          "command": "docker"
+        },
+        "envNames": [
+          "GITHUB_PERSONAL_ACCESS_TOKEN"
+        ],
+        "executable": "docker",
+        "platform": "windows"
+      }
+    },
+    "memory-mcp": {
+      "backend": "npx",
+      "launch": {
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-memory"
+        ],
+        "clientSpec": {
+          "args": [
+            "/d",
+            "/c",
+            "npx",
+            "-y",
+            "@modelcontextprotocol/server-memory"
+          ],
+          "command": "cmd"
+        },
+        "envNames": [],
+        "executable": "npx",
+        "platform": "windows"
+      }
+    },
+    "playwright-mcp": {
+      "backend": "npx",
+      "launch": {
+        "args": [
+          "@playwright/mcp@latest"
+        ],
+        "clientSpec": {
+          "args": [
+            "/d",
+            "/c",
+            "npx",
+            "@playwright/mcp@latest"
+          ],
+          "command": "cmd"
+        },
+        "envNames": [],
+        "executable": "npx",
+        "platform": "windows"
+      }
+    },
+    "postgres-mcp": {
+      "backend": "uvx",
+      "launch": {
+        "args": [
+          "postgres-mcp",
+          "--access-mode=restricted"
+        ],
+        "clientSpec": {
+          "args": [
+            "postgres-mcp",
+            "--access-mode=restricted"
+          ],
+          "command": "uvx"
+        },
+        "envNames": [
+          "DATABASE_URI"
+        ],
+        "executable": "uvx",
+        "platform": "windows"
+      }
+    },
+    "serena": {
+      "backend": "uvx",
+      "launch": {
+        "args": [
+          "--from",
+          "serena-agent",
+          "serena",
+          "start-mcp-server"
+        ],
+        "clientSpec": {
+          "args": [
+            "--from",
+            "serena-agent",
+            "serena",
+            "start-mcp-server"
+          ],
+          "command": "uvx"
+        },
+        "envNames": [],
+        "executable": "uvx",
+        "platform": "windows"
+      }
+    }
+  }
+}

@@ -1,0 +1,194 @@
+// Lifecycle(TASK-046): INSTALLED 카드. 상태 → [업데이트 확인]·[업데이트 계획]·[Health Check]·[이전 버전으로 롤백]
+// → Preview → 승인 항목 체크 → (main 프로세스 네이티브 확인 대화상자) → 진행 → 결과.
+// renderer는 state entry id 하나만 보낸다. Plan·digest·승인을 보내지 않는다. timer·polling이 없고
+// 업데이트 확인(network)은 버튼을 눌렀을 때만 한다. 모든 문자열은 textContent로만 넣는다.
+// skip된 Health는 Core 문장 그대로 "Health: Not verified"로 보인다.
+(() => {
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+  function button(className, text, onClick) {
+    const b = el("button", className, text);
+    b.type = "button";
+    b.addEventListener("click", onClick);
+    return b;
+  }
+
+  const statusEl = document.getElementById("lifecycle-status");
+  const list = document.getElementById("lifecycle-list");
+  const panel = document.getElementById("lifecycle-panel");
+  const PLANNERS = {
+    update: (id) => window.openhub.planLifecycleUpdate(id),
+    rollback: (id) => window.openhub.planLifecycleRollback(id),
+    health: (id) => window.openhub.planLifecycleHealth(id),
+  };
+  const TITLE = { update: "업데이트", rollback: "롤백", health: "Health Check" };
+  let current = null;
+
+  function show(children) {
+    panel.replaceChildren(...children);
+    panel.hidden = children.length === 0;
+    if (!panel.hidden) panel.scrollIntoView({ block: "start" });
+  }
+
+  function renderEntry(item) {
+    const li = el("li", "entry");
+    li.dataset.entryId = item.id;
+    li.dataset.toolId = item.toolId || "";
+    li.append(el("p", "entry-title", item.title));
+    for (const line of item.lines) li.append(el("p", line.trim().startsWith("Health:") || line.trim().startsWith("Reason:") ? "entry-line entry-health" : "entry-line", line));
+    if (item.warning) li.append(el("p", "entry-warning", item.warning));
+    const actions = el("div", "entry-actions");
+    if (item.canUpdate) {
+      actions.append(button("lifecycle-check", "업데이트 확인", () => void check(item.id, li)));
+      actions.append(button("lifecycle-update", "업데이트 계획", () => void open("update", item.id)));
+    }
+    if (item.canHealth) actions.append(button("lifecycle-health", "Health Check", () => void open("health", item.id)));
+    if (item.canRollback) actions.append(button("lifecycle-rollback", "이전 버전으로 롤백", () => void open("rollback", item.id)));
+    if (actions.childElementCount > 0) li.append(actions);
+    return li;
+  }
+
+  async function refresh() {
+    const response = await window.openhub.lifecycleStatus();
+    if (response.status === "no-project") {
+      statusEl.textContent = "프로젝트를 선택하면 OpenHub가 설치한 도구의 버전·drift·Health 상태를 보여줍니다.";
+      list.replaceChildren();
+      return response;
+    }
+    if (response.status !== "ok") {
+      // 손상·미지원 Version State: 경고만 보여 주고 실행 버튼을 만들지 않는다.
+      statusEl.textContent = response.message || response.status;
+      statusEl.className = "install-warning";
+      list.replaceChildren();
+      return response;
+    }
+    statusEl.className = "todo";
+    statusEl.textContent = response.items.length === 0 ? "OpenHub가 이 프로젝트에 설치한 도구가 없습니다." : response.note;
+    list.replaceChildren(...response.items.map(renderEntry));
+    return response;
+  }
+
+  async function check(id, li) {
+    const old = li.querySelector(".entry-check");
+    if (old) old.remove();
+    const line = el("p", "entry-check", "업데이트 확인 중…");
+    li.append(line);
+    const response = await window.openhub.checkLifecycle(id);
+    line.textContent = response.status === "ok" ? response.view.message : "확인할 수 없습니다: " + (response.message || response.status);
+    return response;
+  }
+
+  function renderResult(result) {
+    const nodes = [el("h3", "", "결과 · " + result.status + (result.code ? " (" + result.code + ")" : ""))];
+    for (const line of result.lines) nodes.push(el("p", line.trim().startsWith("-") ? "install-warning" : "install-change", line));
+    show(nodes);
+    void refresh();
+    return result;
+  }
+
+  async function run(operation, id) {
+    const status = el("p", "todo", "확인 대화상자에서 승인하면 실행합니다…");
+    panel.append(status);
+    const response = await window.openhub.runLifecycle(id);
+    if (response.status === "rejected") {
+      status.textContent = "승인하지 않아 중단했습니다. 아무것도 바꾸지 않았습니다.";
+      return { status: "rejected", health: [] };
+    }
+    if (response.status !== "done") {
+      status.textContent = "실행할 수 없습니다: " + (response.message || response.status);
+      return { status: response.status, health: [] };
+    }
+    if (response.result.reapprove) {
+      // PLAN_STALE: 새 계획을 다시 보여 주고 재승인을 받는다.
+      const view = await open(operation, id);
+      panel.prepend(el("p", "install-warning", "승인 후 계획이 바뀌었습니다(" + response.result.changed.join(", ") + "). 새 계획을 확인하고 다시 승인하세요."));
+      return { status: "stale", health: [], reopened: view !== null };
+    }
+    status.textContent = "진행: 승인 확인 → 계획 재확인 → 준비 → 설정 교체 → Health → Version State 기록";
+    return renderResult(response.result);
+  }
+
+  function renderPlan(view) {
+    const nodes = [el("h3", "", view.displayName + " " + TITLE[view.operation] + " 계획")];
+    nodes.push(el("pre", "install-preview", view.previewLines.join("\n")));
+    if (view.upToDate) {
+      nodes.push(el("p", "todo", "이미 같은 버전입니다. 바꿀 것이 없습니다."));
+      show(nodes);
+      return;
+    }
+    if (!view.executable) {
+      nodes.push(el("p", "install-warning", "실행할 수 없는 계획입니다 (" + view.status + "). 자동으로 고치지 않습니다."));
+      show(nodes);
+      return;
+    }
+    const boxes = [];
+    const requirementList = el("div", "install-requirements");
+    for (const r of view.requirements) {
+      const label = el("label", "requirement");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.dataset.requirement = r.id;
+      label.append(box, el("span", "", "[" + r.id + "] " + r.message));
+      requirementList.append(label);
+      boxes.push(box);
+    }
+    const confirm = el("button", "lifecycle-confirm", "승인 대화상자 열기");
+    confirm.type = "button";
+    confirm.disabled = true;
+    const update = () => {
+      confirm.disabled = !boxes.every((b) => b.checked);
+    };
+    for (const b of boxes) b.addEventListener("change", update);
+    confirm.addEventListener("click", () => {
+      confirm.disabled = true;
+      void run(view.operation, view.id);
+    });
+    nodes.push(requirementList, confirm);
+    show(nodes);
+  }
+
+  async function open(operation, id) {
+    current = operation + ":" + id;
+    show([el("p", "todo", TITLE[operation] + " 계획을 만드는 중…")]);
+    const response = await PLANNERS[operation](id);
+    if (current !== operation + ":" + id) return null;
+    if (response.status !== "ok") {
+      show([el("p", "install-warning", "계획을 만들 수 없습니다: " + (response.message || response.status))]);
+      return null;
+    }
+    renderPlan(response.view);
+    return response.view;
+  }
+
+  // 프로젝트 분석 결과가 다시 그려질 때(사용자가 [프로젝트 선택]을 눌렀을 때)만 상태를 읽는다. timer·polling 없음.
+  new MutationObserver(() => void refresh()).observe(document.getElementById("project-body"), { childList: true });
+  // Adopt가 Version State에 항목을 등록하면(TASK-070) 같은 화면을 다시 읽는다. timer·polling 없음.
+  document.addEventListener("openhub:installed-changed", () => void refresh());
+
+  // 스모크(--smoke + OPENHUB_SMOKE_UPDATE): 화면과 같은 경로로 상태 → 업데이트 계획 → 체크 → 확인 → 결과를 기다린다.
+  window.__openhubLifecycle = async (toolId) => {
+    await refresh();
+    const li = [...list.querySelectorAll("li.entry")].find((x) => x.dataset.toolId === toolId);
+    if (!li) return { status: "not-managed", health: [] };
+    const updateButton = li.querySelector(".lifecycle-update");
+    if (!updateButton) return { status: "not-updatable", health: [] };
+    const view = await open("update", li.dataset.entryId);
+    if (view === null) return { status: "no-plan", health: [] };
+    for (const box of panel.querySelectorAll('input[type="checkbox"]')) {
+      box.checked = true;
+      box.dispatchEvent(new Event("change"));
+    }
+    const confirm = panel.querySelector(".lifecycle-confirm");
+    if (!confirm || confirm.disabled) return { status: view.upToDate ? "up-to-date" : "not-executable", health: [] };
+    confirm.disabled = true;
+    const result = await run("update", li.dataset.entryId);
+    await refresh();
+    const after = [...list.querySelectorAll("li.entry")].find((x) => x.dataset.toolId === toolId);
+    return { status: result.status, health: result.health || [], preview: view.previewLines.length, rollbackButton: Boolean(after && after.querySelector(".lifecycle-rollback")) };
+  };
+})();
+

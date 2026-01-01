@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "collectedAt": "2026-01-01T00:00:00Z",
+  "mode": "rest",
+  "repositories": {
+    "ChromeDevTools/chrome-devtools-mcp": {
+      "repository": "ChromeDevTools/chrome-devtools-mcp",
+      "description": "fictional values for ChromeDevTools/chrome-devtools-mcp (CLI golden only)",
+      "stars": 40000,
+      "forks": 3000,
+      "pushedAt": "2025-12-29T00:00:00Z",
+      "archived": false,
+      "license": "Apache-2.0",
+      "topics": [],
+      "latestRelease": {
+        "tag": "v0.0.0-fixture",
+        "publishedAt": "2025-12-12T00:00:00Z",
+        "url": "https://github.com/ChromeDevTools/chrome-devtools-mcp/releases/tag/v0.0.0-fixture"
+      }
+    },
+    "crystaldba/postgres-mcp": {
+      "repository": "crystaldba/postgres-mcp",
+      "description": "fictional values for crystaldba/postgres-mcp (CLI golden only)",
+      "stars": 2500,
+      "forks": 300,
+      "pushedAt": "2025-11-17T00:00:00Z",
+      "archived": false,
+      "license": "MIT",
+      "topics": [],
+      "latestRelease": {
+        "tag": "v0.0.0-fixture",
+        "publishedAt": "2024-11-27T00:00:00Z",
+        "url": "https://github.com/crystaldba/postgres-mcp/releases/tag/v0.0.0-fixture"
+      }
+    },
+    "github/github-mcp-server": {
+      "repository": "github/github-mcp-server",
+      "description": "fictional values for github/github-mcp-server (CLI golden only)",
+      "stars": 25000,
+      "forks": 4000,
+      "pushedAt": "2025-12-31T00:00:00Z",
+      "archived": false,
+      "license": "MIT",
+      "topics": [],
+      "latestRelease": {
+        "tag": "v0.0.0-fixture",
+        "publishedAt": "2025-12-20T00:00:00Z",
+        "url": "https://github.com/github/github-mcp-server/releases/tag/v0.0.0-fixture"
+      }
+    },
+    "microsoft/playwright-mcp": {
+      "repository": "microsoft/playwright-mcp",
+      "description": "fictional values for microsoft/playwright-mcp (CLI golden only)",
+      "stars": 30000,
+      "forks": 2000,
+      "pushedAt": "2025-12-26T00:00:00Z",
+      "archived": false,
+      "license": "Apache-2.0",
+      "topics": [],
+      "latestRelease": {
+        "tag": "v0.0.0-fixture",
+        "publishedAt": "2025-12-26T00:00:00Z",
+        "url": "https://github.com/microsoft/playwright-mcp/releases/tag/v0.0.0-fixture"
+      }
+    },
+    "modelcontextprotocol/servers": {
+      "repository": "modelcontextprotocol/servers",
+      "description": "fictional values for modelcontextprotocol/servers (CLI golden only)",
+      "stars": 80000,
+      "forks": 9000,
+      "pushedAt": "2025-12-28T00:00:00Z",
+      "archived": false,
+      "license": null,
+      "topics": [],
+      "latestRelease": {
+        "tag": "v0.0.0-fixture",
+        "publishedAt": "2025-11-02T00:00:00Z",
+        "url": "https://github.com/modelcontextprotocol/servers/releases/tag/v0.0.0-fixture"
+      }
+    },
+    "oraios/serena": {
+      "repository": "oraios/serena",
+      "description": "fictional values for oraios/serena (CLI golden only)",
+      "stars": 20000,
+      "forks": 1500,
+      "pushedAt": "2025-12-22T00:00:00Z",
+      "archived": false,
+      "license": "MIT",
+      "topics": [],
+      "latestRelease": {
+        "tag": "v0.0.0-fixture",
+        "publishedAt": "2025-10-23T00:00:00Z",
+        "url": "https://github.com/oraios/serena/releases/tag/v0.0.0-fixture"
+      }
+    },
+    "upstash/context7": {
+      "repository": "upstash/context7",
+      "description": "fictional values for upstash/context7 (CLI golden only)",
+      "stars": 45000,
+      "forks": 2500,
+      "pushedAt": "2025-12-30T00:00:00Z",
+      "archived": false,
+      "license": "MIT",
+      "topics": [],
+      "latestRelease": {
+        "tag": "v0.0.0-fixture",
+        "publishedAt": "2025-12-27T00:00:00Z",
+        "url": "https://github.com/upstash/context7/releases/tag/v0.0.0-fixture"
+      }
+    }
+  },
+  "errors": {}
+}

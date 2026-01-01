@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "collectedAt": "2026-01-01T00:00:00Z",
+  "mode": "rest",
+  "repositories": {
+    "example/shared-monorepo": {
+      "repository": "example/shared-monorepo",
+      "description": "synthetic example/shared-monorepo",
+      "stars": 100000,
+      "forks": 5000,
+      "pushedAt": "2025-12-27T00:00:00Z",
+      "archived": false,
+      "license": "MIT",
+      "topics": [],
+      "latestRelease": {
+        "tag": "v1.0.0",
+        "publishedAt": "2025-12-22T00:00:00Z",
+        "url": "https://github.com/example/shared-monorepo/releases/tag/v1.0.0"
+      }
+    },
+    "example/tool-b": {
+      "repository": "example/tool-b",
+      "description": "synthetic example/tool-b",
+      "stars": 3000,
+      "forks": 200,
+      "pushedAt": "2025-11-22T00:00:00Z",
+      "archived": false,
+      "license": "MIT",
+      "topics": [],
+      "latestRelease": {
+        "tag": "v1.0.0",
+        "publishedAt": "2024-12-31T00:00:00Z",
+        "url": "https://github.com/example/tool-b/releases/tag/v1.0.0"
+      }
+    },
+    "example/tool-c": {
+      "repository": "example/tool-c",
+      "description": "synthetic example/tool-c",
+      "stars": 20000,
+      "forks": 1000,
+      "pushedAt": "2024-11-27T00:00:00Z",
+      "archived": true,
+      "license": "Apache-2.0",
+      "topics": [],
+      "latestRelease": {
+        "tag": "v1.0.0",
+        "publishedAt": "2024-08-19T00:00:00Z",
+        "url": "https://github.com/example/tool-c/releases/tag/v1.0.0"
+      }
+    },
+    "example/tool-e": {
+      "repository": "example/tool-e",
+      "description": "synthetic example/tool-e",
+      "stars": 800,
+      "forks": 50,
+      "pushedAt": "2025-09-23T00:00:00Z",
+      "archived": false,
+      "license": null,
+      "topics": [],
+      "latestRelease": null
+    },
+    "example/tool-f": {
+      "repository": "example/tool-f",
+      "description": "synthetic example/tool-f",
+      "stars": 12000,
+      "forks": 900,
+      "pushedAt": "2025-12-01T00:00:00Z",
+      "archived": false,
+      "license": "MIT",
+      "topics": [],
+      "latestRelease": {
+        "tag": "v1.0.0",
+        "publishedAt": "2025-01-01T00:00:00Z",
+        "url": "https://github.com/example/tool-f/releases/tag/v1.0.0"
+      }
+    },
+    "example/tool-g": {
+      "repository": "example/tool-g",
+      "description": "synthetic example/tool-g",
+      "stars": 150,
+      "forks": 10,
+      "pushedAt": "2025-06-15T00:00:00Z",
+      "archived": false,
+      "license": "MIT",
+      "topics": [],
+      "latestRelease": {
+        "tag": "v1.0.0",
+        "publishedAt": "2025-06-15T00:00:00Z",
+        "url": "https://github.com/example/tool-g/releases/tag/v1.0.0"
+      }
+    }
+  },
+  "errors": {
+    "example/tool-d": {
+      "kind": "not-found",
+      "error": "synthetic: 저장소를 찾을 수 없음"
+    }
+  }
+}

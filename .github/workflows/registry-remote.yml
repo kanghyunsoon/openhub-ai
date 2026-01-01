@@ -1,0 +1,67 @@
+name: Registry Remote Validation
+
+# 원격 검증과 sandbox install은 수동 실행·일정 실행에서만 돈다. PR·push trigger가 없어 required check가 될 수 없고
+# 실패해도 main merge를 막지 않는다(D-025). 사용자 PC의 OpenHub에는 timer·daemon·scheduler가 없다.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  remote:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: Remote validation (저장소·archived·이전·license·release source, 비인증)
+        run: pnpm registry:remote registry-remote-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: registry-remote-report
+          path: registry-remote-report.json
+          if-no-files-found: ignore
+
+  sandbox:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v6
+      - run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: Sandbox install + M5 Health (npx·uvx·docker, runner 안에서만)
+        run: pnpm exec vitest run packages/core/test/installer/executor.e2e.test.ts packages/core/test/registry/sandbox.e2e.test.ts --reporter=default --reporter=json --outputFile.json=sandbox-vitest.json
+        env:
+          OPENHUB_E2E: "1"
+      - name: Sandbox report(개수·상태·소요 시간만, REQ-061)
+        if: always()
+        run: pnpm exec tsx scripts/sandbox-report.ts sandbox-vitest.json sandbox-report.json && pnpm metrics --sandbox sandbox-report.json --out metrics-report
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sandbox-report
+          path: |
+            sandbox-report.json
+            metrics-report/
+          if-no-files-found: ignore
+      - name: Pinokio 생성 script 검사(runner에 pinokiod 없음)
+        run: pnpm exec vitest run packages/core/test/pinokio/plan.test.ts
+

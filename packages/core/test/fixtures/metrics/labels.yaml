@@ -1,0 +1,53 @@
+# REQ-061 정답 라벨(TASK-067). 사람이 각 fixture 프로젝트에 적절하다고 판단한 Registry Tool과 기대 Gap 상태다.
+# 현재 추천 결과를 복사한 값이 아니다. 지표는 이 라벨과 실제 결과의 차이를 그대로 보고한다.
+schemaVersion: 1
+kind: openhub-metrics-labels
+projects:
+  react-pnpm:
+    dir: ../projects/react-pnpm
+    relevant: [playwright-mcp, chrome-devtools-mcp, context7]
+    gaps: { e2e-testing: likely-gap, browser-automation: likely-gap }
+  spring-postgres:
+    dir: ../projects/spring-postgres
+    relevant: [postgres-mcp, context7, serena]
+    gaps: { sql-query: likely-gap, db-schema-access: likely-gap }
+  python-fastapi:
+    dir: ../projects/python-fastapi
+    relevant: [postgres-mcp, context7]
+    gaps: { db-schema-access: likely-gap }
+  claude-mcp:
+    dir: ../projects/claude-mcp
+    relevant: [memory-mcp, serena]
+    gaps: { e2e-testing: satisfied, browser-automation: satisfied, knowledge-graph-memory: likely-gap }
+  react-spring-monorepo:
+    dir: ../projects/react-spring-monorepo
+    relevant: [playwright-mcp, postgres-mcp, github-mcp-server, context7]
+    gaps: { e2e-testing: likely-gap, sql-query: likely-gap, github-api: likely-gap }
+releases:
+  - id: heading-breaking
+    breaking: true
+    notes: "### ⚠ BREAKING CHANGES\n- Removed the --legacy flag\n### Bug Fixes\n- Fixed crash on empty config"
+  - id: conventional-bang
+    breaking: true
+    notes: "- feat!: drop stdio transport v1\n- docs: update README"
+  - id: inline-breaking
+    breaking: true
+    notes: "- BREAKING: config field renamed from host to hostname"
+  - id: silent-breaking
+    breaking: true
+    notes: "This release changes the default port from 3000 to 8080."
+  - id: fixes-only
+    breaking: false
+    notes: "### Bug Fixes\n- Fixed pool leak\n- Fixed typo in log message"
+  - id: performance
+    breaking: false
+    notes: "### Performance\n- Cache manifests on startup"
+  - id: security
+    breaking: false
+    notes: "### Security\n- Bump undici to address CVE-2026-12345"
+  - id: features
+    breaking: false
+    notes: "### Features\n- Added new search tool"
+  - id: mentions-breaking-docs
+    breaking: false
+    notes: "- docs: explain how to avoid breaking changes when writing plugins"

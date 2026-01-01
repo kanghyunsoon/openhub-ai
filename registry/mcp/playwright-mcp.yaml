@@ -1,0 +1,31 @@
+schemaVersion: 1
+name: playwright-mcp
+displayName: Playwright MCP
+summary: Playwright로 브라우저를 조작하고 E2E 흐름을 검증하는 MCP 서버
+repository:
+  github: microsoft/playwright-mcp
+category: [mcp, testing, browser]
+capabilities: [browser-automation, e2e-testing]
+targets: [claude-code, codex, cursor]
+platform: { windows: true, macos: true, linux: true }
+requirements:
+  node: ">=18"
+install:
+  preferredAdapter: npx
+  options:
+    command: "npx @playwright/mcp@latest"
+  fallback:
+    - adapter: npm
+      package: "@playwright/mcp"
+healthCheck:
+  type: mcp-handshake
+update:
+  source: npm
+rollback:
+  supported: true
+verification: community
+# 추천 메타데이터(D-008): canonical MCP alias는 normalized lowercase, Registry 전체에서 유일
+recommendation:
+  appliesTo: { stacks: [react, nextjs, vue] }
+  identity: { mcpServerNames: [playwright] }
+  source: { type: dedicated }

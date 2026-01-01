@@ -1,0 +1,9 @@
+packages:
+  - packages/*
+  - apps/*
+
+allowBuilds:
+  electron: true
+  # Squirrel.Windows 전용 설치 도구. OpenHub는 NSIS만 쓰므로 build script를 실행하지 않는다(TASK-071).
+  electron-winstaller: false
+  esbuild: true

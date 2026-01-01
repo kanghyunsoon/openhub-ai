@@ -1,0 +1,41 @@
+# Desktop 패키징(TASK-071, D-036 §12). electron-builder 26.x. 공식 target은 Windows x64 NSIS(unsigned)·Linux x64 AppImage뿐이다.
+# macOS target 없음. 서명·인증서·publish 설정 없음(--publish never). Registry는 extraResources(resourcesPath/registry)다.
+appId: io.github.kanghyunsoon.openhub-ai
+productName: OpenHub AI
+copyright: Copyright (c) 2026 OpenHub AI contributors
+asar: true
+npmRebuild: false
+publish: null
+directories:
+  output: ../../release-out/desktop
+files:
+  - dist/main.cjs
+  - dist/preload.cjs
+  - renderer/**/*
+  - package.json
+  # @openhub/core와 그 의존성은 dist/main.cjs에 번들된다. app.asar에 node_modules를 넣지 않는다.
+  - "!**/node_modules/**/*"
+extraResources:
+  - from: resources/registry
+    to: registry
+extraFiles:
+  - from: ../../LICENSE
+    to: LICENSE.txt
+  - from: ../../THIRD_PARTY_NOTICES.md
+    to: THIRD_PARTY_NOTICES.md
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: OpenHub-AI-Setup-${version}-x64.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: Development
+  executableName: openhub-ai
+  artifactName: OpenHub-AI-${version}-x86_64.${ext}

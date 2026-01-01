@@ -1,0 +1,238 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "name": "react-spring-monorepo"
+  },
+  "languages": [
+    {
+      "id": "java",
+      "name": "Java",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "backend/build.gradle.kts",
+          "type": "manifest",
+          "value": "build.gradle.kts"
+        },
+        {
+          "file": "backend/src/main/java/shop/ShopApplication.java",
+          "type": "extension-count",
+          "value": ".java 파일 1개"
+        }
+      ]
+    },
+    {
+      "id": "javascript",
+      "name": "JavaScript",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "frontend/package.json",
+          "type": "manifest",
+          "value": "package.json"
+        },
+        {
+          "file": "package.json",
+          "type": "manifest",
+          "value": "package.json"
+        }
+      ]
+    },
+    {
+      "id": "typescript",
+      "name": "TypeScript",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "frontend/app/page.tsx",
+          "type": "extension-count",
+          "value": ".ts/.tsx 파일 1개"
+        },
+        {
+          "file": "frontend/package.json",
+          "type": "dependency",
+          "value": "typescript"
+        },
+        {
+          "file": "frontend/tsconfig.json",
+          "type": "config",
+          "value": "tsconfig.json"
+        }
+      ]
+    }
+  ],
+  "frameworks": [
+    {
+      "id": "nextjs",
+      "name": "Next.js",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "frontend/package.json",
+          "type": "dependency",
+          "value": "next"
+        }
+      ]
+    },
+    {
+      "id": "react",
+      "name": "React",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "frontend/package.json",
+          "type": "dependency",
+          "value": "react"
+        }
+      ]
+    },
+    {
+      "id": "spring-boot",
+      "name": "Spring Boot",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "backend/build.gradle.kts",
+          "type": "build-plugin",
+          "value": "org.springframework.boot"
+        },
+        {
+          "file": "backend/build.gradle.kts",
+          "type": "dependency",
+          "value": "org.springframework.boot:spring-boot-starter-web"
+        }
+      ]
+    }
+  ],
+  "databases": [
+    {
+      "id": "mysql",
+      "name": "MySQL",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "backend/build.gradle.kts",
+          "type": "dependency",
+          "value": "com.mysql:mysql-connector-j"
+        },
+        {
+          "file": "backend/src/main/resources/application.properties",
+          "type": "config",
+          "value": "spring.datasource.url scheme=mysql"
+        },
+        {
+          "file": "docker-compose.yml",
+          "type": "docker-image",
+          "value": "mysql: mysql"
+        }
+      ]
+    }
+  ],
+  "packageManagers": [
+    {
+      "id": "gradle",
+      "name": "Gradle",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "backend/build.gradle.kts",
+          "type": "manifest",
+          "value": "build.gradle.kts"
+        },
+        {
+          "file": "gradlew",
+          "type": "config",
+          "value": "gradlew"
+        },
+        {
+          "file": "settings.gradle.kts",
+          "type": "manifest",
+          "value": "settings.gradle.kts"
+        }
+      ]
+    },
+    {
+      "id": "npm",
+      "name": "npm",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "package-lock.json",
+          "type": "lockfile",
+          "value": "package-lock.json"
+        },
+        {
+          "file": "package.json",
+          "type": "config",
+          "value": "npm@10.9.0"
+        }
+      ]
+    }
+  ],
+  "infrastructure": [
+    {
+      "id": "docker-compose",
+      "name": "Docker Compose",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "docker-compose.yml",
+          "type": "config",
+          "value": "services: backend, mysql"
+        }
+      ]
+    },
+    {
+      "id": "github-actions",
+      "name": "GitHub Actions",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": ".github/workflows/ci.yml",
+          "type": "config",
+          "value": "jobs: build"
+        }
+      ]
+    }
+  ],
+  "aiClients": [],
+  "aiTools": [],
+  "detectors": [
+    {
+      "id": "ai-environment",
+      "status": "ok"
+    },
+    {
+      "id": "databases",
+      "status": "ok"
+    },
+    {
+      "id": "frameworks",
+      "status": "ok"
+    },
+    {
+      "id": "infrastructure",
+      "status": "ok"
+    },
+    {
+      "id": "languages",
+      "status": "ok"
+    },
+    {
+      "id": "package-managers",
+      "status": "ok"
+    }
+  ],
+  "warnings": []
+}

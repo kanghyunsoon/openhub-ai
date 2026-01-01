@@ -1,0 +1,32 @@
+Memory MCP (memory-mcp) 업데이트 계획
+
+상태         ready
+Backend      npx
+현재 버전    @modelcontextprotocol/server-memory (고정되지 않음)
+목표 버전    @modelcontextprotocol/server-memory@1.2.3
+요청 spec    @modelcontextprotocol/server-memory
+준비 단계    없음 — 패키지 매니저 명령을 실행하지 않고 Client 설정의 패키지 인자만 바꿉니다
+Client 실행 명령
+  현재  npx -y @modelcontextprotocol/server-memory
+  변경  npx -y @modelcontextprotocol/server-memory@1.2.3
+
+대상
+  - .mcp.json (Claude Code, 프로젝트 범위) mcpServers.memory 항목 교체 · revision 1
+
+Health Check
+  필수 — MCP 서버를 격리 임시 디렉터리에서 실행해 initialize·tools/list 응답을 확인합니다(Client 앱은 실행하지 않음)
+  제한 시간 startup 20초 · handshake 10초 · 전체 45초
+  Health가 실패하면 설정을 원래 내용으로 되돌리고 Version State를 바꾸지 않습니다
+
+환경변수
+  (필요 없음)
+
+Warnings
+  - [health-execution] Health Check는 MCP 서버(제3자 코드)를 격리된 임시 디렉터리에서 실행하며 패키지나 이미지를 내려받을 수 있습니다.
+  - [version-level-lock] npm·PyPI 패키지는 버전 수준으로 고정합니다. 같은 버전의 tarball 내용까지 고정하지는 않습니다.
+
+승인 항목
+  - [base] 위 lifecycle 계획(바뀌는 artifact, 쓰는 설정 파일, 실행할 명령)을 확인했고 이대로 실행하는 데 동의합니다.
+  - [health-execution] Health Check는 MCP 서버(제3자 코드)를 격리된 임시 디렉터리에서 실행하며 패키지나 이미지를 내려받을 수 있습니다.
+
+Plan digest  sha256:<digest>

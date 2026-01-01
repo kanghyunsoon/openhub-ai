@@ -1,0 +1,38 @@
+# 기획서 v0.2 §10 예시 그대로
+name: playwright-mcp
+
+repository:
+  github: microsoft/playwright-mcp
+
+category:
+  - mcp
+  - testing
+  - browser
+
+targets:
+  - claude-code
+  - codex
+
+platform:
+  windows: true
+  macos: true
+  linux: true
+
+requirements:
+  node: ">=20"
+
+install:
+  preferredAdapter: pinokio
+
+  fallback:
+    - adapter: npx
+      command: "npx @playwright/mcp@latest"
+
+healthCheck:
+  type: process
+
+update:
+  source: github-release
+
+rollback:
+  supported: true

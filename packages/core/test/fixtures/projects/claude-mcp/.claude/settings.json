@@ -1,0 +1,14 @@
+{
+  "enabledPlugins": {
+    "code-review@claude-plugins-official": true,
+    "disabled-plugin@example": false
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npm test)"
+    ]
+  },
+  "env": {
+    "ANTHROPIC_API_KEY": "FAKE_ANTHROPIC_KEY_5555"
+  }
+}

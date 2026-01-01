@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "name": "polyglot-native"
+  },
+  "languages": [
+    {
+      "id": "cpp",
+      "name": "C++",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "Game.uproject",
+          "type": "config",
+          "value": "Modules: Game"
+        },
+        {
+          "file": "Source/Game/Game.cpp",
+          "type": "extension-count",
+          "value": ".cpp/.h 파일 2개"
+        }
+      ]
+    },
+    {
+      "id": "csharp",
+      "name": "C#",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "tools/Pipeline.sln",
+          "type": "manifest",
+          "value": "Pipeline.sln"
+        },
+        {
+          "file": "tools/Pipeline/Pipeline.csproj",
+          "type": "manifest",
+          "value": "Pipeline.csproj"
+        },
+        {
+          "file": "tools/Pipeline/Program.cs",
+          "type": "extension-count",
+          "value": ".cs 파일 1개"
+        }
+      ]
+    },
+    {
+      "id": "rust",
+      "name": "Rust",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "Cargo.toml",
+          "type": "manifest",
+          "value": "Cargo.toml"
+        },
+        {
+          "file": "src/main.rs",
+          "type": "extension-count",
+          "value": ".rs 파일 1개"
+        }
+      ]
+    }
+  ],
+  "frameworks": [],
+  "databases": [],
+  "packageManagers": [
+    {
+      "id": "cargo",
+      "name": "Cargo",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "Cargo.lock",
+          "type": "lockfile",
+          "value": "Cargo.lock"
+        },
+        {
+          "file": "Cargo.toml",
+          "type": "manifest",
+          "value": "Cargo.toml"
+        }
+      ]
+    }
+  ],
+  "infrastructure": [],
+  "aiClients": [],
+  "aiTools": [],
+  "detectors": [
+    {
+      "id": "ai-environment",
+      "status": "ok"
+    },
+    {
+      "id": "databases",
+      "status": "ok"
+    },
+    {
+      "id": "frameworks",
+      "status": "ok"
+    },
+    {
+      "id": "infrastructure",
+      "status": "ok"
+    },
+    {
+      "id": "languages",
+      "status": "ok"
+    },
+    {
+      "id": "package-managers",
+      "status": "ok"
+    }
+  ],
+  "warnings": []
+}

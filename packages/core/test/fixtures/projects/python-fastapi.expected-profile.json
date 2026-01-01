@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "name": "python-fastapi"
+  },
+  "languages": [
+    {
+      "id": "python",
+      "name": "Python",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "app/main.py",
+          "type": "extension-count",
+          "value": ".py 파일 1개"
+        },
+        {
+          "file": "pyproject.toml",
+          "type": "manifest",
+          "value": "pyproject.toml"
+        }
+      ]
+    }
+  ],
+  "frameworks": [
+    {
+      "id": "fastapi",
+      "name": "FastAPI",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "pyproject.toml",
+          "type": "dependency",
+          "value": "fastapi"
+        }
+      ]
+    }
+  ],
+  "databases": [
+    {
+      "id": "postgresql",
+      "name": "PostgreSQL",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "pyproject.toml",
+          "type": "dependency",
+          "value": "psycopg"
+        }
+      ]
+    }
+  ],
+  "packageManagers": [
+    {
+      "id": "uv",
+      "name": "uv",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "pyproject.toml",
+          "type": "config",
+          "value": "[tool.uv]"
+        },
+        {
+          "file": "uv.lock",
+          "type": "lockfile",
+          "value": "uv.lock"
+        }
+      ]
+    }
+  ],
+  "infrastructure": [],
+  "aiClients": [],
+  "aiTools": [],
+  "detectors": [
+    {
+      "id": "ai-environment",
+      "status": "ok"
+    },
+    {
+      "id": "databases",
+      "status": "ok"
+    },
+    {
+      "id": "frameworks",
+      "status": "ok"
+    },
+    {
+      "id": "infrastructure",
+      "status": "ok"
+    },
+    {
+      "id": "languages",
+      "status": "ok"
+    },
+    {
+      "id": "package-managers",
+      "status": "ok"
+    }
+  ],
+  "warnings": []
+}

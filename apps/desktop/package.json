@@ -1,0 +1,22 @@
+{
+  "name": "@openhub/desktop",
+  "version": "0.1.0",
+  "description": "OpenHub AI desktop app",
+  "author": "OpenHub AI contributors",
+  "license": "MIT",
+  "private": true,
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node build.mjs && electron .",
+    "smoke": "node build.mjs && electron . --smoke"
+  },
+  "dependencies": {
+    "@openhub/core": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2"
+  }
+}

@@ -1,0 +1,12 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://db.internal.example:5432/app?sslmode=require
+    username: app_user
+    password: FAKE_DB_PASSWORD_123
+---
+spring:
+  config:
+    activate:
+      on-profile: test
+  datasource:
+    url: jdbc:postgresql://localhost:5432/app_test

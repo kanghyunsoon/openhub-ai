@@ -1,0 +1,31 @@
+Postgres MCP Pro (postgres-mcp) 업데이트 계획
+
+상태         ready
+Backend      uvx
+현재 버전    postgres-mcp (고정되지 않음)
+목표 버전    postgres-mcp==0.3.0
+요청 spec    postgres-mcp
+준비 단계    없음 — 패키지 매니저 명령을 실행하지 않고 Client 설정의 패키지 인자만 바꿉니다
+Client 실행 명령
+  현재  uvx postgres-mcp --access-mode=restricted
+  변경  uvx postgres-mcp==0.3.0 --access-mode=restricted
+
+대상
+  - .mcp.json (Claude Code, 프로젝트 범위) mcpServers.postgres 항목 교체 · revision 1
+
+Health Check
+  생략(사전 승인) — 적용 후 Health: Not verified / Reason: Required environment is unchecked
+
+환경변수
+  - 이 도구는 실행 시 DATABASE_URI 환경변수가 필요합니다. OpenHub는 값이나 설정 여부를 확인하거나 저장하지 않습니다.
+
+Warnings
+  - [health-gate-skipped] 이 도구는 실행에 환경변수가 필요하지만 OpenHub는 해당 값이나 설정 여부를 확인하지 않습니다. Health Check를 생략하면 업데이트 후 MCP가 실제로 동작하는지는 검증되지 않습니다.
+  - [version-level-lock] npm·PyPI 패키지는 버전 수준으로 고정합니다. 같은 버전의 tarball 내용까지 고정하지는 않습니다.
+
+승인 항목
+  - [base] 위 lifecycle 계획(바뀌는 artifact, 쓰는 설정 파일, 실행할 명령)을 확인했고 이대로 실행하는 데 동의합니다.
+  - [environment-unverified] 이 도구는 실행에 환경변수가 필요하지만 OpenHub는 해당 값이나 설정 여부를 확인하지 않습니다.
+  - [health-gate-skipped] 이 도구는 실행에 환경변수가 필요하지만 OpenHub는 해당 값이나 설정 여부를 확인하지 않습니다. Health Check를 생략하면 업데이트 후 MCP가 실제로 동작하는지는 검증되지 않습니다.
+
+Plan digest  sha256:<digest>

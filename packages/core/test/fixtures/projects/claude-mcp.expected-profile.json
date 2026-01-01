@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "name": "claude-mcp"
+  },
+  "languages": [
+    {
+      "id": "javascript",
+      "name": "JavaScript",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "package.json",
+          "type": "manifest",
+          "value": "package.json"
+        }
+      ]
+    }
+  ],
+  "frameworks": [
+    {
+      "id": "react",
+      "name": "React",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "package.json",
+          "type": "dependency",
+          "value": "react"
+        }
+      ]
+    }
+  ],
+  "databases": [],
+  "packageManagers": [],
+  "infrastructure": [],
+  "aiClients": [
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": ".claude/settings.json",
+          "type": "config",
+          "value": "settings.json"
+        },
+        {
+          "file": ".claude/skills/release-notes/SKILL.md",
+          "type": "config",
+          "value": "skills"
+        },
+        {
+          "file": ".mcp.json",
+          "type": "config",
+          "value": "mcpServers"
+        },
+        {
+          "file": "CLAUDE.md",
+          "type": "config",
+          "value": "CLAUDE.md"
+        }
+      ]
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": ".codex/config.toml",
+          "type": "config",
+          "value": "config.toml"
+        },
+        {
+          "file": "AGENTS.md",
+          "type": "file-presence",
+          "value": "AGENTS.md"
+        }
+      ]
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": ".cursor/mcp.json",
+          "type": "config",
+          "value": "mcpServers"
+        }
+      ]
+    }
+  ],
+  "aiTools": [
+    {
+      "id": "code-review-claude-plugins-official",
+      "name": "code-review@claude-plugins-official",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": ".claude/settings.json",
+          "type": "config",
+          "value": "code-review@claude-plugins-official"
+        }
+      ],
+      "kind": "plugin",
+      "clients": [
+        "claude-code"
+      ]
+    },
+    {
+      "id": "context7",
+      "name": "context7",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": ".mcp.json",
+          "type": "config",
+          "value": "context7 (http)"
+        }
+      ],
+      "kind": "mcp-server",
+      "clients": [
+        "claude-code"
+      ]
+    },
+    {
+      "id": "github",
+      "name": "github",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": ".codex/config.toml",
+          "type": "config",
+          "value": "github (stdio, npx)"
+        },
+        {
+          "file": ".mcp.json",
+          "type": "config",
+          "value": "github (stdio, npx)"
+        }
+      ],
+      "kind": "mcp-server",
+      "clients": [
+        "claude-code",
+        "codex"
+      ]
+    },
+    {
+      "id": "playwright",
+      "name": "playwright",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": ".codex/config.toml",
+          "type": "config",
+          "value": "playwright (stdio, npx)"
+        },
+        {
+          "file": ".cursor/mcp.json",
+          "type": "config",
+          "value": "playwright (stdio, npx)"
+        }
+      ],
+      "kind": "mcp-server",
+      "clients": [
+        "codex",
+        "cursor"
+      ]
+    },
+    {
+      "id": "postgres",
+      "name": "postgres",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": ".mcp.json",
+          "type": "config",
+          "value": "postgres (stdio, uvx)"
+        }
+      ],
+      "kind": "mcp-server",
+      "clients": [
+        "claude-code"
+      ]
+    },
+    {
+      "id": "release-notes",
+      "name": "release-notes",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": ".claude/skills/release-notes/SKILL.md",
+          "type": "config",
+          "value": "release-notes"
+        }
+      ],
+      "kind": "skill",
+      "clients": [
+        "claude-code"
+      ]
+    }
+  ],
+  "detectors": [
+    {
+      "id": "ai-environment",
+      "status": "ok"
+    },
+    {
+      "id": "databases",
+      "status": "ok"
+    },
+    {
+      "id": "frameworks",
+      "status": "ok"
+    },
+    {
+      "id": "infrastructure",
+      "status": "ok"
+    },
+    {
+      "id": "languages",
+      "status": "ok"
+    },
+    {
+      "id": "package-managers",
+      "status": "ok"
+    }
+  ],
+  "warnings": []
+}

@@ -1,0 +1,35 @@
+schemaVersion: 1
+name: postgres-mcp
+displayName: Postgres MCP Pro
+summary: PostgreSQL 스키마 조회, 안전한 SQL 실행, 인덱스·쿼리 튜닝을 제공하는 MCP 서버
+repository:
+  github: crystaldba/postgres-mcp
+category: [database, mcp]
+capabilities: [db-schema-access, sql-query, query-tuning]
+targets: [claude-code, codex, cursor]
+platform: { windows: true, macos: true, linux: true }
+requirements:
+  python: ">=3.12"
+env:
+  - name: DATABASE_URI
+    required: true
+    description: postgresql://user:password@host:5432/db 형식의 접속 문자열
+install:
+  preferredAdapter: uvx
+  options:
+    command: "uvx postgres-mcp --access-mode=restricted"
+  fallback:
+    - adapter: docker
+      image: crystaldba/postgres-mcp
+healthCheck:
+  type: mcp-handshake
+update:
+  source: pypi
+rollback:
+  supported: true
+verification: community
+# 추천 메타데이터(D-008): canonical MCP alias는 normalized lowercase, Registry 전체에서 유일
+recommendation:
+  appliesTo: { stacks: [postgresql] }
+  identity: { mcpServerNames: [postgres] }
+  source: { type: dedicated }

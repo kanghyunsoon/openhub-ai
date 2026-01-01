@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "name": "docker-project"
+  },
+  "languages": [
+    {
+      "id": "javascript",
+      "name": "JavaScript",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "package.json",
+          "type": "manifest",
+          "value": "package.json"
+        },
+        {
+          "file": "server.js",
+          "type": "extension-count",
+          "value": ".js/.jsx 파일 1개"
+        }
+      ]
+    }
+  ],
+  "frameworks": [
+    {
+      "id": "vue",
+      "name": "Vue",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "package.json",
+          "type": "dependency",
+          "value": "vue"
+        }
+      ]
+    }
+  ],
+  "databases": [
+    {
+      "id": "mongodb",
+      "name": "MongoDB",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "compose.yaml",
+          "type": "docker-image",
+          "value": "documents: mongo"
+        },
+        {
+          "file": "package.json",
+          "type": "dependency",
+          "value": "mongoose"
+        }
+      ]
+    },
+    {
+      "id": "postgresql",
+      "name": "PostgreSQL",
+      "scope": "project",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "compose.yaml",
+          "type": "docker-image",
+          "value": "db: postgres"
+        }
+      ]
+    },
+    {
+      "id": "sqlite",
+      "name": "SQLite",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "package.json",
+          "type": "dependency",
+          "value": "better-sqlite3"
+        }
+      ]
+    }
+  ],
+  "packageManagers": [
+    {
+      "id": "npm",
+      "name": "npm",
+      "scope": "project",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "file": "package-lock.json",
+          "type": "lockfile",
+          "value": "package-lock.json"
+        }
+      ]
+    }
+  ],
+  "infrastructure": [
+    {
+      "id": "docker",
+      "name": "Docker",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "Dockerfile",
+          "type": "config",
+          "value": "FROM node:22-alpine"
+        }
+      ]
+    },
+    {
+      "id": "docker-compose",
+      "name": "Docker Compose",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "compose.yaml",
+          "type": "config",
+          "value": "services: app, cache, db, documents"
+        }
+      ]
+    }
+  ],
+  "aiClients": [],
+  "aiTools": [],
+  "detectors": [
+    {
+      "id": "ai-environment",
+      "status": "ok"
+    },
+    {
+      "id": "databases",
+      "status": "ok"
+    },
+    {
+      "id": "frameworks",
+      "status": "ok"
+    },
+    {
+      "id": "infrastructure",
+      "status": "ok"
+    },
+    {
+      "id": "languages",
+      "status": "ok"
+    },
+    {
+      "id": "package-managers",
+      "status": "ok"
+    }
+  ],
+  "warnings": []
+}

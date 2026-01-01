@@ -1,0 +1,4 @@
+{
+  "mcpServers": {
+    "github": { "command": "npx", "env": { "TOKEN": "FAKE_MALFORMED_SECRET_7777" } },
+  }

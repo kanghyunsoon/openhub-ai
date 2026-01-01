@@ -1,0 +1,24 @@
+schemaVersion: 1
+name: tool-b
+displayName: Tool B
+summary: synthetic fixture tool-b
+repository: { github: example/tool-b }
+category: [database, mcp]
+capabilities: [db-schema-access, sql-query]
+targets: [claude-code, codex, cursor]
+platform: { windows: true, macos: true, linux: true }
+requirements:
+  python: ">=3.12"
+env:
+  - name: DATABASE_URI
+    required: true
+    description: postgresql://user:secret-password@db.internal:5432/app 형식
+install: { preferredAdapter: uvx, fallback: [{ adapter: docker, image: example/tool-b }] }
+healthCheck: { type: mcp-handshake }
+update: { source: github-release }
+rollback: { supported: true }
+verification: community
+recommendation:
+  appliesTo: { stacks: [postgresql] }
+  identity: { mcpServerNames: [tool-b] }
+  source: { type: dedicated }

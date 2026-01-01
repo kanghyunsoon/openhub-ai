@@ -1,0 +1,277 @@
+
+== 1. Analyze — 프로젝트 분석(읽기만)
+$ openhub project scan examples/demo-project
+OpenHub Project Analysis — demo-project
+
+Languages
+  Java                               1.00  pom.xml (manifest: pom.xml)
+  JavaScript                         1.00  package.json (manifest: package.json)
+
+Frameworks
+  React                              1.00  package.json (dependency: react)
+  Spring Boot                        1.00  pom.xml (dependency: org.springframework.boot:spring-boot-starter-data-jpa) 외 2건
+
+Databases
+  PostgreSQL                         1.00  docker-compose.yml (docker-image: db: postgres) 외 2건
+
+Package Managers
+  Maven                              1.00  pom.xml (manifest: pom.xml)
+
+Infrastructure
+  Docker Compose                     1.00  docker-compose.yml (config: services: db)
+
+AI Clients
+  Claude Code                        1.00  .mcp.json (config: mcpServers)
+
+AI Tools
+  memory [mcp-server; claude-code]   1.00  .mcp.json (config: memory (stdio, npx))
+
+Detectors  ai-environment:ok  databases:ok  frameworks:ok  infrastructure:ok  languages:ok  package-managers:ok
+(exit 0)
+
+== 2. Existing tools — 이미 설정된 MCP 서버
+$ openhub lifecycle status --project examples/demo-project
+memory · Claude Code · 프로젝트 (.mcp.json)
+  Tool       (식별 안 됨)
+  상태       untracked-foreign(OpenHub가 관리하지 않는 설정)
+  Health: Unknown (아직 확인하지 않음)
+
+사용자 범위 설정은 확인하지 않았습니다(--include-host로 켭니다).
+(exit 0)
+
+== 3. Recommend — 맞춤 추천(설치하지 않음)
+$ openhub project recommend examples/demo-project
+OpenHub Recommendations — demo-project
+
+검사 범위  프로젝트 (사용자 범위 미검사 — --include-host로 확인)
+설치된 MCP  memory → memory-mcp (프로젝트)
+
+추천
+ 1. Chrome DevTools MCP (chrome-devtools-mcp)  [likely-gap · high · 브라우저 자동화]
+    Project Fit 0.97 · OpenScore 0.96
+    Capability  브라우저 자동화, 네트워크 검사, 성능 추적
+    - React이(가) package.json의 의존성(react)에서 탐지됨 → 브라우저 자동화 필요
+    - 브라우저 자동화 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)
+    - React 전용 도구와 프로젝트 스택이 일치
+    … 이유 7개 더 (--json)
+ 2. Playwright MCP (playwright-mcp)  [likely-gap · high · 브라우저 자동화]
+    Project Fit 0.97 · OpenScore 0.96
+    Capability  브라우저 자동화, E2E 테스트
+    - React이(가) package.json의 의존성(react)에서 탐지됨 → 브라우저 자동화 필요
+    - 브라우저 자동화 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)
+    - React 전용 도구와 프로젝트 스택이 일치
+    … 이유 7개 더 (--json)
+ 3. Postgres MCP Pro (postgres-mcp)  [likely-gap · high · DB 스키마 조회]
+    Project Fit 0.97 · OpenScore 0.63
+    Capability  DB 스키마 조회, 쿼리 튜닝, SQL 질의
+    - PostgreSQL이(가) pom.xml의 의존성(org.postgresql:postgresql)에서 탐지됨 → DB 스키마 조회 필요
+    - DB 스키마 조회 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)
+    - PostgreSQL 전용 도구와 프로젝트 스택이 일치
+    … 이유 8개 더 (--json)
+ 4. Serena (serena)  [likely-gap · medium · 의미 기반 코드 탐색]
+    Project Fit 0.79 · OpenScore 0.96
+    Capability  코드 편집, 의미 기반 코드 탐색
+    - Java이(가) pom.xml의 매니페스트(pom.xml)에서 탐지됨 → 의미 기반 코드 탐색 필요
+    - 의미 기반 코드 탐색 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)
+    - Claude Code에서 사용 가능
+    … 이유 6개 더 (--json)
+ 5. Context7 (context7)  [likely-gap · medium · 라이브러리 문서 조회]
+    Project Fit 0.75 · OpenScore 0.96
+    Capability  라이브러리 문서 조회
+    - React이(가) package.json의 의존성(react)에서 탐지됨 → 라이브러리 문서 조회 필요
+    - 라이브러리 문서 조회 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)
+    - Claude Code에서 사용 가능
+    … 이유 6개 더 (--json)
+
+충족된 Capability
+  - 지식 그래프 메모리: memory (프로젝트)
+
+OpenScore는 저장소 유지관리·활동성·커뮤니티 신호이며 보안·코드 품질 평가가 아닙니다
+(exit 0)
+
+== 4. Install preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)
+$ openhub install playwright-mcp --project examples/demo-project --client claude-code
+Playwright MCP (playwright-mcp) 설치 계획
+
+설치 상태    프로젝트 범위 기준 미설치(사용자 범위 미검사)
+검사 범위    프로젝트
+Backend      npx
+준비 단계    없음 — OpenHub는 아무것도 실행하지 않고, Client가 처음 실행할 때 패키지를 받습니다(launch-on-demand)
+Client 실행 명령  npx @playwright/mcp@latest
+
+변경 파일
+  - .mcp.json (Claude Code, 프로젝트 범위) mcpServers.playwright 항목 추가 · 기존 파일
+
+환경변수
+  (필요 없음)
+
+충돌         없음
+
+Warnings
+  - [floating-artifact] 이 설치 계획은 실행 명령과 설정을 고정하지만, 원격 패키지 내용 자체는 고정하지 않습니다. 동일한 계획을 나중에 실행하면 다른 artifact가 내려올 수 있습니다.
+
+승인 항목
+  - [base] 위 설치 계획(실행 명령, 쓰는 설정 파일, 네트워크 사용)을 확인했고 이대로 실행하는 데 동의합니다.
+  - [floating-artifact] 원격 패키지 버전이 고정되어 있지 않습니다. 나중에 실행하면 다른 artifact가 내려올 수 있습니다.
+
+Plan digest  sha256:<프로젝트 위치에 따라 달라짐>
+
+[floating-artifact] 원격 패키지 버전이 고정되어 있지 않습니다. 나중에 실행하면 다른 artifact가 내려올 수 있습니다.
+! 승인하지 않아 설치를 중단했습니다. 아무것도 바꾸지 않았습니다.
+(exit 1)
+
+== 5. Adopt — 기존 설정을 관리 대상으로 등록(데모가 임시 HOME에서 승인 질문에 답함, 설정 파일 변경 없음)
+$ openhub adopt memory-mcp --project examples/demo-project
+Adopt 계획: memory-mcp (ready)
+대상: claude-code · project · .mcp.json · 서버 memory
+식별: exact — 서버 이름과 package·image가 모두 Registry와 일치 [alias-and-artifact]
+  일치한 artifact: npm:@modelcontextprotocol/server-memory
+  현재 서버 이름: memory
+  Registry 이름: memory-mcp (canonical alias memory)
+실행 방식(기존 설정 그대로): npx · npx -y @modelcontextprotocol/server-memory@2025.8.4
+artifact: @modelcontextprotocol/server-memory@2025.8.4 (설정에 고정된 spec을 기록합니다)
+효과: Version State 기록 1회 · 설정 파일 변경 0 · 실행 0 · 네트워크 0
+Health: Not verified (adopt는 MCP 서버를 실행하지 않습니다)
+승인 요구:
+  [base] 위 adopt 계획(관리 대상으로 등록할 설정 항목과 Version State 기록 1회)을 확인했고 등록하는 데 동의합니다. 설정 파일은 바뀌지 않고 아무것도 실행하지 않습니다.
+plan digest: sha256:<프로젝트 위치에 따라 달라짐>
+
+위 adopt 계획(관리 대상으로 등록할 설정 항목과 Version State 기록 1회)을 확인했고 등록하는 데 동의합니다. 설정 파일은 바뀌지 않고 아무것도 실행하지 않습니다.
+Adopt 완료: memory-mcp (Version State revision 1). 설정 파일은 바뀌지 않았습니다.
+Health: Not verified (lifecycle health로 확인할 수 있습니다)
+(exit 0)
+
+== 6. Releases — 고정 release fixture
+$ openhub releases memory-mcp --project examples/demo-project --no-token
+Memory MCP (memory-mcp) 릴리스
+
+버전 출처   npm · notes github-release
+현재        2025.8.4
+최신        2025.9.25 · 게시 2025-09-25
+포함 릴리스 2025.9.25, 2025.9.1
+
+요약(결정론 분류, 근거 [버전 L줄])
+  Breaking      1
+    - [2025.9.1 L1] BREAKING: renamed open_nodes to read_nodes
+  Security      0
+  Compatibility 1
+    - [2025.9.1 L2] See the migration guide
+  Performance   0
+  Fix           1
+    - [2025.9.25 L3] Fixed entity dedupe
+  Other         1
+    - [2025.9.25 L5] Added search_nodes limit
+
+Release notes 2025.9.25 (원문 일부, 해석하지 않음)
+  | ## What's Changed
+  | ### Bug Fixes
+  | - Fixed entity dedupe
+  | ### Features
+  | - Added search_nodes limit
+
+링크        https://github.com/modelcontextprotocol/servers/releases/tag/2025.9.25
+(exit 0)
+
+== 7. Impact — 업데이트 영향
+$ openhub impact memory-mcp --project examples/demo-project --no-token
+Memory MCP (memory-mcp) 업데이트 영향
+
+버전        2025.8.4 → 2025.9.25
+판정        HIGH (WARNING)
+이유
+  - notes-breaking (high)
+  - notes-migration (medium)
+  - version-minor (low)
+근거
+  - release-note 2025.9.1: line 1
+  - release-note 2025.9.1: line 2
+  - version npm: 2025.8.4 -> 2025.9.25
+영향 파일   .mcp.json
+
+Impact는 판단 근거이며 승인이 아닙니다. 실행은 openhub update의 계획·승인을 거칩니다.
+(exit 0)
+
+== 8. Update preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)
+$ openhub update memory-mcp --project examples/demo-project
+Update available: 2025.8.4 → 2025.9.25
+Impact: HIGH (WARNING)
+Reasons: notes-breaking, notes-migration, version-minor
+Summary: Breaking 1 · Security 0 · Compatibility 1 · Performance 0 · Fix 1 · Other 1
+(Impact·Summary는 판단 근거이며 승인이 아닙니다. 아래 계획을 확인하세요)
+
+Memory MCP (memory-mcp) 업데이트 계획
+
+상태         ready
+Backend      npx
+현재 버전    @modelcontextprotocol/server-memory@2025.8.4
+목표 버전    @modelcontextprotocol/server-memory@2025.9.25
+요청 spec    @modelcontextprotocol/server-memory
+준비 단계    없음 — 패키지 매니저 명령을 실행하지 않고 Client 설정의 패키지 인자만 바꿉니다
+Client 실행 명령
+  현재  npx -y @modelcontextprotocol/server-memory@2025.8.4
+  변경  npx -y @modelcontextprotocol/server-memory@2025.9.25
+
+대상
+  - .mcp.json (Claude Code, 프로젝트 범위) mcpServers.memory 항목 교체 · revision 1
+
+Health Check
+  필수 — MCP 서버를 격리 임시 디렉터리에서 실행해 initialize·tools/list 응답을 확인합니다(Client 앱은 실행하지 않음)
+  제한 시간 startup 20초 · handshake 10초 · 전체 45초
+  Health가 실패하면 설정을 원래 내용으로 되돌리고 Version State를 바꾸지 않습니다
+
+환경변수
+  (필요 없음)
+
+Warnings
+  - [health-execution] Health Check는 MCP 서버(제3자 코드)를 격리된 임시 디렉터리에서 실행하며 패키지나 이미지를 내려받을 수 있습니다.
+  - [version-level-lock] npm·PyPI 패키지는 버전 수준으로 고정합니다. 같은 버전의 tarball 내용까지 고정하지는 않습니다.
+
+승인 항목
+  - [base] 위 lifecycle 계획(바뀌는 artifact, 쓰는 설정 파일, 실행할 명령)을 확인했고 이대로 실행하는 데 동의합니다.
+  - [health-execution] Health Check는 MCP 서버(제3자 코드)를 격리된 임시 디렉터리에서 실행하며 패키지나 이미지를 내려받을 수 있습니다.
+
+Plan digest  sha256:<프로젝트 위치에 따라 달라짐>
+
+[health-execution] Health Check는 MCP 서버(제3자 코드)를 격리된 임시 디렉터리에서 실행하며 패키지나 이미지를 내려받을 수 있습니다.
+! 승인하지 않아 중단했습니다. 아무것도 바꾸지 않았습니다.
+(exit 1)
+
+== 9. Discover — New for your project
+$ openhub discover --view new --project examples/demo-project
+NEW FOR YOUR PROJECT — 최근 90일 안에 Registry에 들어왔고 이 프로젝트의 Gap을 채우는 도구(2026-10-07 기준)
+  (없음)
+(exit 0)
+
+== 9. Discover — Trending
+$ openhub trending
+TRENDING — OpenHub Trend Score (historical star growth가 아니라 현재 popularity와 최근 release/activity를 조합한 점수)
+기준: metadata 2026-01-01T00:00:00Z · 보안·품질 점수가 아닙니다
+  1. context7 — Trend 96 (popularity 46 · release 25 · activity 25; stars 45000, release 2025-12-27, push 2025-12-30)
+  2. chrome-devtools-mcp — Trend 96 (popularity 46 · release 25 · activity 25; stars 40000, release 2025-12-12, push 2025-12-29)
+  3. playwright-mcp — Trend 94 (popularity 44 · release 25 · activity 25; stars 30000, release 2025-12-26, push 2025-12-26)
+  4. github-mcp-server — Trend 93 (popularity 43 · release 25 · activity 25; stars 25000, release 2025-12-20, push 2025-12-31)
+  5. serena — Trend 79 (popularity 43 · release 18 · activity 18; stars 20000, release 2025-10-23, push 2025-12-22)
+  6. memory-mcp — Trend 67 (popularity 24 · release 18 · activity 25; stars 80000, release 2025-11-02, push 2025-12-28, shared-repository)
+  7. postgres-mcp — Trend 43 (popularity 33 · release 0 · activity 10; stars 2500, release 2024-11-27, push 2025-11-17)
+(exit 0)
+
+== 10. Benchmark preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)
+$ openhub benchmark memory-mcp --project examples/demo-project
+Benchmark 계획: memory-mcp (ready)
+대상: claude-code · project · .mcp.json · 서버 memory
+artifact(고정): @modelcontextprotocol/server-memory@2025.8.4
+실행: npx -y @modelcontextprotocol/server-memory@2025.8.4 (격리 임시 디렉터리, shell 없음)
+횟수: 준비 1 + 측정 5 · 제한: 시작 20초 · handshake 10초 · 회당 45초 · 전체 300초
+MCP 서버를 6번(준비 1 + 측정 5) 실행해 initialize·tools/list 응답 시간만 잽니다. MCP tool은 호출하지 않습니다(tools/call 0).
+결과: median·min·max·실패 수(p95 없음, peak RSS 미측정). 이 PC에서만 의미가 있고 저장하지 않습니다.
+승인 요구:
+  [base] 위 Benchmark 계획(MCP 서버를 격리된 임시 디렉터리에서 6번 실행, tool 호출 없음)을 확인했고 실행하는 데 동의합니다.
+  [artifact-fetch] npx·uvx·docker가 고정된 artifact를 내려받을 수 있습니다(네트워크 사용).
+plan digest: sha256:<프로젝트 위치에 따라 달라짐>
+
+[artifact-fetch] npx·uvx·docker가 고정된 artifact를 내려받을 수 있습니다(네트워크 사용).
+Benchmark를 취소했습니다. 아무것도 실행하지 않았습니다.
+(exit 1)
+
+== 요약
+가짜 fetch 응답 7회(실제 네트워크 0) · 프로세스 실행 0회

@@ -1,0 +1,13 @@
+# Secret scanning configuration (gitleaks 8.30.x).
+# Test files contain obviously fake credentials to prove that OpenHub never prints or stores them.
+# The allowlist is limited to test paths; everything else is scanned with the default rules.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fake credentials in tests and test fixtures"
+paths = [
+  '''^packages/[^/]+/test/''',
+  '''^apps/[^/]+/test/''',
+  '''^test/''',
+]

@@ -1,0 +1,34 @@
+schemaVersion: 1
+name: context7
+displayName: Context7
+summary: 라이브러리 최신 공식 문서와 코드 예시를 Agent 컨텍스트로 가져오는 MCP 서버
+repository:
+  github: upstash/context7
+category: [context, mcp]
+capabilities: [library-docs]
+targets: [claude-code, codex, cursor, vscode]
+platform: { windows: true, macos: true, linux: true }
+requirements:
+  node: ">=20.18.1"
+env:
+  - name: CONTEXT7_API_KEY
+    required: false
+    description: 사용량 한도를 늘리는 선택 API 키
+install:
+  preferredAdapter: npx
+  options:
+    command: "npx -y @upstash/context7-mcp"
+  fallback:
+    - adapter: npm
+      package: "@upstash/context7-mcp"
+healthCheck:
+  type: mcp-handshake
+update:
+  source: npm
+rollback:
+  supported: true
+verification: community
+# 추천 메타데이터(D-008): canonical MCP alias는 normalized lowercase, Registry 전체에서 유일
+recommendation:
+  identity: { mcpServerNames: [context7] }
+  source: { type: dedicated }

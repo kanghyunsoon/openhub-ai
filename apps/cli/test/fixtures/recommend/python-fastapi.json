@@ -1,0 +1,695 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": {
+    "profileSchemaVersion": 1,
+    "taxonomyVersion": 1,
+    "registryDigest": "sha256:038852e3e4e0a85b86fb6df6271037d2307b34844f289c86cf2302d10466f679",
+    "metadataCollectedAt": "2026-01-01T00:00:00Z"
+  },
+  "project": {
+    "name": "python-fastapi"
+  },
+  "assessment": {
+    "inspectedScopes": [
+      "project"
+    ],
+    "coverage": [
+      {
+        "detector": "ai-environment",
+        "status": "ok"
+      },
+      {
+        "detector": "databases",
+        "status": "ok"
+      },
+      {
+        "detector": "frameworks",
+        "status": "ok"
+      },
+      {
+        "detector": "infrastructure",
+        "status": "ok"
+      },
+      {
+        "detector": "languages",
+        "status": "ok"
+      },
+      {
+        "detector": "package-managers",
+        "status": "ok"
+      }
+    ],
+    "unresolvedInstalledTools": 0,
+    "warnings": []
+  },
+  "installedTools": [],
+  "needs": [
+    {
+      "capability": "code-editing",
+      "label": "코드 편집",
+      "priority": "low",
+      "state": "likely-gap",
+      "stateReasons": [
+        "host-unchecked"
+      ],
+      "sources": [
+        {
+          "category": "languages",
+          "itemId": "python",
+          "scope": "project",
+          "confidence": 1,
+          "strength": "strong"
+        }
+      ],
+      "satisfiedBy": [],
+      "candidates": [
+        {
+          "toolId": "serena",
+          "status": "recommended"
+        }
+      ],
+      "reasons": []
+    },
+    {
+      "capability": "db-schema-access",
+      "label": "DB 스키마 조회",
+      "priority": "high",
+      "state": "likely-gap",
+      "stateReasons": [
+        "host-unchecked"
+      ],
+      "sources": [
+        {
+          "category": "databases",
+          "itemId": "postgresql",
+          "scope": "project",
+          "confidence": 1,
+          "strength": "strong"
+        }
+      ],
+      "satisfiedBy": [],
+      "candidates": [
+        {
+          "toolId": "postgres-mcp",
+          "status": "recommended"
+        }
+      ],
+      "reasons": []
+    },
+    {
+      "capability": "library-docs",
+      "label": "라이브러리 문서 조회",
+      "priority": "medium",
+      "state": "likely-gap",
+      "stateReasons": [
+        "host-unchecked"
+      ],
+      "sources": [
+        {
+          "category": "frameworks",
+          "itemId": "fastapi",
+          "scope": "project",
+          "confidence": 1,
+          "strength": "strong"
+        }
+      ],
+      "satisfiedBy": [],
+      "candidates": [
+        {
+          "toolId": "context7",
+          "status": "recommended"
+        }
+      ],
+      "reasons": []
+    },
+    {
+      "capability": "query-tuning",
+      "label": "쿼리 튜닝",
+      "priority": "medium",
+      "state": "likely-gap",
+      "stateReasons": [
+        "host-unchecked"
+      ],
+      "sources": [
+        {
+          "category": "databases",
+          "itemId": "postgresql",
+          "scope": "project",
+          "confidence": 1,
+          "strength": "strong"
+        }
+      ],
+      "satisfiedBy": [],
+      "candidates": [
+        {
+          "toolId": "postgres-mcp",
+          "status": "recommended"
+        }
+      ],
+      "reasons": []
+    },
+    {
+      "capability": "semantic-code-navigation",
+      "label": "의미 기반 코드 탐색",
+      "priority": "medium",
+      "state": "likely-gap",
+      "stateReasons": [
+        "host-unchecked"
+      ],
+      "sources": [
+        {
+          "category": "languages",
+          "itemId": "python",
+          "scope": "project",
+          "confidence": 1,
+          "strength": "strong"
+        }
+      ],
+      "satisfiedBy": [],
+      "candidates": [
+        {
+          "toolId": "serena",
+          "status": "recommended"
+        }
+      ],
+      "reasons": []
+    },
+    {
+      "capability": "sql-query",
+      "label": "SQL 질의",
+      "priority": "high",
+      "state": "likely-gap",
+      "stateReasons": [
+        "host-unchecked"
+      ],
+      "sources": [
+        {
+          "category": "databases",
+          "itemId": "postgresql",
+          "scope": "project",
+          "confidence": 1,
+          "strength": "strong"
+        }
+      ],
+      "satisfiedBy": [],
+      "candidates": [
+        {
+          "toolId": "postgres-mcp",
+          "status": "recommended"
+        }
+      ],
+      "reasons": []
+    }
+  ],
+  "recommendations": [
+    {
+      "rank": 1,
+      "toolId": "postgres-mcp",
+      "displayName": "Postgres MCP Pro",
+      "primaryCapability": "db-schema-access",
+      "covers": [
+        {
+          "capability": "db-schema-access",
+          "state": "likely-gap",
+          "priority": "high",
+          "fitContribution": 0.72
+        },
+        {
+          "capability": "query-tuning",
+          "state": "likely-gap",
+          "priority": "medium",
+          "fitContribution": 0.61
+        },
+        {
+          "capability": "sql-query",
+          "state": "likely-gap",
+          "priority": "high",
+          "fitContribution": 0.72
+        }
+      ],
+      "projectFit": {
+        "score": 0.89,
+        "components": {
+          "needCoverage": 1,
+          "evidenceStrength": 1,
+          "stackMatch": 1,
+          "clientSupport": 0.5,
+          "environment": 0.66
+        }
+      },
+      "openScore": {
+        "kind": "repository-health-heuristic",
+        "score": 0.63,
+        "status": "ok",
+        "components": {
+          "maintenance": 0.8,
+          "release": 0.2,
+          "community": 0.54,
+          "license": 1
+        },
+        "flags": [
+          "stale-release"
+        ]
+      },
+      "compatibility": {
+        "overall": "unverified",
+        "clients": {
+          "status": "unknown",
+          "detected": [],
+          "supported": []
+        },
+        "platform": {
+          "status": "compatible",
+          "value": "linux"
+        },
+        "runtime": {
+          "status": "unknown",
+          "requirements": {
+            "python": ">=3.12"
+          }
+        },
+        "backend": {
+          "status": "unknown",
+          "options": [
+            "uvx",
+            "docker"
+          ]
+        }
+      },
+      "installation": {
+        "status": "not-installed",
+        "inspectedScopes": [
+          "project"
+        ]
+      },
+      "conflicts": [],
+      "setup": {
+        "requiredEnv": [
+          "DATABASE_URI"
+        ]
+      },
+      "reasons": [
+        {
+          "code": "need-from-evidence",
+          "message": "PostgreSQL이(가) pyproject.toml의 의존성(psycopg)에서 탐지됨 → DB 스키마 조회 필요",
+          "refs": [
+            "profile:databases/postgresql/project",
+            "evidence:databases/postgresql/project#0"
+          ]
+        },
+        {
+          "code": "gap-likely-host-unchecked",
+          "message": "DB 스키마 조회 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)",
+          "refs": [
+            "detector:ai-environment"
+          ]
+        },
+        {
+          "code": "stack-match",
+          "message": "PostgreSQL 전용 도구와 프로젝트 스택이 일치",
+          "refs": [
+            "manifest:postgres-mcp#recommendation.appliesTo.stacks",
+            "profile:databases/postgresql/project"
+          ]
+        },
+        {
+          "code": "client-unverified",
+          "message": "AI Client가 탐지되지 않아 지원 여부 미확인",
+          "refs": [
+            "manifest:postgres-mcp#targets"
+          ]
+        },
+        {
+          "code": "platform-ok",
+          "message": "현재 OS(Linux)에서 지원",
+          "refs": [
+            "manifest:postgres-mcp#platform"
+          ]
+        },
+        {
+          "code": "runtime-unverified",
+          "message": "Python >=3.12 필요(설치된 버전 미확인)",
+          "refs": [
+            "manifest:postgres-mcp#requirements.python"
+          ]
+        },
+        {
+          "code": "backend-unverified",
+          "message": "설치 방식 uvx·docker(사용 가능 여부 미확인)",
+          "refs": [
+            "manifest:postgres-mcp#install"
+          ]
+        },
+        {
+          "code": "setup-required-env",
+          "message": "환경변수 DATABASE_URI 설정 필요",
+          "refs": [
+            "manifest:postgres-mcp#env"
+          ]
+        },
+        {
+          "code": "repo-activity",
+          "message": "저장소 최근 push 45일 전(저장소 활동 신호)",
+          "refs": [
+            "metadata:crystaldba/postgres-mcp#pushedAt"
+          ]
+        },
+        {
+          "code": "repo-release",
+          "message": "최근 release 400일 전, 1년 이상 지남(유지관리 신호)",
+          "refs": [
+            "metadata:crystaldba/postgres-mcp#latestRelease"
+          ]
+        },
+        {
+          "code": "repo-community",
+          "message": "stars 2500·forks 300(커뮤니티 신호)",
+          "refs": [
+            "metadata:crystaldba/postgres-mcp#stars",
+            "metadata:crystaldba/postgres-mcp#forks"
+          ]
+        }
+      ],
+      "evidence": [
+        {
+          "category": "databases",
+          "itemId": "postgresql",
+          "scope": "project",
+          "file": "pyproject.toml",
+          "type": "dependency",
+          "value": "psycopg"
+        }
+      ]
+    },
+    {
+      "rank": 2,
+      "toolId": "serena",
+      "displayName": "Serena",
+      "primaryCapability": "semantic-code-navigation",
+      "covers": [
+        {
+          "capability": "code-editing",
+          "state": "likely-gap",
+          "priority": "low",
+          "fitContribution": 0.43
+        },
+        {
+          "capability": "semantic-code-navigation",
+          "state": "likely-gap",
+          "priority": "medium",
+          "fitContribution": 0.54
+        }
+      ],
+      "projectFit": {
+        "score": 0.71,
+        "components": {
+          "needCoverage": 0.7,
+          "evidenceStrength": 1,
+          "stackMatch": 0.5,
+          "clientSupport": 0.5,
+          "environment": 0.66
+        }
+      },
+      "openScore": {
+        "kind": "repository-health-heuristic",
+        "score": 0.96,
+        "status": "ok",
+        "components": {
+          "maintenance": 1,
+          "release": 1,
+          "community": 0.88,
+          "license": 1
+        },
+        "flags": []
+      },
+      "compatibility": {
+        "overall": "unverified",
+        "clients": {
+          "status": "unknown",
+          "detected": [],
+          "supported": []
+        },
+        "platform": {
+          "status": "compatible",
+          "value": "linux"
+        },
+        "runtime": {
+          "status": "unknown",
+          "requirements": {
+            "python": ">=3.11,<3.15"
+          }
+        },
+        "backend": {
+          "status": "unknown",
+          "options": [
+            "uvx",
+            "uv"
+          ]
+        }
+      },
+      "installation": {
+        "status": "not-installed",
+        "inspectedScopes": [
+          "project"
+        ]
+      },
+      "conflicts": [],
+      "setup": {
+        "requiredEnv": []
+      },
+      "reasons": [
+        {
+          "code": "need-from-evidence",
+          "message": "Python이(가) pyproject.toml의 매니페스트(pyproject.toml)에서 탐지됨 → 의미 기반 코드 탐색 필요",
+          "refs": [
+            "profile:languages/python/project",
+            "evidence:languages/python/project#1"
+          ]
+        },
+        {
+          "code": "gap-likely-host-unchecked",
+          "message": "의미 기반 코드 탐색 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)",
+          "refs": [
+            "detector:ai-environment"
+          ]
+        },
+        {
+          "code": "client-unverified",
+          "message": "AI Client가 탐지되지 않아 지원 여부 미확인",
+          "refs": [
+            "manifest:serena#targets"
+          ]
+        },
+        {
+          "code": "platform-ok",
+          "message": "현재 OS(Linux)에서 지원",
+          "refs": [
+            "manifest:serena#platform"
+          ]
+        },
+        {
+          "code": "runtime-unverified",
+          "message": "Python >=3.11,<3.15 필요(설치된 버전 미확인)",
+          "refs": [
+            "manifest:serena#requirements.python"
+          ]
+        },
+        {
+          "code": "backend-unverified",
+          "message": "설치 방식 uvx·uv(사용 가능 여부 미확인)",
+          "refs": [
+            "manifest:serena#install"
+          ]
+        },
+        {
+          "code": "repo-activity",
+          "message": "저장소 최근 push 10일 전(저장소 활동 신호)",
+          "refs": [
+            "metadata:oraios/serena#pushedAt"
+          ]
+        },
+        {
+          "code": "repo-release",
+          "message": "최근 release 70일 전(유지관리 신호)",
+          "refs": [
+            "metadata:oraios/serena#latestRelease"
+          ]
+        },
+        {
+          "code": "repo-community",
+          "message": "stars 20000·forks 1500(커뮤니티 신호)",
+          "refs": [
+            "metadata:oraios/serena#stars",
+            "metadata:oraios/serena#forks"
+          ]
+        }
+      ],
+      "evidence": [
+        {
+          "category": "languages",
+          "itemId": "python",
+          "scope": "project",
+          "file": "app/main.py",
+          "type": "extension-count",
+          "value": ".py 파일 1개"
+        },
+        {
+          "category": "languages",
+          "itemId": "python",
+          "scope": "project",
+          "file": "pyproject.toml",
+          "type": "manifest",
+          "value": "pyproject.toml"
+        }
+      ]
+    },
+    {
+      "rank": 3,
+      "toolId": "context7",
+      "displayName": "Context7",
+      "primaryCapability": "library-docs",
+      "covers": [
+        {
+          "capability": "library-docs",
+          "state": "likely-gap",
+          "priority": "medium",
+          "fitContribution": 0.54
+        }
+      ],
+      "projectFit": {
+        "score": 0.68,
+        "components": {
+          "needCoverage": 0.6,
+          "evidenceStrength": 1,
+          "stackMatch": 0.5,
+          "clientSupport": 0.5,
+          "environment": 0.66
+        }
+      },
+      "openScore": {
+        "kind": "repository-health-heuristic",
+        "score": 0.96,
+        "status": "ok",
+        "components": {
+          "maintenance": 1,
+          "release": 1,
+          "community": 0.88,
+          "license": 1
+        },
+        "flags": []
+      },
+      "compatibility": {
+        "overall": "unverified",
+        "clients": {
+          "status": "unknown",
+          "detected": [],
+          "supported": []
+        },
+        "platform": {
+          "status": "compatible",
+          "value": "linux"
+        },
+        "runtime": {
+          "status": "unknown",
+          "requirements": {
+            "node": ">=20.18.1"
+          }
+        },
+        "backend": {
+          "status": "unknown",
+          "options": [
+            "npx",
+            "npm"
+          ]
+        }
+      },
+      "installation": {
+        "status": "not-installed",
+        "inspectedScopes": [
+          "project"
+        ]
+      },
+      "conflicts": [],
+      "setup": {
+        "requiredEnv": []
+      },
+      "reasons": [
+        {
+          "code": "need-from-evidence",
+          "message": "FastAPI이(가) pyproject.toml의 의존성(fastapi)에서 탐지됨 → 라이브러리 문서 조회 필요",
+          "refs": [
+            "profile:frameworks/fastapi/project",
+            "evidence:frameworks/fastapi/project#0"
+          ]
+        },
+        {
+          "code": "gap-likely-host-unchecked",
+          "message": "라이브러리 문서 조회 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)",
+          "refs": [
+            "detector:ai-environment"
+          ]
+        },
+        {
+          "code": "client-unverified",
+          "message": "AI Client가 탐지되지 않아 지원 여부 미확인",
+          "refs": [
+            "manifest:context7#targets"
+          ]
+        },
+        {
+          "code": "platform-ok",
+          "message": "현재 OS(Linux)에서 지원",
+          "refs": [
+            "manifest:context7#platform"
+          ]
+        },
+        {
+          "code": "runtime-unverified",
+          "message": "Node.js >=20.18.1 필요(설치된 버전 미확인)",
+          "refs": [
+            "manifest:context7#requirements.node"
+          ]
+        },
+        {
+          "code": "backend-unverified",
+          "message": "설치 방식 npx·npm(사용 가능 여부 미확인)",
+          "refs": [
+            "manifest:context7#install"
+          ]
+        },
+        {
+          "code": "repo-activity",
+          "message": "저장소 최근 push 2일 전(저장소 활동 신호)",
+          "refs": [
+            "metadata:upstash/context7#pushedAt"
+          ]
+        },
+        {
+          "code": "repo-release",
+          "message": "최근 release 5일 전(유지관리 신호)",
+          "refs": [
+            "metadata:upstash/context7#latestRelease"
+          ]
+        },
+        {
+          "code": "repo-community",
+          "message": "stars 45000·forks 2500(커뮤니티 신호)",
+          "refs": [
+            "metadata:upstash/context7#stars",
+            "metadata:upstash/context7#forks"
+          ]
+        }
+      ],
+      "evidence": [
+        {
+          "category": "frameworks",
+          "itemId": "fastapi",
+          "scope": "project",
+          "file": "pyproject.toml",
+          "type": "dependency",
+          "value": "fastapi"
+        }
+      ]
+    }
+  ]
+}

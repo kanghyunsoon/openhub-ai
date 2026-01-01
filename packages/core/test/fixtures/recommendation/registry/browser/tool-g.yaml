@@ -1,0 +1,19 @@
+schemaVersion: 1
+name: tool-g
+displayName: Tool G
+summary: synthetic fixture tool-g
+repository: { github: example/tool-g }
+category: [browser, mcp]
+capabilities: [browser-automation]
+targets: [vscode]
+platform: { windows: false, macos: true, linux: false }
+requirements:
+  node: ">=99"
+install: { preferredAdapter: docker }
+healthCheck: { type: mcp-handshake }
+update: { source: github-release }
+rollback: { supported: true }
+verification: community
+recommendation:
+  identity: { mcpServerNames: [tool-g] }
+  source: { type: dedicated }

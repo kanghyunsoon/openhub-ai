@@ -1,0 +1,38 @@
+name: Pinokio E2E (manual)
+
+# 실제 Pinokio 연동은 수동 실행에서만 조사한다(D-033). PR·push·schedule trigger가 없어 필수 check가 될 수 없고
+# 실패해도 merge를 막지 않는다. 공식 지원 범위는 pterm 0.0.25이며 이 job의 결과는 문서에만 반영한다.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinokio-e2e:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: 호환성 보고서(npm 최신 pterm·pinokiod, 지원 상수는 바꾸지 않음)
+        run: pnpm pinokio:compat pinokio-compat-report.json
+      - name: pterm 0.0.25 설치(지원 버전 정확히)
+        run: npm install -g pterm@0.0.25
+      - name: 실제 Pinokio 연동 E2E(runner에 pinokiod가 없으면 실패로 기록된다)
+        run: pnpm exec vitest run packages/core/test/pinokio/e2e.test.ts
+        env:
+          OPENHUB_E2E: "1"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pinokio-compat-report
+          path: pinokio-compat-report.json
+          if-no-files-found: ignore

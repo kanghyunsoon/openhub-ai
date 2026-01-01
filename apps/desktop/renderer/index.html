@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:" />
+    <title>OpenHub AI</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>OpenHub AI</h1>
+        <p class="tagline">Project-Aware AI Tool Lifecycle Manager</p>
+      </div>
+      <p id="status" class="status">Registry 불러오는 중…</p>
+    </header>
+    <main>
+      <aside>
+        <section class="onboarding" id="onboarding" aria-label="처음 사용 안내">
+          <h3>처음 사용 안내</h3>
+          <ol id="onboarding-steps" class="onboarding-steps"></ol>
+          <p class="notice">이 안내는 아무것도 저장하지 않습니다. 프로젝트를 고르면 사라집니다.</p>
+        </section>
+        <section class="card">
+          <h2>PROJECT</h2>
+          <button id="project-select" type="button">프로젝트 선택</button>
+          <p id="project-status" class="todo">분석할 프로젝트 폴더를 고르세요.</p>
+          <div id="project-body"></div>
+        </section>
+        <section class="card" id="for-you">
+          <h2>FOR YOU</h2>
+          <p id="for-you-status" class="todo">프로젝트를 선택하면 맞춤 추천을 보여줍니다.</p>
+          <ol id="for-you-list" class="for-you"></ol>
+          <div id="for-you-gaps"></div>
+          <p id="for-you-open-unavailable" class="todo" hidden></p>
+          <p class="notice">OpenScore는 저장소 유지관리·활동성·커뮤니티 신호이며 보안·코드 품질 평가가 아닙니다</p>
+          <div id="install-panel" class="install-panel" hidden></div>
+        </section>
+        <section class="card" id="lifecycle">
+          <h2>INSTALLED</h2>
+          <p id="lifecycle-status" class="todo">프로젝트를 선택하면 OpenHub가 설치한 도구의 버전·drift·Health 상태를 보여줍니다.</p>
+          <ol id="lifecycle-list" class="lifecycle"></ol>
+          <div id="lifecycle-panel" class="install-panel" hidden></div>
+          <div class="subsection" id="adopt">
+            <h3>ADOPT · 이미 설정된 도구 관리 등록</h3>
+            <p id="adopt-status" class="todo">프로젝트를 선택하면 OpenHub가 관리하지 않는 설정 중 식별된 항목을 보여줍니다.</p>
+            <ol id="adopt-list" class="lifecycle"></ol>
+            <p class="notice">Benchmark는 승인이 필요한 실행입니다(MCP 서버를 6번 실행, tool 호출 없음).</p>
+            <div id="adopt-panel" class="install-panel" hidden></div>
+          </div>
+          <div class="subsection" id="pinokio">
+            <h3>PINOKIO</h3>
+            <p class="todo">OpenHub가 생성하는 제한 script의 설치 계획과 제3자 script 원문을 미리 봅니다. 이 화면에는 실행 버튼이 없습니다.</p>
+            <p class="notice">Pinokio 지원은 pterm 0.0.25 기준입니다. 기본 테스트는 가짜 pinokiod를 쓰고 실제 Pinokio 연동은 OPENHUB_E2E=1일 때만 실행합니다.</p>
+            <div id="pinokio-body"></div>
+            <div id="pinokio-panel" class="install-panel" hidden></div>
+          </div>
+        </section>
+      </aside>
+      <section class="registry" id="discover">
+        <h2>DISCOVER</h2>
+        <div id="discover-tabs" class="tabs" role="tablist"></div>
+        <p id="discover-status" class="todo"></p>
+        <div id="tool-detail" class="install-panel detail" hidden></div>
+        <div class="tab-panel" id="discover-new" data-tab="new" hidden>
+          <p class="notice">이 프로젝트의 FOR YOU 추천 중 최근 Registry에 등록된 도구입니다.</p>
+          <ol id="discover-new-list" class="discover-list"></ol>
+        </div>
+        <div class="tab-panel" id="discover-trending" data-tab="trending" hidden>
+          <p class="notice" id="trend-meaning"></p>
+          <ol id="discover-trending-list" class="discover-list"></ol>
+        </div>
+        <div class="tab-panel" id="discover-verified" data-tab="verified">
+          <h3>Verified Registry <span class="hint">Star 순 · 추천 순서 아님</span></h3>
+          <ul id="issues" class="issues" hidden></ul>
+          <ol id="tools"></ol>
+        </div>
+        <div class="tab-panel" id="discover-candidates" data-tab="candidates" hidden>
+          <p class="notice">Candidate는 검증되지 않은 외부 발견 결과입니다. 설치·Adopt·업데이트할 수 없고 설명·설치 문구는 실행하지 않는 텍스트입니다.</p>
+          <p id="candidate-result" class="todo"></p>
+          <ol id="discover-candidates-list" class="discover-list"></ol>
+        </div>
+      </section>
+    </main>
+    <script src="renderer.js"></script>
+    <script src="onboarding.js"></script>
+    <script src="project.js"></script>
+    <script src="for-you.js"></script>
+    <script src="install.js"></script>
+    <script src="lifecycle.js"></script>
+    <script src="release.js"></script>
+    <script src="llm.js"></script>
+    <script src="discover.js"></script>
+    <script src="detail.js"></script>
+    <script src="adopt.js"></script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+Memory MCP (memory-mcp) 업데이트 영향
+
+버전        2025.8.4 → 2025.9.25
+판정        HIGH (WARNING)
+이유
+  - notes-breaking (high)
+  - notes-migration (medium)
+  - version-minor (low)
+근거
+  - release-note 2025.9.1: line 1
+  - release-note 2025.9.1: line 2
+  - version npm: 2025.8.4 -> 2025.9.25
+영향 파일   .mcp.json
+
+Impact는 판단 근거이며 승인이 아닙니다. 실행은 openhub update의 계획·승인을 거칩니다.

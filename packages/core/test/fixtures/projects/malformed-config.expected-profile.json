@@ -1,0 +1,233 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "name": "malformed-config"
+  },
+  "languages": [
+    {
+      "id": "java",
+      "name": "Java",
+      "scope": "project",
+      "confidence": 0.6,
+      "evidence": [
+        {
+          "file": "pom.xml",
+          "type": "file-presence",
+          "value": "pom.xml"
+        }
+      ]
+    },
+    {
+      "id": "javascript",
+      "name": "JavaScript",
+      "scope": "project",
+      "confidence": 0.6,
+      "evidence": [
+        {
+          "file": "package.json",
+          "type": "file-presence",
+          "value": "package.json"
+        }
+      ]
+    },
+    {
+      "id": "python",
+      "name": "Python",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "requirements.txt",
+          "type": "manifest",
+          "value": "requirements.txt"
+        }
+      ]
+    },
+    {
+      "id": "typescript",
+      "name": "TypeScript",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "tsconfig.json",
+          "type": "config",
+          "value": "tsconfig.json"
+        }
+      ]
+    }
+  ],
+  "frameworks": [
+    {
+      "id": "fastapi",
+      "name": "FastAPI",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "requirements.txt",
+          "type": "dependency",
+          "value": "fastapi"
+        }
+      ]
+    }
+  ],
+  "databases": [
+    {
+      "id": "postgresql",
+      "name": "PostgreSQL",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "requirements.txt",
+          "type": "dependency",
+          "value": "psycopg"
+        }
+      ]
+    }
+  ],
+  "packageManagers": [
+    {
+      "id": "maven",
+      "name": "Maven",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "pom.xml",
+          "type": "manifest",
+          "value": "pom.xml"
+        }
+      ]
+    },
+    {
+      "id": "pip",
+      "name": "pip",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "requirements.txt",
+          "type": "manifest",
+          "value": "requirements.txt"
+        }
+      ]
+    }
+  ],
+  "infrastructure": [
+    {
+      "id": "docker-compose",
+      "name": "Docker Compose",
+      "scope": "project",
+      "confidence": 0.6,
+      "evidence": [
+        {
+          "file": "docker-compose.yml",
+          "type": "file-presence",
+          "value": "docker-compose.yml"
+        }
+      ]
+    }
+  ],
+  "aiClients": [
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": ".mcp.json",
+          "type": "file-presence",
+          "value": ".mcp.json"
+        },
+        {
+          "file": "CLAUDE.md",
+          "type": "config",
+          "value": "CLAUDE.md"
+        }
+      ]
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": ".codex/config.toml",
+          "type": "config",
+          "value": "config.toml"
+        }
+      ]
+    }
+  ],
+  "aiTools": [
+    {
+      "id": "context7",
+      "name": "context7",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": ".codex/config.toml",
+          "type": "config",
+          "value": "context7 (http)"
+        }
+      ],
+      "kind": "mcp-server",
+      "clients": [
+        "codex"
+      ]
+    }
+  ],
+  "detectors": [
+    {
+      "id": "ai-environment",
+      "status": "partial"
+    },
+    {
+      "id": "databases",
+      "status": "partial"
+    },
+    {
+      "id": "frameworks",
+      "status": "partial"
+    },
+    {
+      "id": "infrastructure",
+      "status": "partial"
+    },
+    {
+      "id": "languages",
+      "status": "partial"
+    },
+    {
+      "id": "package-managers",
+      "status": "partial"
+    }
+  ],
+  "warnings": [
+    {
+      "code": "parse-failed",
+      "message": "JSON 형식이 올바르지 않아 해석하지 못했습니다",
+      "file": ".mcp.json"
+    },
+    {
+      "code": "parse-failed",
+      "message": "YAML 형식이 올바르지 않아 해석하지 못했습니다",
+      "file": "docker-compose.yml"
+    },
+    {
+      "code": "parse-failed",
+      "message": "JSON 형식이 올바르지 않아 해석하지 못했습니다",
+      "file": "package.json"
+    },
+    {
+      "code": "parse-failed",
+      "message": "XML 형식이 올바르지 않아 해석하지 못했습니다",
+      "file": "pom.xml"
+    }
+  ]
+}

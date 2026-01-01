@@ -1,0 +1,17 @@
+schemaVersion: 1
+name: tool-d
+displayName: Tool D
+summary: synthetic fixture tool-d
+repository: { github: example/tool-d }
+category: [testing, mcp]
+capabilities: [e2e-testing]
+targets: [claude-code, codex, cursor]
+platform: { windows: true, macos: true, linux: true }
+install: { preferredAdapter: npx }
+healthCheck: { type: mcp-handshake }
+update: { source: github-release }
+rollback: { supported: true }
+verification: community
+recommendation:
+  identity: { mcpServerNames: [tool-d] }
+  source: { type: dedicated }

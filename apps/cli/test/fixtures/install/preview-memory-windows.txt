@@ -1,0 +1,25 @@
+Memory MCP (memory-mcp) 설치 계획
+
+설치 상태    프로젝트 범위 기준 미설치(사용자 범위 미검사)
+검사 범위    프로젝트
+Backend      npx
+준비 단계    없음 — OpenHub는 아무것도 실행하지 않고, Client가 처음 실행할 때 패키지를 받습니다(launch-on-demand)
+Client 실행 명령  cmd /d /c npx -y @modelcontextprotocol/server-memory
+  Windows 호환 정책(OpenHub): Client가 npx를 실행할 수 있도록 설정 파일에 cmd /d /c npx 형태로 기록합니다. OpenHub는 이 명령을 실행하지 않습니다.
+
+변경 파일
+  - .cursor/mcp.json (Cursor, 프로젝트 범위) mcpServers.memory 항목 추가 · 새 파일
+
+환경변수
+  (필요 없음)
+
+충돌         없음
+
+Warnings
+  - [floating-artifact] 이 설치 계획은 실행 명령과 설정을 고정하지만, 원격 패키지 내용 자체는 고정하지 않습니다. 동일한 계획을 나중에 실행하면 다른 artifact가 내려올 수 있습니다.
+
+승인 항목
+  - [base] 위 설치 계획(실행 명령, 쓰는 설정 파일, 네트워크 사용)을 확인했고 이대로 실행하는 데 동의합니다.
+  - [floating-artifact] 원격 패키지 버전이 고정되어 있지 않습니다. 나중에 실행하면 다른 artifact가 내려올 수 있습니다.
+
+Plan digest  sha256:39bc907c1ba8d4e20f0b38604b9cde4204f90f5dbadf63bc90276440aab9cd94

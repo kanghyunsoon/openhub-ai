@@ -1,0 +1,18 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+.openhub-cache/
+# Candidate Contribution Package 출력(openhub candidate prepare, 사람이 검토 후 직접 제출)
+contrib/
+# pnpm metrics·sandbox workflow 출력
+metrics-report/
+sandbox-report.json
+sandbox-vitest.json
+# 배포 산출물(pnpm pack:cli·pack:desktop)과 Desktop 개발용 Registry staging(TASK-071)
+release-out/
+apps/desktop/resources/
+.DS_Store
+Thumbs.db
