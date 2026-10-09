@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -92,10 +92,25 @@ describe("결과 진단: Docker·Docker Compose는 환경 정보라 '연결 규�
     }
   });
 
-  it("Kubernetes need는 Docker와 함께 있어도 '검증 도구 없음'으로 계속 보인다", async () => {
+  it("Docker를 진단 목록에서 빼도 검증 도구가 없는 실제 need는 계속 보인다(Docker + Unity 에디터 프로젝트)", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "openhub-docker-unity-"));
+    try {
+      await mkdir(path.join(root, "ProjectSettings"), { recursive: true });
+      await writeFile(path.join(root, "ProjectSettings", "ProjectVersion.txt"), "m_EditorVersion: 6000.0.23f1\n");
+      await writeFile(path.join(root, "Dockerfile"), "FROM alpine:3.20\n");
+      const r = await analyzeProject(root);
+      if (!r.ok) throw new Error(r.error.code);
+      const d = diagnoseRecommendation(r.profile, recommend(r.profile, seed, undefined, { platform: "linux" }));
+      expect(d).toEqual({ emptyReason: "no-verified-tool", unmappedTechs: [], needsWithoutVerifiedTool: ["game-engine-editor"] });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("Kubernetes need는 Docker와 함께 있어도 그대로 이어지고 이제 검증 도구가 있다(P0-2 batch 1)", async () => {
     const r = await analyzeProject(path.join(FIXTURES, "k8s-deploy"));
     if (!r.ok) throw new Error(r.error.code);
     const d = diagnoseRecommendation(r.profile, recommend(r.profile, seed, undefined, { platform: "linux" }));
-    expect(d).toEqual({ emptyReason: "no-verified-tool", unmappedTechs: [], needsWithoutVerifiedTool: ["kubernetes-operations"] });
+    expect(d).toEqual({ emptyReason: null, unmappedTechs: [], needsWithoutVerifiedTool: [] });
   });
 });

@@ -1,3 +1,4 @@
+import { readdirSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -11,6 +12,10 @@ import { memoryIO } from "./helpers";
  * 저장소 밖 cwd에서 실행한다(in-process, network 0). 실제 tgz 설치 smoke는 test/packaging.test.ts다.
  */
 const REPO = path.resolve(import.meta.dirname, "../../..");
+/** registry/<category>/<name>.yaml Manifest 수(v0.2.0 P0-2부터 묶음마다 늘어나므로 숫자를 박지 않는다). */
+const REGISTRY_MANIFEST_COUNT = readdirSync(path.join(REPO, "registry"), { withFileTypes: true })
+  .filter((d) => d.isDirectory())
+  .flatMap((d) => readdirSync(path.join(REPO, "registry", d.name)).filter((f) => f.endsWith(".yaml"))).length;
 const SEED = path.join(REPO, "packages/core/test/fixtures/recommendation/metadata.seed-synthetic.json");
 const scratch = await mkdtemp(path.join(tmpdir(), "openhub-cli-packaging-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));
@@ -43,14 +48,14 @@ describe("REQ-065 TASK-071 CLI 배포", () => {
   it("AC-071-03 저장소 밖 cwd에서 패키지 리소스 Registry로 registry list·project scan·doctor가 동작한다", async () => {
     const { io } = await installedLayout();
     expect(await runCli(["registry", "list", "--json"], io)).toBe(0);
-    expect((JSON.parse(io.stdout.join("\n")) as unknown[]).length).toBe(7);
+    expect((JSON.parse(io.stdout.join("\n")) as unknown[]).length).toBe(REGISTRY_MANIFEST_COUNT);
     io.stdout.length = 0;
     expect(await runCli(["project", "scan", path.join(REPO, "packages/core/test/fixtures/projects/react-spring-monorepo"), "--json"], io)).toBe(0);
     expect(JSON.parse(io.stdout.join("\n"))).toMatchObject({ schemaVersion: expect.any(Number) });
     io.stdout.length = 0;
     expect(await runCli(["doctor", "--json"], io)).toBe(0);
     const doc = JSON.parse(io.stdout.join("\n")) as { registry: { source: string; manifests: number }; metadata: { source: string; collectedAt: string | null } };
-    expect(doc.registry).toMatchObject({ source: "설치 패키지의 registry", manifests: 7 });
+    expect(doc.registry).toMatchObject({ source: "설치 패키지의 registry", manifests: REGISTRY_MANIFEST_COUNT });
     expect(doc.metadata.source).toContain("포함 snapshot");
     expect(doc.metadata.collectedAt).not.toBeNull();
     expect(io.stdout.join("\n")).not.toContain(scratch);

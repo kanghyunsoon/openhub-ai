@@ -121,7 +121,7 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     expect(tokenizeManifestCommand("npx ~/evil", "npx")).toMatchObject({ ok: false });
   });
 
-  it("AC-030-05 seed 7개의 launch spec이 golden과 같다(npx 4, uvx 2, docker 1, linux·windows)", async () => {
+  it("AC-030-05 seed Registry의 launch spec이 golden과 같다(npx 5, uvx 2, docker 1, linux·windows)", async () => {
     // D-016 반영으로 launch에 platform·clientSpec(Client config에 실제 기록될 command/args)이 추가돼 golden을 두 플랫폼으로 갱신했다.
     const specsFor = (platform: "linux" | "windows") =>
       Object.fromEntries(
@@ -132,7 +132,8 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
       );
     const linux = specsFor("linux");
     const counts = Object.values(linux).reduce<Record<string, number>>((acc, s) => ((acc[s.backend ?? "none"] = (acc[s.backend ?? "none"] ?? 0) + 1), acc), {});
-    expect(counts).toEqual({ npx: 4, uvx: 2, docker: 1 });
+    // v0.2.0 P0-2 batch 1: kubernetes-mcp-server(npx) 추가. 기존 7개 항목은 그대로다.
+    expect(counts).toEqual({ npx: 5, uvx: 2, docker: 1 });
     await expectInstallerGolden("seed-launch-specs.json", json({ linux, windows: specsFor("windows") }));
   });
 
@@ -184,7 +185,7 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     expect(isPinnedArtifact("npx", npxArtifact(["--package", "x", "@scope/pkg@1.2.3"]))).toBe(false);
   });
 
-  it("AC-030-09 uvx ==X.Y.Z와 docker @sha256만 pinned이고 seed 7개는 모두 floating으로 golden과 같다", async () => {
+  it("AC-030-09 uvx ==X.Y.Z와 docker @sha256만 pinned이고 seed Registry는 모두 floating으로 golden과 같다", async () => {
     expect(isPinnedArtifact("uvx", uvxArtifact(["postgres-mcp==0.3.0"]))).toBe(true);
     expect(isPinnedArtifact("uvx", uvxArtifact(["--from", "serena-agent==1.2.3", "serena"]))).toBe(true);
     for (const args of [["postgres-mcp"], ["postgres-mcp>=0.3"], ["postgres-mcp==0.3"], ["--python", "3.12", "postgres-mcp==0.3.0"], ["--from", "serena-agent", "serena"]]) {

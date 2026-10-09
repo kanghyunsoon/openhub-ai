@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadRegistry, parseManifest, type Manifest, type RegistryEntry } from "../../src/index";
 import { checkRecommendationMetadata } from "../../src/registry/recommendation-checks";
-import { FIXTURES_DIR, REPO_ROOT } from "./helpers";
+import { FIXTURES_DIR, REPO_ROOT, registryManifestCount } from "./helpers";
 
 let root: string;
 beforeEach(async () => {
@@ -125,15 +125,15 @@ describe("REQ-020 Registry Recommendation Metadata", () => {
     }
   });
 
-  it("AC-018-07 seed 7개는 recommendation 블록과 함께 registry 검증을 통과한다", async () => {
+  it("AC-018-07 seed Manifest 전체는 recommendation 블록과 함께 registry 검증을 통과한다", async () => {
     const r = await loadRegistry(path.join(REPO_ROOT, "registry"));
     expect(r.issues).toEqual([]);
-    expect(r.entries).toHaveLength(7);
+    expect(r.entries).toHaveLength(registryManifestCount());
     const get = (name: string) => r.entries.find((e) => e.manifest.name === name)?.manifest.recommendation;
     expect(get("memory-mcp")?.source).toEqual({ type: "shared-repo", path: "src/memory" });
     expect(get("postgres-mcp")?.appliesTo?.stacks).toEqual(["postgresql"]);
     const aliases = r.entries.flatMap((e) => e.manifest.recommendation?.identity?.mcpServerNames ?? []);
-    expect(aliases.length).toBe(7);
+    expect(aliases.length).toBe(registryManifestCount());
     expect(new Set(aliases.map((a) => a.toLowerCase())).size).toBe(aliases.length);
     for (const e of r.entries) expect(e.manifest.recommendation?.source?.type).toBeDefined();
   });

@@ -32,7 +32,8 @@ describe("REQ-020 Capability Taxonomy와 Need Rules", () => {
     }
     const { entries } = await loadRegistry(path.join(REPO_ROOT, "registry"));
     const seedCapabilities = new Set(entries.flatMap((e) => e.manifest.capabilities));
-    expect(seedCapabilities.size).toBe(14);
+    // P0-2 batch 1: kubernetes-mcp-server가 kubernetes-operations를 처음 제공한다. game-engine-editor는 아직 도구가 없다.
+    expect([...seedCapabilities].sort()).toEqual([...CAPABILITIES.map((c) => c.id).filter((id) => id !== "game-engine-editor")].sort());
     for (const id of seedCapabilities) expect(isCapabilityId(id)).toBe(true);
   });
 

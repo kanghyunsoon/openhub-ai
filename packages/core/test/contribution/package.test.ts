@@ -128,7 +128,8 @@ describe("REQ-064 Candidate Contribution Package", () => {
     expect(catalog.startsWith(CATALOG.replace(/\n$/u, ""))).toBe(true);
     expect(catalog.trimEnd().split("\n").at(-1)).toBe('  weather-mcp: { addedAt: "2026-10-07" }');
     // 적용 결과는 사람이 verification을 올리기 전까지 draft라서 fast validation이 그 한 가지만 막는다.
-    const v = await validateRegistry(path.join(root, "registry"), { catalog: { asOf: ASOF } });
+    // catalog 검증 기준일은 실제 Registry의 가장 최근 addedAt(2026-10-09, P0-2 batch 1) 이후여야 한다. 패키지 내용은 ASOF 기준 그대로다.
+    const v = await validateRegistry(path.join(root, "registry"), { catalog: { asOf: new Date("2026-10-09T03:00:00.000Z") } });
     expect(v.issues.map((i) => [i.file, i.path])).toEqual([["mcp/weather-mcp.yaml", "verification"]]);
   });
 
