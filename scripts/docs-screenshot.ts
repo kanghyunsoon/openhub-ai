@@ -9,7 +9,7 @@ import path from "node:path";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const out = path.join(ROOT, "docs", "images", "desktop.png");
 mkdirSync(path.dirname(out), { recursive: true });
-const env = {
+const env: NodeJS.ProcessEnv = {
   ...process.env,
   OPENHUB_SMOKE_PROJECT: path.join(ROOT, "examples", "demo-project"),
   OPENHUB_METADATA: path.join(ROOT, "packages/core/test/fixtures/recommendation/metadata.seed-synthetic.json"),
