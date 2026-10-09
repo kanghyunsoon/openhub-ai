@@ -113,7 +113,7 @@ release 산출물에는 CycloneDX SBOM과 `SHA256SUMS`가 함께 있습니다. S
 
 ## 아키텍처
 
-TypeScript monorepo입니다. `packages/core`에 분석·Registry·추천·설치·lifecycle·release 로직이 있고 `apps/cli`와 `apps/desktop`(Electron)은 그 위의 얇은 화면입니다. `registry/`에 검토된 Manifest가 있습니다. [아키텍처](docs/architecture.md)와 [문제 해결](docs/troubleshooting.md)을 참고하세요.
+TypeScript monorepo입니다. `packages/core`에 분석·Registry·추천·설치·lifecycle·release 로직이 있고 `apps/cli`와 `apps/desktop`(Electron)은 그 위의 얇은 화면입니다. `registry/`에 검토된 Manifest가 있습니다. [아키텍처](docs/architecture.md)와 [문제 해결](docs/troubleshooting.md)을 참고하세요. 앞으로의 계획은 [로드맵](docs/roadmap.md)과 [specs](docs/specs/)에 있습니다(영문).
 
 ## 기여
 

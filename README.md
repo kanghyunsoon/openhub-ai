@@ -113,7 +113,7 @@ The desktop app has four areas: **PROJECT** (choose and analyze a folder), **FOR
 
 ## Architecture
 
-A TypeScript monorepo: `packages/core` holds the analyzer, Registry, recommendation, installer, lifecycle and release logic; `apps/cli` and `apps/desktop` (Electron) are thin front ends over it; `registry/` holds the curated Manifests. See [Architecture](docs/architecture.md) and [Troubleshooting](docs/troubleshooting.md).
+A TypeScript monorepo: `packages/core` holds the analyzer, Registry, recommendation, installer, lifecycle and release logic; `apps/cli` and `apps/desktop` (Electron) are thin front ends over it; `registry/` holds the curated Manifests. See [Architecture](docs/architecture.md) and [Troubleshooting](docs/troubleshooting.md). Planned work is in the [Roadmap](docs/roadmap.md) and the [specs](docs/specs/).
 
 ## Contributing
 
