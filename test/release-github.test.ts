@@ -121,7 +121,8 @@ describe("같은 tag의 Release 판정과 draft notes 갱신", () => {
 
 describe("GitHub Release API 기준 asset 검증", () => {
   it("v0.1.0 실제 asset 8개(이름·크기·digest)는 통과한다", () => {
-    expect(verify([release({ id: 1 })])).toEqual({ ok: true, releaseId: 1, errors: [], warnings: [] });
+    // 로컬 파일이 없으면 SHA256SUMS가 덮는 6개만 digest를 비교했다고 보고한다.
+    expect(verify([release({ id: 1 })])).toEqual({ ok: true, releaseId: 1, errors: [], warnings: [], digestVerified: V010.slice(0, 6).map(([n]) => n), digestUnchecked: ["release-coverage.json", "SHA256SUMS"] });
   });
 
   it("asset 하나가 빠지거나, 이름이 중복되거나, 업로드 중이거나, 크기 0이거나, digest가 다르면 실패한다", () => {
@@ -140,7 +141,46 @@ describe("GitHub Release API 기준 asset 검증", () => {
     expect(renamed.errors).toContain("Release asset 없음: openhub-ai-0.1.0.tgz");
     const extra = verify([release({ id: 1, assets: [...V010.map((a) => asset(a)), asset(["notes.txt", 3, "a".repeat(64)])] })]);
     expect(extra).toMatchObject({ ok: true, warnings: ["계약 밖 asset: notes.txt"] });
-    expect(verify([release({ id: 1, assets: V010.map((a) => asset(a, { digest: null })) })])).toMatchObject({ ok: true, warnings: V010.map(([n]) => "GitHub digest 없음: " + n) });
+  });
+
+  it("SHA256SUMS가 덮는 6개는 GitHub digest가 없거나 형식이 틀리거나 다르면 실패한다(경고로 넘어가지 않는다)", () => {
+    const noDigest = verify([release({ id: 1, draft: false, published_at: "2026-10-09T11:07:42Z", assets: V010.map((a) => asset(a, { digest: null })) })], "published");
+    expect(noDigest.ok).toBe(false);
+    expect(noDigest.errors).toEqual(V010.slice(0, 6).map(([n]) => "GitHub digest 없음: " + n));
+    // 독립 기대 해시가 없는 두 파일은 digest가 없어도 실패로 만들지 않지만 검증했다고도 하지 않는다.
+    expect(noDigest.digestVerified).toEqual([]);
+    expect(noDigest.digestUnchecked).toEqual(["release-coverage.json", "SHA256SUMS"]);
+    const undef = verify([release({ id: 1, assets: V010.map((a, i) => (i === 0 ? { name: a[0], size: a[1], state: "uploaded" } : asset(a))) })]);
+    expect(undef.errors).toEqual(["GitHub digest 없음: openhub-ai-0.1.0.tgz"]);
+    for (const bad of ["sha256:" + "A".repeat(64), "sha256:abc", "md5:" + "0".repeat(32), V010[1]![2], "sha512:" + V010[1]![2]]) {
+      const r = verify([release({ id: 1, assets: V010.map((a, i) => asset(a, i === 1 ? { digest: bad } : {})) })]);
+      expect(r.errors, bad).toEqual(["GitHub digest 형식 오류: OpenHub-AI-Setup-0.1.0-x64.exe"]);
+    }
+  });
+
+  it("draft 검증에서 로컬 파일이 있으면 release-coverage.json·SHA256SUMS를 포함한 8개 digest를 로컬 해시와 비교한다", () => {
+    const local: LocalAsset[] = V010.map(([name, size, sha]) => ({ name, size, sha256: sha }));
+    const check = (assets: GithubAsset[]) => verifyGithubRelease({ tag: "v0.1.0", version: "0.1.0", releases: [release({ id: 1, assets })], expect: "draft", sums: SUMS_010, local });
+    expect(check(V010.map((a) => asset(a)))).toMatchObject({ ok: true, digestVerified: V010.map(([n]) => n), digestUnchecked: [] });
+    expect(check(V010.map((a) => (a[0] === "release-coverage.json" ? asset(a, { digest: null }) : asset(a)))).errors).toEqual(["GitHub digest 없음: release-coverage.json"]);
+    expect(check(V010.map((a) => (a[0] === "SHA256SUMS" ? asset(a, { digest: "sha256:" + "1".repeat(64) }) : asset(a)))).errors).toEqual(["digest 불일치: SHA256SUMS"]);
+    // 로컬 파일이 SHA256SUMS와 다르면(digest가 SHA256SUMS와 같아도) 실패한다.
+    const drifted = local.map((f) => (f.name === "openhub-ai-0.1.0.tgz" ? { ...f, sha256: "2".repeat(64) } : f));
+    expect(verifyGithubRelease({ tag: "v0.1.0", version: "0.1.0", releases: [release({ id: 1 })], expect: "draft", sums: SUMS_010, local: drifted }).errors).toEqual(["digest 불일치: openhub-ai-0.1.0.tgz"]);
+  });
+
+  it("workflow를 다시 실행하면 같은 draft를 재사용하고, notes 갱신은 tag를 보존하며 asset 검증은 그대로 통과한다", () => {
+    // 1회차: Release 없음 → 생성. 생성 뒤 API에는 그 draft 하나가 보인다.
+    expect(planDraftRelease([], "v0.1.0")).toEqual({ action: "create" });
+    const created = release({ id: 5 });
+    // 2회차(재실행): 같은 draft를 재사용한다(새 Release를 만들지 않는다).
+    expect(planDraftRelease([created], "v0.1.0")).toEqual({ action: "reuse", releaseId: 5 });
+    const payload = draftNotesUpdate(created, "v0.1.0", { body: "new notes" });
+    // GitHub가 PATCH 본문을 반영한 상태: notes만 바뀌고 tag·asset은 그대로다.
+    const afterPatch: GithubRelease = { ...created, body: payload.body, name: payload.name, tag_name: payload.tag_name, draft: payload.draft };
+    expect(afterPatch.assets).toBe(created.assets);
+    expect(verify([afterPatch])).toMatchObject({ ok: true, releaseId: 5 });
+    expect(planDraftRelease([afterPatch], "v0.1.0")).toEqual({ action: "reuse", releaseId: 5 });
   });
 
   it("로컬 dist가 있으면 Release asset 크기가 로컬 파일과 같아야 한다", () => {

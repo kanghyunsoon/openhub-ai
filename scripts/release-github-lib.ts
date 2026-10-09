@@ -126,19 +126,30 @@ export interface ReleaseCheck {
   releaseId: number | null;
   errors: string[];
   warnings: string[];
+  /** GitHub digest를 독립적인 기대 해시(SHA256SUMS 항목 또는 로컬 파일)와 비교해 맞은 asset */
+  digestVerified: string[];
+  /** 독립적인 기대 해시가 없어 digest를 비교하지 않은 asset(검증했다고 보고하지 않는다) */
+  digestUnchecked: string[];
 }
+
+const DIGEST = /^sha256:([0-9a-f]{64})$/u;
 
 /**
  * GitHub API가 돌려준 Release로 asset을 검증한다.
  * - 같은 tag의 Release는 하나(보이는 범위에서), 상태는 expect(draft/published)와 같다.
  * - 필수 asset 이름 ⊆ 실제 이름, 이름 중복 0, state = uploaded, size > 0(로컬 파일이 있으면 같은 크기).
- * - GitHub digest가 있으면 SHA256SUMS(그리고 로컬 파일)와 같아야 한다. 계약 밖 asset은 경고다.
+ * - SHA256SUMS가 덮는 6개: GitHub digest가 있어야 하고(sha256:<64 hex>) SHA256SUMS와 같아야 한다. 로컬 파일이 있으면 로컬 해시와도 같아야 한다.
+ * - release-coverage.json·SHA256SUMS: 로컬 파일이 있으면(draft 검증) digest가 있어야 하고 로컬 해시와 같아야 한다.
+ *   로컬 파일이 없으면(published 검증) 독립적인 기대 해시가 없으므로 digestUnchecked로만 보고한다.
+ * - 계약 밖 asset은 경고다.
  */
 export function verifyGithubRelease(input: { tag: string; version: string; releases: readonly GithubRelease[]; expect: "draft" | "published"; sums: readonly SumsEntry[]; local?: readonly LocalAsset[] }): ReleaseCheck {
   const errors = [...checkReleaseTag(input.tag, input.version)];
   const warnings: string[] = [];
+  const digestVerified: string[] = [];
+  const digestUnchecked: string[] = [];
   const same = input.releases.filter((r) => r.tag_name === input.tag);
-  if (same.length === 0) return { ok: false, releaseId: null, errors: [...errors, input.tag + "의 GitHub Release가 없습니다"], warnings };
+  if (same.length === 0) return { ok: false, releaseId: null, errors: [...errors, input.tag + "의 GitHub Release가 없습니다"], warnings, digestVerified, digestUnchecked };
   if (same.length > 1) errors.push(input.tag + "에 Release가 " + same.length + "개 있습니다(id " + same.map((r) => r.id + (r.draft ? " draft" : " published")).join(", ") + ")");
   const release = same.find((r) => (input.expect === "draft" ? r.draft : !r.draft)) ?? same[0]!;
   if (input.expect === "draft" && !release.draft) errors.push("Release id " + release.id + "가 draft가 아닙니다");
@@ -148,6 +159,7 @@ export function verifyGithubRelease(input: { tag: string; version: string; relea
   const names = release.assets.map((a) => a.name);
   for (const n of new Set(names)) if (names.filter((x) => x === n).length > 1) errors.push("asset 이름 중복: " + n);
   const expected = releaseAssetNames(input.version);
+  const checksummed = checksummedAssetNames(input.version);
   const sumsByName = new Map(input.sums.map((e) => [e.name, e.sha256]));
   const localByName = new Map((input.local ?? []).map((f) => [f.name, f]));
   for (const name of expected) {
@@ -160,12 +172,22 @@ export function verifyGithubRelease(input: { tag: string; version: string; relea
     if (!(asset.size > 0)) errors.push("크기 0 asset: " + name);
     const local = localByName.get(name);
     if (local !== undefined && local.size !== asset.size) errors.push("크기 불일치: " + name + " (Release " + asset.size + " ≠ 로컬 " + local.size + ")");
-    const want = sumsByName.get(name) ?? local?.sha256;
-    const digest = typeof asset.digest === "string" && asset.digest.startsWith("sha256:") ? asset.digest.slice(7) : null;
-    if (digest === null) warnings.push("GitHub digest 없음: " + name);
-    else if (want !== undefined && digest !== want) errors.push("digest 불일치: " + name);
+    // 독립적인 기대 해시: checksum 대상은 SHA256SUMS 항목, 나머지 둘은 로컬 파일(있을 때만).
+    const wants = [checksummed.includes(name) ? sumsByName.get(name) : undefined, local?.sha256].filter((x): x is string => x !== undefined);
+    if (wants.length === 0) {
+      digestUnchecked.push(name);
+      continue;
+    }
+    if (asset.digest === undefined || asset.digest === null) {
+      errors.push("GitHub digest 없음: " + name);
+      continue;
+    }
+    const m = DIGEST.exec(asset.digest);
+    if (m === null) errors.push("GitHub digest 형식 오류: " + name);
+    else if (wants.some((w) => w !== m[1])) errors.push("digest 불일치: " + name);
+    else digestVerified.push(name);
   }
   for (const n of new Set(names)) if (!expected.includes(n)) warnings.push("계약 밖 asset: " + n);
-  return { ok: errors.length === 0, releaseId: release.id, errors, warnings };
+  return { ok: errors.length === 0, releaseId: release.id, errors, warnings, digestVerified, digestUnchecked };
 }
 

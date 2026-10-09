@@ -71,11 +71,15 @@ The dry-run opens the real artifacts and fails if a notice is missing: OpenHub `
    - none: it creates a draft Release with the assets attached;
    - exactly one draft: it reuses that draft, re-uploads the assets and updates its notes;
    - a published Release, or more than one draft: it stops without changing anything.
-   Finally it reads the draft back from the GitHub Release API and fails unless every required asset is present exactly once, is fully uploaded, has the local size and has a GitHub digest equal to `SHA256SUMS`. A workflow artifact alone is not enough to pass.
+   Finally it reads the draft back from the GitHub Release API and fails unless every required asset is present exactly once, is fully uploaded and has the local size, and every one of the eight assets has a GitHub digest (`sha256:<64 hex>`) equal to the hash of the local file (and, for the six checksummed files, to `SHA256SUMS`). A missing or malformed digest is a failure. A workflow artifact alone is not enough to pass. Rerunning the workflow for the same tag reuses the same draft instead of creating another one.
 2. Open **that** draft from the repository's Releases list (drafts appear only there). Do not use "Draft a new release" or create a Release from the tag page: GitHub allows several Releases per tag, and a second Release starts with no assets.
 3. Review the draft Release, its `SHA256SUMS`, SBOMs and `release-coverage.json`.
-4. Publish the draft. npm publishing is not part of this workflow.
-5. Publishing triggers `.github/workflows/release-verify.yml`, which verifies the published Release the same way (assets, digests against the published `SHA256SUMS`, one published Release for the tag). It only reads; a failure means the published Release is incomplete and must be fixed by hand.
+4. Publish the draft: on the draft's page choose **Edit**, then **Publish release**. From the command line, publish it by id and keep the tag in the same request:
+   `gh api -X PATCH "repos/<owner>/<repo>/releases/<draft id>" -f tag_name=vX.Y.Z -F draft=false`.
+   npm publishing is not part of this workflow.
+5. Publishing triggers `.github/workflows/release-verify.yml`. It checks the published Release: one published Release for the tag, all eight assets present once, uploaded and non-empty, and the GitHub digests of the six checksummed files equal to the published `SHA256SUMS`. It does not claim to verify the digests of `SHA256SUMS` and `release-coverage.json` themselves (there is no independent expected hash for them after publishing; the draft check compared them with the built files). It only reads; a failure means the published Release is incomplete and must be fixed by hand.
+
+   Limitation: this workflow runs with `contents: read`, and a read-only token does not list draft Releases. A leftover draft for the same tag is therefore not visible here; the release job (which has `contents: write`) refuses to run when a published Release or several drafts exist for the tag.
 
 ### Editing a draft's notes safely
 

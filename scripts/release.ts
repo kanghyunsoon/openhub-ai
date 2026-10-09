@@ -447,7 +447,9 @@ function githubVerify() {
   const result = verifyGithubRelease({ tag, version, releases: readReleases(), expect, sums: parseSha256Sums(sumsText), ...(dir === null ? {} : { local: localAssets(dir) }) });
   printIssues(result.warnings);
   if (!result.ok) fail("GitHub Release 검증 실패(id " + String(result.releaseId) + "):\n  " + result.errors.join("\n  "));
-  console.log("✓ GitHub Release id " + result.releaseId + " (" + expect + "): 필수 asset " + releaseAssetNames(version).length + "개 이름·상태·크기·digest 확인");
+  console.log("✓ GitHub Release id " + result.releaseId + " (" + expect + "): 필수 asset " + releaseAssetNames(version).length + "개 이름·중복·상태·크기 확인");
+  console.log("  digest 일치(독립 기대 해시와 비교): " + result.digestVerified.length + "개 — " + result.digestVerified.join(", "));
+  if (result.digestUnchecked.length > 0) console.log("  digest 비교 안 함(독립 기대 해시 없음): " + result.digestUnchecked.join(", "));
 }
 
 const commands: Record<string, () => unknown> = {
