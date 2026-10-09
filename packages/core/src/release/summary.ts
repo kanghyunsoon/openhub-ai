@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { canonicalize } from "../installer/plan";
+import { markdownBulletText, markdownHeadingText } from "./markdown-line";
 import type { ReleaseEntry, ReleaseSnapshotV1 } from "./snapshot";
 
 /**
@@ -56,10 +57,9 @@ const firstMatch = (rules: readonly (readonly [SummaryCategory, RegExp])[], text
   return null;
 };
 
-const HEADING = /^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/u;
+// ATX 제목(#)과 목록 표지는 markdown-line.ts가 선형 시간으로 읽는다(제3자 입력의 긴 공백 줄에서 정규식 backtracking이 폭주했다).
 const BOLD_HEADING = /^\s{0,3}(?:\*\*|__)([^*_]{1,120})(?:\*\*|__):?\s*$/u;
 const COLON_HEADING = /^\s{0,3}([A-Za-z][A-Za-z '’&/-]{1,60}):\s*$/u;
-const BULLET = /^\s*(?:[-*+]|\d{1,3}[.)])\s+(.+?)\s*$/u;
 const FENCE = /^\s{0,3}(?:\u0060{3,}|~{3,})/u;
 
 interface Line {
@@ -79,14 +79,14 @@ function scanNotes(notes: string): Line[] {
       return;
     }
     if (fenced || raw.trim() === "") return;
-    const h = HEADING.exec(raw) ?? BOLD_HEADING.exec(raw) ?? COLON_HEADING.exec(raw);
+    const h = markdownHeadingText(raw) ?? BOLD_HEADING.exec(raw)?.[1] ?? COLON_HEADING.exec(raw)?.[1] ?? null;
     if (h !== null) {
-      heading = firstMatch(HEADING_RULES, h[1]!);
+      heading = firstMatch(HEADING_RULES, h);
       return;
     }
     if (/^\s*(?:<!--.*-->|[-=*_]{3,})\s*$/u.test(raw)) return;
-    const b = BULLET.exec(raw);
-    out.push({ line: i + 1, text: (b === null ? raw.trim() : b[1]!).slice(0, SUMMARY_ITEM_MAX_CHARS), heading, bullet: b !== null });
+    const b = markdownBulletText(raw);
+    out.push({ line: i + 1, text: (b === null ? raw.trim() : b).slice(0, SUMMARY_ITEM_MAX_CHARS), heading, bullet: b !== null });
   });
   // 목록이 있으면 목록 항목만, 없으면 일반 줄을 항목으로 쓴다.
   return out.some((l) => l.bullet) ? out.filter((l) => l.bullet) : out;
