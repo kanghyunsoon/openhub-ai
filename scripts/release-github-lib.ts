@@ -86,6 +86,7 @@ export interface GithubAsset {
 export interface GithubRelease {
   id: number;
   tag_name: string;
+  target_commitish?: string;
   name?: string | null;
   draft: boolean;
   published_at: string | null;
@@ -143,7 +144,7 @@ const DIGEST = /^sha256:([0-9a-f]{64})$/u;
  *   로컬 파일이 없으면(published 검증) 독립적인 기대 해시가 없으므로 digestUnchecked로만 보고한다.
  * - 계약 밖 asset은 경고다.
  */
-export function verifyGithubRelease(input: { tag: string; version: string; releases: readonly GithubRelease[]; expect: "draft" | "published"; sums: readonly SumsEntry[]; local?: readonly LocalAsset[] }): ReleaseCheck {
+export function verifyGithubRelease(input: { tag: string; version: string; releases: readonly GithubRelease[]; expect: "draft" | "published"; sums: readonly SumsEntry[]; local?: readonly LocalAsset[]; preserved?: GithubRelease }): ReleaseCheck {
   const errors = [...checkReleaseTag(input.tag, input.version)];
   const warnings: string[] = [];
   const digestVerified: string[] = [];
@@ -154,6 +155,7 @@ export function verifyGithubRelease(input: { tag: string; version: string; relea
   const release = same.find((r) => (input.expect === "draft" ? r.draft : !r.draft)) ?? same[0]!;
   if (input.expect === "draft" && !release.draft) errors.push("Release id " + release.id + "가 draft가 아닙니다");
   if (input.expect === "published" && (release.draft || release.published_at === null)) errors.push("Release id " + release.id + "가 아직 공개되지 않았습니다");
+  if (input.preserved !== undefined) errors.push(...preservationIssues(input.preserved, release));
   errors.push(...sumsIssues(input.version, input.sums));
 
   const names = release.assets.map((a) => a.name);
@@ -189,5 +191,20 @@ export function verifyGithubRelease(input: { tag: string; version: string; relea
   }
   for (const n of new Set(names)) if (!expected.includes(n)) warnings.push("계약 밖 asset: " + n);
   return { ok: errors.length === 0, releaseId: release.id, errors, warnings, digestVerified, digestUnchecked };
+}
+
+/**
+ * 기존 draft를 재사용했을 때(workflow 재실행) asset 말고는 바뀐 것이 없는지 본다.
+ * id·tag·target·제목·본문(사람이 쓴 Release Notes)·draft 상태가 실행 전과 같아야 한다.
+ */
+export function preservationIssues(before: GithubRelease, after: GithubRelease): string[] {
+  const issues: string[] = [];
+  if (after.id !== before.id) issues.push("재사용한 draft가 아닙니다(id " + before.id + " → " + after.id + ")");
+  if (after.tag_name !== before.tag_name) issues.push("draft의 tag가 바뀌었습니다(" + before.tag_name + " → " + after.tag_name + ")");
+  if ((after.target_commitish ?? null) !== (before.target_commitish ?? null)) issues.push("draft의 target이 바뀌었습니다");
+  if ((after.name ?? null) !== (before.name ?? null)) issues.push("draft 제목이 바뀌었습니다");
+  if ((after.body ?? null) !== (before.body ?? null)) issues.push("draft Release Notes 본문이 바뀌었습니다");
+  if (after.draft !== before.draft) issues.push("draft 상태가 바뀌었습니다");
+  return issues;
 }
 

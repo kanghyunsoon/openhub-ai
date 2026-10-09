@@ -276,16 +276,17 @@ jobs:
         run: |
           mapfile -t assets < "$RUNNER_TEMP/assets.txt"
           gh release create "$TAG" --draft --verify-tag --title "OpenHub AI $TAG" --notes-file docs/release-process.md "${assets[@]}"
-      - name: 기존 draft에 asset을 다시 올리고 notes를 tag_name과 함께 갱신
+      - name: 기존 draft에 asset만 다시 올리기(Release Notes·제목·tag는 건드리지 않는다)
         if: steps.plan.outputs.action == 'reuse'
-        env:
-          RELEASE_ID: ${{ steps.plan.outputs.release_id }}
         run: |
           mapfile -t assets < "$RUNNER_TEMP/assets.txt"
           gh release upload "$TAG" --clobber "${assets[@]}"
-          pnpm release github-notes --tag "$TAG" --releases "$RUNNER_TEMP/releases.json" --notes-file docs/release-process.md --out "$RUNNER_TEMP/notes.json"
-          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --input "$RUNNER_TEMP/notes.json" > /dev/null
-      - name: GitHub Release API로 asset 검증(이름·중복·상태·크기·digest·tag)
+      - name: GitHub Release API로 asset 검증(이름·중복·상태·크기·digest·tag, 재사용이면 draft 보존)
+        env:
+          PLAN_ACTION: ${{ steps.plan.outputs.action }}
+          RELEASE_ID: ${{ steps.plan.outputs.release_id }}
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases-after.json"
-          pnpm release github-verify --tag "$TAG" --releases "$RUNNER_TEMP/releases-after.json" --dir release/dist --expect draft
+          preserve=()
+          if [[ "$PLAN_ACTION" == "reuse" ]]; then preserve=(--before "$RUNNER_TEMP/releases.json" --release-id "$RELEASE_ID"); fi
+          pnpm release github-verify --tag "$TAG" --releases "$RUNNER_TEMP/releases-after.json" --dir release/dist --expect draft "${preserve[@]}"

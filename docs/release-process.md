@@ -69,7 +69,7 @@ The dry-run opens the real artifacts and fails if a notice is missing: OpenHub `
 1. Run the release workflow on the release tag with `dry_run=false` and `publish=true`.
    The `release` job checks that the tag equals the package version and that the eight required assets exist locally (installer, AppImage, CLI tgz, three SBOMs, `release-coverage.json`, `SHA256SUMS`). It then looks up existing Releases for the tag:
    - none: it creates a draft Release with the assets attached;
-   - exactly one draft: it reuses that draft, re-uploads the assets and updates its notes;
+   - exactly one draft: it reuses that draft and re-uploads the assets only. The draft's Release Notes, title, tag and target are left as they are, so notes written by a maintainer survive a rerun; the verification step fails if any of them changed;
    - a published Release, or more than one draft: it stops without changing anything.
    Finally it reads the draft back from the GitHub Release API and fails unless every required asset is present exactly once, is fully uploaded and has the local size, and every one of the eight assets has a GitHub digest (`sha256:<64 hex>`) equal to the hash of the local file (and, for the six checksummed files, to `SHA256SUMS`). A missing or malformed digest is a failure. A workflow artifact alone is not enough to pass. Rerunning the workflow for the same tag reuses the same draft instead of creating another one.
 2. Open **that** draft from the repository's Releases list (drafts appear only there). Do not use "Draft a new release" or create a Release from the tag page: GitHub allows several Releases per tag, and a second Release starts with no assets.

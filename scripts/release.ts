@@ -19,7 +19,8 @@
  *   release-assets --dir <dist> [--list <file>]                       필수 asset 8개·버전·SHA256SUMS 확인, 올릴 경로 목록 작성
  *   github-plan    --tag <t> --releases <json> --github-output <file> 같은 tag Release 판정(create·reuse, 공개됐거나 여럿이면 중단)
  *   github-notes   --tag <t> --releases <json> --notes-file <md> --out <json>   tag_name을 보존하는 draft notes PATCH 본문
- *   github-verify  --tag <t> --releases <json> --expect draft|published (--dir <dist> | --sums <file>)   Release API 기준 asset 검증
+ *   github-verify  --tag <t> --releases <json> --expect draft|published (--dir <dist> | --sums <file>) [--before <json> --release-id <id>]
+ *                  Release API 기준 asset 검증. --before·--release-id를 주면 재사용한 draft의 id·tag·target·제목·본문이 그대로인지도 본다.
  * 각 명령은 --report <file>에 자기 결과를 합쳐 쓴다(job별 부분 보고서).
  */
 import { execFileSync, execSync, spawnSync } from "node:child_process";
@@ -66,6 +67,7 @@ import {
   releaseAssetNames,
   verifyGithubRelease,
   type LocalAsset,
+  type GithubRelease,
 } from "./release-github-lib";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -77,6 +79,7 @@ const { values } = parseArgs({
     installer: { type: "string" }, report: { type: "string" }, reports: { type: "string" }, artifact: { type: "string" }, "count-only": { type: "boolean", default: false },
     "cli-metafile": { type: "string" }, "desktop-metafile": { type: "string" },
     tag: { type: "string" }, releases: { type: "string" }, sums: { type: "string" }, expect: { type: "string" }, "notes-file": { type: "string" }, list: { type: "string" }, "github-output": { type: "string" },
+    before: { type: "string" }, "release-id": { type: "string" },
   },
   strict: true,
 });
@@ -403,7 +406,8 @@ function localAssets(dir: string): LocalAsset[] {
       return { name: f, size: buf.length, sha256: sha256(buf) };
     });
 }
-const readReleases = () => flattenReleases(JSON.parse(readFileSync(path.resolve(need(values.releases, "--releases")), "utf8")));
+const readReleasesFrom = (file: string) => flattenReleases(JSON.parse(readFileSync(path.resolve(file), "utf8")));
+const readReleases = () => readReleasesFrom(need(values.releases, "--releases"));
 const printIssues = (warnings: readonly string[]) => {
   for (const w of warnings) console.log("  경고: " + w);
 };
@@ -444,10 +448,16 @@ function githubVerify() {
   const expect = values.expect === "draft" || values.expect === "published" ? values.expect : fail("--expect draft|published가 필요합니다");
   const dir = values.dir === undefined ? null : path.resolve(values.dir);
   const sumsText = readFileSync(dir === null ? path.resolve(need(values.sums, "--sums 또는 --dir")) : path.join(dir, SHA256SUMS_FILE), "utf8");
-  const result = verifyGithubRelease({ tag, version, releases: readReleases(), expect, sums: parseSha256Sums(sumsText), ...(dir === null ? {} : { local: localAssets(dir) }) });
+  let preserved: GithubRelease | undefined;
+  if (values.before !== undefined || values["release-id"] !== undefined) {
+    const id = Number(need(values["release-id"], "--release-id"));
+    preserved = readReleasesFrom(need(values.before, "--before")).find((r) => r.id === id) ?? fail("--before에 Release id " + String(id) + "가 없습니다");
+  }
+  const result = verifyGithubRelease({ tag, version, releases: readReleases(), expect, sums: parseSha256Sums(sumsText), ...(dir === null ? {} : { local: localAssets(dir) }), ...(preserved === undefined ? {} : { preserved }) });
   printIssues(result.warnings);
   if (!result.ok) fail("GitHub Release 검증 실패(id " + String(result.releaseId) + "):\n  " + result.errors.join("\n  "));
   console.log("✓ GitHub Release id " + result.releaseId + " (" + expect + "): 필수 asset " + releaseAssetNames(version).length + "개 이름·중복·상태·크기 확인");
+  if (preserved !== undefined) console.log("  재사용한 draft의 id·tag·target·제목·Release Notes 본문 그대로");
   console.log("  digest 일치(독립 기대 해시와 비교): " + result.digestVerified.length + "개 — " + result.digestVerified.join(", "));
   if (result.digestUnchecked.length > 0) console.log("  digest 비교 안 함(독립 기대 해시 없음): " + result.digestUnchecked.join(", "));
 }

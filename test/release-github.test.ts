@@ -11,6 +11,7 @@ import {
   draftNotesUpdate,
   flattenReleases,
   planDraftRelease,
+  preservationIssues,
   releaseAssetNames,
   verifyGithubRelease,
   type GithubAsset,
@@ -183,6 +184,36 @@ describe("GitHub Release API 기준 asset 검증", () => {
     expect(planDraftRelease([afterPatch], "v0.1.0")).toEqual({ action: "reuse", releaseId: 5 });
   });
 
+  it("(C·D) 사람이 쓴 Release Notes가 있는 draft를 재실행으로 재사용하면 asset만 바뀌고 본문은 그대로이며, 다시 올린 8개 digest를 검증한다", () => {
+    const handWritten = "# OpenHub AI v0.1.0\n\nHand-written notes by a maintainer.\n";
+    const before = release({ id: 5, body: handWritten, target_commitish: "main" });
+    expect(planDraftRelease([before], "v0.1.0")).toEqual({ action: "reuse", releaseId: 5 });
+    // 재실행으로 다시 빌드된 파일(내용이 달라 digest도 다르다)
+    const rebuilt: LocalAsset[] = V010.map(([name, size]) => ({ name, size, sha256: sha256("rebuilt " + name) }));
+    const rebuiltSums = rebuilt.filter((f) => checksummedAssetNames("0.1.0").includes(f.name)).map((f) => ({ name: f.name, sha256: f.sha256 }));
+    // gh release upload --clobber 뒤: asset만 바뀌고 id·tag·target·제목·본문은 그대로다.
+    const after: GithubRelease = { ...before, assets: rebuilt.map((f) => ({ name: f.name, size: f.size, state: "uploaded", digest: "sha256:" + f.sha256 })) };
+    const ok = verifyGithubRelease({ tag: "v0.1.0", version: "0.1.0", releases: [after], expect: "draft", sums: rebuiltSums, local: rebuilt, preserved: before });
+    expect(ok).toMatchObject({ ok: true, releaseId: 5, digestVerified: V010.map(([n]) => n), digestUnchecked: [] });
+    expect(after.body).toBe(handWritten);
+    // 한 파일이 다시 올라가지 않아 옛 asset이 남으면 실패한다.
+    const stale: GithubRelease = { ...after, assets: after.assets.map((a) => (a.name === "openhub-ai-0.1.0.tgz" ? asset(V010[0]!) : a)) };
+    expect(verifyGithubRelease({ tag: "v0.1.0", version: "0.1.0", releases: [stale], expect: "draft", sums: rebuiltSums, local: rebuilt, preserved: before }).errors).toEqual(["digest 불일치: openhub-ai-0.1.0.tgz"]);
+  });
+
+  it("재사용한 draft의 Release Notes·제목·tag·target·id·draft 상태가 바뀌면 검증이 실패한다", () => {
+    const before = release({ id: 5, body: "Hand-written notes", target_commitish: "main" });
+    expect(preservationIssues(before, { ...before })).toEqual([]);
+    expect(preservationIssues(before, { ...before, body: "# Release process\n..." })).toEqual(["draft Release Notes 본문이 바뀌었습니다"]);
+    expect(preservationIssues(before, { ...before, name: "other" })).toEqual(["draft 제목이 바뀌었습니다"]);
+    expect(preservationIssues(before, { ...before, tag_name: "untagged-5de984efbf94c1c8d8b1" })).toEqual(["draft의 tag가 바뀌었습니다(v0.1.0 → untagged-5de984efbf94c1c8d8b1)"]);
+    expect(preservationIssues(before, { ...before, target_commitish: "2e712ee" })).toEqual(["draft의 target이 바뀌었습니다"]);
+    expect(preservationIssues(before, { ...before, id: 6 })).toEqual(["재사용한 draft가 아닙니다(id 5 → 6)"]);
+    expect(preservationIssues(before, { ...before, draft: false, published_at: "2026-10-09T11:07:42Z" })).toEqual(["draft 상태가 바뀌었습니다"]);
+    // verifyGithubRelease에 preserved를 주면 같은 검사가 오류에 합쳐진다.
+    expect(verifyGithubRelease({ tag: "v0.1.0", version: "0.1.0", releases: [{ ...before, body: "overwritten" }], expect: "draft", sums: SUMS_010, preserved: before }).errors).toEqual(["draft Release Notes 본문이 바뀌었습니다"]);
+  });
+
   it("로컬 dist가 있으면 Release asset 크기가 로컬 파일과 같아야 한다", () => {
     const local: LocalAsset[] = V010.map(([name, size, sha]) => ({ name, size: name === "release-coverage.json" ? size + 1 : size, sha256: sha }));
     const r = verifyGithubRelease({ tag: "v0.1.0", version: "0.1.0", releases: [release({ id: 1 })], expect: "draft", sums: SUMS_010, local });
@@ -231,13 +262,17 @@ describe("release workflow 연결", () => {
       at('gh release create "$TAG" --draft --verify-tag'),
       at("if: steps.plan.outputs.action == 'reuse'"),
       at('gh release upload "$TAG" --clobber'),
-      at("pnpm release github-notes"),
-      at('pnpm release github-verify --tag "$TAG" --releases "$RUNNER_TEMP/releases-after.json" --dir release/dist --expect draft'),
+      at('preserve=(--before "$RUNNER_TEMP/releases.json" --release-id "$RELEASE_ID")'),
+      at('pnpm release github-verify --tag "$TAG" --releases "$RUNNER_TEMP/releases-after.json" --dir release/dist --expect draft "${preserve[@]}"'),
     ];
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     // 올리는 파일은 계약 목록뿐이다(dist 전체 glob 아님).
     expect(releaseJob).not.toContain("release/dist/*");
     expect(releaseJob).toContain('"${assets[@]}"');
+    // (C) 재실행(재사용)에서 Release Notes·제목을 고치는 단계가 없다. notes 수정은 사람이 명시적으로 github-notes로 한다.
+    expect(releaseJob).not.toMatch(/github-notes|-X PATCH|gh release edit|--notes-file docs\/release-process\.md"?\s*$/mu);
+    const reuseStep = releaseJob.slice(releaseJob.indexOf("if: steps.plan.outputs.action == 'reuse'"), releaseJob.indexOf("GitHub Release API로 asset 검증"));
+    expect(reuseStep).not.toMatch(/--notes|--title|PATCH|github-notes/u);
   });
 
   it("release-verify.yml은 공개(published) 때만 돌고 읽기 권한으로 검증만 한다", () => {
@@ -268,6 +303,17 @@ describe("release workflow 연결", () => {
     const missing = run("github-verify", "--tag", "v" + PACKAGE_VERSION, "--releases", releases, "--dir", dist, "--expect", "draft");
     expect(missing.status).toBe(1);
     expect(missing.stderr).toContain("Release asset 없음: OpenHub-AI-Setup-" + PACKAGE_VERSION + "-x64.exe");
+
+    // 재사용 draft 보존 검사: 실행 전과 같으면 0, Release Notes가 바뀌면 1
+    const before = path.join(scratch, "releases-before.json");
+    const withBody = (body: string) => gh(null).map((page) => page.map((r) => ({ ...r, body })));
+    writeFileSync(before, JSON.stringify(withBody("Hand-written notes")));
+    writeFileSync(releases, JSON.stringify(withBody("Hand-written notes")));
+    expect(run("github-verify", "--tag", "v" + PACKAGE_VERSION, "--releases", releases, "--dir", dist, "--expect", "draft", "--before", before, "--release-id", "7").status).toBe(0);
+    writeFileSync(releases, JSON.stringify(withBody("# Release process")));
+    const overwritten = run("github-verify", "--tag", "v" + PACKAGE_VERSION, "--releases", releases, "--dir", dist, "--expect", "draft", "--before", before, "--release-id", "7");
+    expect(overwritten.status).toBe(1);
+    expect(overwritten.stderr).toContain("draft Release Notes 본문이 바뀌었습니다");
 
     rmSync(path.join(dist, "SHA256SUMS"));
     expect(run("release-assets", "--dir", dist).status).toBe(1);
