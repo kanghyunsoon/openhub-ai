@@ -13,7 +13,7 @@ import {
   type ProjectProfile,
   type RecommendationReport,
 } from "../src/index";
-import { REPO_ROOT, seedEntries } from "./recommendation/helpers";
+import { REPO_ROOT, registryManifestCount, seedEntries } from "./recommendation/helpers";
 
 /**
  * v0.2.0 P0-1 Stack Coverage. 네 층을 따로 본다.
@@ -152,13 +152,22 @@ describe("B·C·D. Need·Registry·추천: 인식한 기술이 추천까지 이�
     }
   });
 
-  it("Playwright를 쓰는 프로젝트는 E2E need에 Playwright MCP를 추천하고, Kubernetes는 도구 없음으로 설명한다", async () => {
+  it("Playwright를 쓰는 프로젝트는 E2E need에 Playwright MCP를 추천하고, Kubernetes는 P0-2 batch 1의 read-only 도구를 추천한다", async () => {
     const vite = (await analyze("vitest-app")).report;
     expect(needOf(vite, "e2e-testing")?.sources.map((s) => s.itemId).sort()).toEqual(["playwright", "react"]);
     expect(recs(vite)).toContain("playwright-mcp");
     const k8s = await analyze("k8s-deploy");
-    expect(needOf(k8s.report, "kubernetes-operations")?.candidates).toEqual([]);
-    expect(diagnoseRecommendation(k8s.profile, k8s.report)).toMatchObject({ emptyReason: "no-verified-tool", needsWithoutVerifiedTool: ["kubernetes-operations"] });
+    expect(needOf(k8s.report, "kubernetes-operations")?.candidates).toEqual([{ toolId: "kubernetes-mcp-server", status: "recommended" }]);
+    expect(recs(k8s.report)).toEqual(["kubernetes-mcp-server"]);
+    expect(diagnoseRecommendation(k8s.profile, k8s.report)).toEqual({ emptyReason: null, unmappedTechs: [], needsWithoutVerifiedTool: [] });
+  });
+
+  it("Verified 도구가 없는 need만 있으면 no-verified-tool로 설명한다(C# 소스 없는 Unity 에디터 프로젝트)", async () => {
+    const { profile, report } = await analyze("unity-editor-only");
+    expect(ids(profile.frameworks)).toEqual(["unity"]);
+    expect(ids(profile.languages)).toEqual([]);
+    expect(recs(report)).toEqual([]);
+    expect(diagnoseRecommendation(profile, report)).toEqual({ emptyReason: "no-verified-tool", unmappedTechs: [], needsWithoutVerifiedTool: ["game-engine-editor"] });
   });
 
   it("결과 진단: 스택 미인식·연결 규칙 없음·도구 없음을 구분한다", async () => {
@@ -228,7 +237,7 @@ describe("Taxonomy v2 계약", () => {
   it("기존 Registry Manifest가 taxonomy v2 검증을 통과한다", async () => {
     const { entries, issues } = await loadRegistry(path.join(REPO_ROOT, "registry"));
     expect(issues).toEqual([]);
-    expect(entries.length).toBe(7);
+    expect(entries.length).toBe(registryManifestCount());
   });
 
   it("taxonomyVersion 1로 만든 보고서는 조용히 해석하지 않고 schema 검증에서 거부한다(다시 생성해야 한다)", async () => {

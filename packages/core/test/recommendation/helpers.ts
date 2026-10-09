@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect } from "vitest";
@@ -94,6 +94,17 @@ export async function seedEntries(): Promise<RegistryEntry[]> {
   const { entries, issues } = await loadRegistry(path.join(REPO_ROOT, "registry"));
   if (issues.length > 0) throw new Error("seed registry 검증 실패");
   return entries;
+}
+
+/**
+ * registry/<category>/<name>.yaml Manifest 파일 수. v0.2.0 P0-2부터 Registry가 묶음 단위로 늘어나므로
+ * 테스트는 "7개" 같은 숫자 대신 디스크의 Manifest 수와 비교한다(loader 결과와 독립된 기준).
+ */
+export function registryManifestCount(): number {
+  const root = path.join(REPO_ROOT, "registry");
+  return readdirSync(root, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .flatMap((d) => readdirSync(path.join(root, d.name)).filter((f) => f.endsWith(".yaml"))).length;
 }
 
 /** §9 synthetic Registry(tool-a ~ tool-g). */

@@ -7,6 +7,7 @@ tools:
   chrome-devtools-mcp: { addedAt: null }
   context7: { addedAt: null }
   github-mcp-server: { addedAt: null }
+  kubernetes-mcp-server: { addedAt: 2026-10-09 }
   memory-mcp: { addedAt: null }
   playwright-mcp: { addedAt: null }
   postgres-mcp: { addedAt: null }
