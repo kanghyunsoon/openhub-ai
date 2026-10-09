@@ -260,6 +260,8 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       - name: tag가 SemVer이고 package 버전과 같은지 확인
         run: pnpm release check-tag --tag "$TAG"
+      - name: 사용자용 Release Notes 확인(docs/release-notes/<tag>.md)
+        run: pnpm release check-notes --tag "$TAG"
       - uses: actions/download-artifact@v4
         with:
           name: openhub-release-dry-run
@@ -275,7 +277,7 @@ jobs:
         if: steps.plan.outputs.action == 'create'
         run: |
           mapfile -t assets < "$RUNNER_TEMP/assets.txt"
-          gh release create "$TAG" --draft --verify-tag --title "OpenHub AI $TAG" --notes-file docs/release-process.md "${assets[@]}"
+          gh release create "$TAG" --draft --verify-tag --title "OpenHub AI $TAG" --notes-file "docs/release-notes/$TAG.md" "${assets[@]}"
       - name: 기존 draft에 asset만 다시 올리기(Release Notes·제목·tag는 건드리지 않는다)
         if: steps.plan.outputs.action == 'reuse'
         run: |

@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   checkLocalAssets,
+  checkReleaseNotes,
   checkReleaseTag,
   checksummedAssetNames,
   draftNotesUpdate,
@@ -13,6 +14,7 @@ import {
   planDraftRelease,
   preservationIssues,
   releaseAssetNames,
+  releaseNotesPath,
   verifyGithubRelease,
   type GithubAsset,
   type GithubRelease,
@@ -244,6 +246,38 @@ describe("GitHub Release API 기준 asset 검증", () => {
 });
 
 describe("release workflow 연결", () => {
+  it("새 draft의 본문은 사용자용 Release Notes 파일이고 유지보수자용 release-process 문서는 Release 본문으로 쓰지 않는다", () => {
+    const yml = read(".github/workflows/release.yml");
+    const job = yml.slice(yml.indexOf("\n  release:\n"));
+    expect(releaseNotesPath("v0.1.1")).toBe("docs/release-notes/v0.1.1.md");
+    expect(job).toContain('--notes-file "docs/release-notes/$TAG.md"');
+    expect(job).not.toContain("docs/release-process.md");
+    expect(read("docs/release-process.md")).toContain("docs/release-notes/vX.Y.Z.md");
+  });
+
+  it("현재 package 버전의 사용자용 Release Notes가 있고 계약을 만족한다(tag 전에 CI가 잡는다)", () => {
+    const tag = "v" + PACKAGE_VERSION;
+    const text = read(releaseNotesPath(tag));
+    expect(checkReleaseNotes(tag, PACKAGE_VERSION, text)).toEqual([]);
+    expect(text).toMatch(/No breaking changes/u);
+  });
+
+  it("Release Notes 계약: 제목·English·내부 식별자·유지보수자 문서·내려받을 파일 이름·필수 안내를 검사한다", () => {
+    const good = read(releaseNotesPath("v" + PACKAGE_VERSION));
+    const tag = "v" + PACKAGE_VERSION;
+    expect(checkReleaseNotes(tag, PACKAGE_VERSION, good.replace("# OpenHub AI " + tag, "# OpenHub AI"))[0]).toContain("첫 줄이");
+    expect(checkReleaseNotes(tag, PACKAGE_VERSION, good + "\n한글 문장\n")).toEqual(["사용자용 Release Notes는 English로 씁니다(한글 포함)"]);
+    expect(checkReleaseNotes(tag, PACKAGE_VERSION, good + "\nSee REQ-065.\n")).toEqual(["내부 작업 식별자가 있습니다"]);
+    // 유지보수자 문서를 그대로 쓰면 실패한다(v0.1.0 draft에서 실제로 있었던 일).
+    expect(checkReleaseNotes(tag, PACKAGE_VERSION, read("docs/release-process.md"))).toEqual(expect.arrayContaining(["유지보수자용 release-process 문서는 Release Notes가 아닙니다"]));
+    // 이전 버전 파일 이름이 남아 있으면 실패한다.
+    expect(checkReleaseNotes(tag, PACKAGE_VERSION, good.replaceAll(PACKAGE_VERSION, "0.0.9").replace("# OpenHub AI v0.0.9", "# OpenHub AI " + tag))).toEqual(releaseAssetNames(PACKAGE_VERSION).slice(0, 3).map((n) => "내려받을 파일 이름이 없습니다: " + n));
+    expect(checkReleaseNotes(tag, PACKAGE_VERSION, good.replace("**unsigned**", "not signed"))).toEqual(["Windows installer unsigned 안내가 없습니다"]);
+    expect(checkReleaseNotes(tag, PACKAGE_VERSION, good.replaceAll("macOS", "Mac"))).toEqual(["macOS 지원 범위 안내가 없습니다"]);
+    expect(checkReleaseNotes(tag, PACKAGE_VERSION, good.replaceAll("SHA256SUMS", "checksums"))).toEqual(["SHA256SUMS 안내가 없습니다"]);
+    expect(checkReleaseNotes(tag, PACKAGE_VERSION, "# OpenHub AI " + tag + "\n")).toContain("본문이 비어 있습니다");
+  });
+
   const yml = read(".github/workflows/release.yml");
   const releaseJob = yml.slice(yml.indexOf("\n  release:\n"));
   const verifyYml = read(".github/workflows/release-verify.yml");
@@ -256,10 +290,11 @@ describe("release workflow 연결", () => {
     };
     const order = [
       at('pnpm release check-tag --tag "$TAG"'),
+      at('pnpm release check-notes --tag "$TAG"'),
       at('pnpm release release-assets --dir release/dist --list "$RUNNER_TEMP/assets.txt"'),
       at('pnpm release github-plan --tag "$TAG"'),
       at("if: steps.plan.outputs.action == 'create'"),
-      at('gh release create "$TAG" --draft --verify-tag'),
+      at('gh release create "$TAG" --draft --verify-tag --title "OpenHub AI $TAG" --notes-file "docs/release-notes/$TAG.md"'),
       at("if: steps.plan.outputs.action == 'reuse'"),
       at('gh release upload "$TAG" --clobber'),
       at('preserve=(--before "$RUNNER_TEMP/releases.json" --release-id "$RELEASE_ID")'),
@@ -319,6 +354,10 @@ describe("release workflow 연결", () => {
     expect(run("release-assets", "--dir", dist).status).toBe(1);
     expect(execFileSync(process.execPath, [tsxCli, "scripts/release.ts", "check-tag", "--tag", "v" + PACKAGE_VERSION], { cwd: ROOT, encoding: "utf8" })).toContain("✓ tag");
     expect(run("check-tag", "--tag", "v9.9.9").status).toBe(1);
+    expect(run("check-notes", "--tag", "v" + PACKAGE_VERSION).status).toBe(0);
+    const noNotes = run("check-notes", "--tag", "v9.9.9");
+    expect(noNotes.status).toBe(1);
+    expect(noNotes.stderr).toContain("docs/release-notes/v9.9.9.md");
   });
 });
 

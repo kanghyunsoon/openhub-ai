@@ -47,7 +47,7 @@ Requirements: Node.js 24.15 or later. Backends you plan to use (npx, uvx or Dock
 Install the CLI from a release package and look at a project:
 
 ```sh
-npm install -g ./openhub-ai-0.1.0.tgz
+npm install -g ./openhub-ai-0.1.1.tgz
 openhub --version
 openhub registry list
 openhub project scan ./my-project

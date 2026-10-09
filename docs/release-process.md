@@ -66,6 +66,8 @@ The dry-run opens the real artifacts and fails if a notice is missing: OpenHub `
 
 ## Publishing (manual)
 
+User-facing release notes live in `docs/release-notes/vX.Y.Z.md`, one file per version. Write them before tagging. The `release` job checks the file with `pnpm release check-notes --tag vX.Y.Z` and uses it as the body of a newly created draft. The check requires the heading `# OpenHub AI vX.Y.Z`, English text, the three download file names, and the `SHA256SUMS`, unsigned-installer and macOS notes. This maintainer document is never used as release notes.
+
 1. Run the release workflow on the release tag with `dry_run=false` and `publish=true`.
    The `release` job checks that the tag equals the package version and that the eight required assets exist locally (installer, AppImage, CLI tgz, three SBOMs, `release-coverage.json`, `SHA256SUMS`). It then looks up existing Releases for the tag:
    - none: it creates a draft Release with the assets attached;
@@ -87,7 +89,7 @@ When a draft Release is updated through the API without `tag_name`, GitHub detac
 
 ```sh
 gh api --paginate --slurp "repos/<owner>/<repo>/releases?per_page=100" > releases.json
-pnpm release github-notes --tag vX.Y.Z --releases releases.json --notes-file notes.md --out notes.json
+pnpm release github-notes --tag vX.Y.Z --releases releases.json --notes-file docs/release-notes/vX.Y.Z.md --out notes.json
 gh api -X PATCH "repos/<owner>/<repo>/releases/<draft id>" --input notes.json
 gh api --paginate --slurp "repos/<owner>/<repo>/releases?per_page=100" > releases.json
 pnpm release github-verify --tag vX.Y.Z --releases releases.json --sums SHA256SUMS --expect draft

@@ -47,7 +47,7 @@ Discover → Recommend → Install → Verify → Update → Rollback
 release 패키지로 CLI를 설치하고 프로젝트를 확인합니다.
 
 ```sh
-npm install -g ./openhub-ai-0.1.0.tgz
+npm install -g ./openhub-ai-0.1.1.tgz
 openhub --version
 openhub registry list
 openhub project scan ./my-project

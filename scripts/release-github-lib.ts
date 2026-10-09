@@ -33,6 +33,33 @@ export function checkReleaseTag(tag: string, version: string): string[] {
   return [];
 }
 
+/** 사용자용 Release Notes 파일 위치(저장소 루트 기준). 유지보수자 문서(docs/release-process.md)는 Release 본문으로 쓰지 않는다. */
+export function releaseNotesPath(tag: string): string {
+  return "docs/release-notes/" + tag + ".md";
+}
+/** GitHub Release 본문 최대 길이 */
+export const RELEASE_NOTES_MAX_CHARS = 125_000;
+
+/**
+ * 사용자용 Release Notes 계약: 첫 줄은 "# OpenHub AI <tag>", English, 내부 작업 식별자 없음, 유지보수자 절차 문서가 아님,
+ * 이 버전의 내려받을 파일 이름 3개와 SHA256SUMS·unsigned Windows installer·macOS 공식 artifact 없음 안내가 있음.
+ */
+export function checkReleaseNotes(tag: string, version: string, text: string): string[] {
+  const errors: string[] = [];
+  const lines = text.split(/\r?\n/u);
+  if (lines[0] !== "# OpenHub AI " + tag) errors.push("첫 줄이 \"# OpenHub AI " + tag + "\"가 아닙니다");
+  if (text.trim().split(/\r?\n/u).length < 5) errors.push("본문이 비어 있습니다");
+  if (text.length > RELEASE_NOTES_MAX_CHARS) errors.push("GitHub Release 본문 한도(" + RELEASE_NOTES_MAX_CHARS + "자)를 넘습니다");
+  if (/[\uac00-\ud7a3]/u.test(text)) errors.push("사용자용 Release Notes는 English로 씁니다(한글 포함)");
+  if (/\b(?:REQ|TASK|AC)-\d{3}\b|\b[DP]-0\d{2}\b/u.test(text)) errors.push("내부 작업 식별자가 있습니다");
+  if (/^# Release process\b|^## Publishing \(manual\)/mu.test(text)) errors.push("유지보수자용 release-process 문서는 Release Notes가 아닙니다");
+  for (const name of releaseAssetNames(version).slice(0, 3)) if (!text.includes(name)) errors.push("내려받을 파일 이름이 없습니다: " + name);
+  for (const [word, label] of [["SHA256SUMS", "SHA256SUMS 안내"], ["unsigned", "Windows installer unsigned 안내"], ["macOS", "macOS 지원 범위 안내"]] as const) {
+    if (!text.includes(word)) errors.push(label + "가 없습니다");
+  }
+  return errors;
+}
+
 export interface LocalAsset {
   name: string;
   size: number;
