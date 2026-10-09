@@ -67,5 +67,28 @@ The dry-run opens the real artifacts and fails if a notice is missing: OpenHub `
 ## Publishing (manual)
 
 1. Run the release workflow on the release tag with `dry_run=false` and `publish=true`.
-2. Review the draft Release, its `SHA256SUMS`, SBOMs and `release-coverage.json`.
-3. Publish the draft. npm publishing is not part of this workflow.
+   The `release` job checks that the tag equals the package version and that the eight required assets exist locally (installer, AppImage, CLI tgz, three SBOMs, `release-coverage.json`, `SHA256SUMS`). It then looks up existing Releases for the tag:
+   - none: it creates a draft Release with the assets attached;
+   - exactly one draft: it reuses that draft, re-uploads the assets and updates its notes;
+   - a published Release, or more than one draft: it stops without changing anything.
+   Finally it reads the draft back from the GitHub Release API and fails unless every required asset is present exactly once, is fully uploaded, has the local size and has a GitHub digest equal to `SHA256SUMS`. A workflow artifact alone is not enough to pass.
+2. Open **that** draft from the repository's Releases list (drafts appear only there). Do not use "Draft a new release" or create a Release from the tag page: GitHub allows several Releases per tag, and a second Release starts with no assets.
+3. Review the draft Release, its `SHA256SUMS`, SBOMs and `release-coverage.json`.
+4. Publish the draft. npm publishing is not part of this workflow.
+5. Publishing triggers `.github/workflows/release-verify.yml`, which verifies the published Release the same way (assets, digests against the published `SHA256SUMS`, one published Release for the tag). It only reads; a failure means the published Release is incomplete and must be fixed by hand.
+
+### Editing a draft's notes safely
+
+When a draft Release is updated through the API without `tag_name`, GitHub detaches the draft from its tag (the tag shows as `untagged-…` and the draft URL changes). Always send the tag with the notes:
+
+```sh
+gh api --paginate --slurp "repos/<owner>/<repo>/releases?per_page=100" > releases.json
+pnpm release github-notes --tag vX.Y.Z --releases releases.json --notes-file notes.md --out notes.json
+gh api -X PATCH "repos/<owner>/<repo>/releases/<draft id>" --input notes.json
+gh api --paginate --slurp "repos/<owner>/<repo>/releases?per_page=100" > releases.json
+pnpm release github-verify --tag vX.Y.Z --releases releases.json --sums SHA256SUMS --expect draft
+```
+
+`github-notes` refuses to edit a published Release or a draft whose tag is already detached, and the payload never touches assets.
+
+For v0.1.0 the workflow's draft (with all eight assets) stayed unpublished, and a second Release created for the same tag was published without assets; the assets were then attached by hand. The checks above make both situations fail loudly.

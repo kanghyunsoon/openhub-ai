@@ -154,9 +154,9 @@ describe("REQ-065 TASK-072 release workflow", () => {
   it("AC-072-02 release job은 publish·!dry_run·SemVer tag·tag = package 버전일 때만 draft Release를 만든다", () => {
     const r = job("release");
     expect(r).toContain("if: github.event_name == 'workflow_dispatch' && inputs.publish == true && inputs.dry_run == false && startsWith(github.ref, 'refs/tags/v')");
-    expect(r).toContain('[[ "$tag" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]');
-    expect(r).toContain('[[ "$tag" == "v$version" ]]');
-    expect(r).toContain("gh release create \"$GITHUB_REF_NAME\" --draft");
+    // SemVer·package 버전 비교는 release-github-lib checkReleaseTag(test/release-github.test.ts)가 한다.
+    expect(r).toContain('pnpm release check-tag --tag "$TAG"');
+    expect(r).toContain("gh release create \"$TAG\" --draft");
     expect(r).toContain("needs: verify");
   });
 

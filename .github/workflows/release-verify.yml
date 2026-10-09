@@ -1,0 +1,38 @@
+name: Release verify
+
+# 사람이 GitHub Release를 공개(published)하면 그 Release를 GitHub API 기준으로 다시 검증한다.
+# - 필수 asset 8개(이름·중복·상태·크기)와 GitHub digest = 공개된 SHA256SUMS, tag = package 버전, 같은 tag의 공개 Release가 하나인지 본다.
+# - asset 없이 공개된 Release(v0.1.0에서 실제로 있었던 일)는 이 workflow가 실패로 알린다. Release를 고치거나 지우지는 않는다.
+# - 권한은 contents: read뿐이다. 읽기 token에는 draft가 보이지 않으므로 남은 draft 확인은 release job(github-plan)이 맡는다.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: 공개된 Release와 SHA256SUMS 읽기
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          mkdir -p "$RUNNER_TEMP/published"
+          gh release download "$TAG" --pattern SHA256SUMS --dir "$RUNNER_TEMP/published" || echo "SHA256SUMS asset을 받지 못했습니다(아래 검증이 실패로 알린다)"
+          touch "$RUNNER_TEMP/published/SHA256SUMS"
+      - name: GitHub Release API로 공개된 asset 검증
+        run: pnpm release github-verify --tag "$TAG" --releases "$RUNNER_TEMP/releases.json" --sums "$RUNNER_TEMP/published/SHA256SUMS" --expect published
+

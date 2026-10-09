@@ -245,19 +245,47 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       - name: tag가 SemVer이고 package 버전과 같은지 확인
-        run: |
-          tag="${GITHUB_REF_NAME}"
-          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "SemVer tag가 아닙니다: $tag"; exit 1; }
-          version="$(node -p "require('./apps/cli/package.json').version")"
-          [[ "$tag" == "v$version" ]] || { echo "tag $tag ≠ package v$version"; exit 1; }
+        run: pnpm release check-tag --tag "$TAG"
       - uses: actions/download-artifact@v4
         with:
           name: openhub-release-dry-run
           path: release
-      - name: draft GitHub Release 만들기(공개는 사람이 한다)
-        run: gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "OpenHub AI $GITHUB_REF_NAME" --notes-file docs/release-process.md release/dist/*
+      - name: 올릴 Release asset 계약 확인(필수 8개·버전·SHA256SUMS)
+        run: pnpm release release-assets --dir release/dist --list "$RUNNER_TEMP/assets.txt"
+      - name: 같은 tag의 Release 확인(공개됐거나 draft가 여럿이면 중단, draft 하나면 재사용)
+        id: plan
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          pnpm release github-plan --tag "$TAG" --releases "$RUNNER_TEMP/releases.json" --github-output "$GITHUB_OUTPUT"
+      - name: draft GitHub Release 만들기(asset 포함, 공개는 사람이 한다)
+        if: steps.plan.outputs.action == 'create'
+        run: |
+          mapfile -t assets < "$RUNNER_TEMP/assets.txt"
+          gh release create "$TAG" --draft --verify-tag --title "OpenHub AI $TAG" --notes-file docs/release-process.md "${assets[@]}"
+      - name: 기존 draft에 asset을 다시 올리고 notes를 tag_name과 함께 갱신
+        if: steps.plan.outputs.action == 'reuse'
         env:
-          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.plan.outputs.release_id }}
+        run: |
+          mapfile -t assets < "$RUNNER_TEMP/assets.txt"
+          gh release upload "$TAG" --clobber "${assets[@]}"
+          pnpm release github-notes --tag "$TAG" --releases "$RUNNER_TEMP/releases.json" --notes-file docs/release-process.md --out "$RUNNER_TEMP/notes.json"
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --input "$RUNNER_TEMP/notes.json" > /dev/null
+      - name: GitHub Release API로 asset 검증(이름·중복·상태·크기·digest·tag)
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases-after.json"
+          pnpm release github-verify --tag "$TAG" --releases "$RUNNER_TEMP/releases-after.json" --dir release/dist --expect draft
