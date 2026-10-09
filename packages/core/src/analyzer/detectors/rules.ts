@@ -19,7 +19,12 @@ export interface TechRule {
   dockerImages?: readonly string[];
   /** Spring datasource·mongodb URL scheme(jdbc: 다음 또는 URL scheme) */
   urlSchemes?: readonly string[];
+  /** 이 기술 전용 설정 파일 이름(파일 이름 정확히 일치). 있으면 config 근거가 된다. */
+  configFiles?: readonly string[];
 }
+
+const configNames = (base: string, exts: readonly string[]) => exts.map((e) => base + "." + e);
+const JS_EXTS = ["ts", "js", "mts", "mjs", "cts", "cjs"] as const;
 
 export const DEFAULT_TECH_RULES: readonly TechRule[] = Object.freeze([
   { category: "frameworks", id: "react", name: "React", npm: ["react"] },
@@ -33,6 +38,20 @@ export const DEFAULT_TECH_RULES: readonly TechRule[] = Object.freeze([
     jvmPlugins: ["org.springframework.boot:spring-boot-maven-plugin", "org.springframework.boot"],
   },
   { category: "frameworks", id: "fastapi", name: "FastAPI", pypi: ["fastapi"] },
+  // taxonomyVersion 2(v0.2.0): 백엔드·테스트 프레임워크. 의존성 또는 전용 설정 파일만 근거로 쓴다.
+  { category: "frameworks", id: "express", name: "Express", npm: ["express"] },
+  { category: "frameworks", id: "nestjs", name: "NestJS", npm: ["@nestjs/core"] },
+  { category: "frameworks", id: "jest", name: "Jest", npm: ["jest"], configFiles: [...configNames("jest.config", JS_EXTS), "jest.config.json"] },
+  { category: "frameworks", id: "vitest", name: "Vitest", npm: ["vitest"], configFiles: configNames("vitest.config", JS_EXTS) },
+  { category: "frameworks", id: "pytest", name: "pytest", pypi: ["pytest"], configFiles: ["pytest.ini", "conftest.py"] },
+  {
+    category: "frameworks",
+    id: "playwright",
+    name: "Playwright",
+    npm: ["@playwright/test", "playwright"],
+    pypi: ["playwright", "pytest-playwright"],
+    configFiles: configNames("playwright.config", JS_EXTS),
+  },
 
   {
     category: "databases",

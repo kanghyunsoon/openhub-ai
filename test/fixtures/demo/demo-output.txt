@@ -26,7 +26,7 @@ AI Clients
 AI Tools
   memory [mcp-server; claude-code]   1.00  .mcp.json (config: memory (stdio, npx))
 
-Detectors  ai-environment:ok  databases:ok  frameworks:ok  infrastructure:ok  languages:ok  package-managers:ok
+Detectors  ai-environment:ok  databases:ok  frameworks:ok  infrastructure:ok  kubernetes:ok  languages:ok  package-managers:ok
 (exit 0)
 
 == 2. Existing tools — 이미 설정된 MCP 서버

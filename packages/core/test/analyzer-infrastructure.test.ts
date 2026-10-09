@@ -80,22 +80,23 @@ describe("REQ-010 Infrastructure Detection", () => {
   });
 
   it("AC-012-05 테스트 전용 Infrastructure Detector를 주입하면 Analyzer 변경 없이 결과에 나타난다", async () => {
-    await put({ "k8s/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\n", Dockerfile: "FROM alpine\n" });
-    const kubernetes: ProjectDetector = {
-      id: "test-kubernetes",
-      supports: (ctx) => ctx.files.some((f) => f.startsWith("k8s/")),
+    // v0.2.0부터 Kubernetes는 기본 Detector(kubernetes.ts)가 인식하므로, 기본 목록에 없는 기술의 예로 Terraform을 쓴다.
+    await put({ "infra/main.tf.json": "{\"terraform\": {\"required_version\": \">= 1.5\"}}\n", Dockerfile: "FROM alpine\n" });
+    const terraform: ProjectDetector = {
+      id: "test-terraform",
+      supports: (ctx) => ctx.files.some((f) => f.startsWith("infra/")),
       async detect(ctx) {
-        const doc = await ctx.readYaml("k8s/deployment.yaml");
-        const kind = typeof doc === "object" && doc !== null ? (doc as { kind?: unknown }).kind : undefined;
+        const doc = await ctx.readJson("infra/main.tf.json");
+        const ok = typeof doc === "object" && doc !== null && "terraform" in doc;
         return {
-          findings: kind === "Deployment"
-            ? [{ category: "infrastructure", id: "kubernetes", name: "Kubernetes", scope: "project", evidence: [{ file: "k8s/deployment.yaml", type: "config", value: "kind: Deployment" }] }]
+          findings: ok
+            ? [{ category: "infrastructure", id: "terraform", name: "Terraform", scope: "project", evidence: [{ file: "infra/main.tf.json", type: "config", value: "terraform block" }] }]
             : [],
         };
       },
     };
-    const p = await profile(root, [...defaultDetectors(), kubernetes]);
-    expect(p.infrastructure.map((i) => i.id)).toEqual(["docker", "kubernetes"]);
+    const p = await profile(root, [...defaultDetectors(), terraform]);
+    expect(p.infrastructure.map((i) => i.id)).toEqual(["docker", "terraform"]);
     expect((await profile()).infrastructure.map((i) => i.id)).toEqual(["docker"]); // 기본 목록에는 없음
   });
 });

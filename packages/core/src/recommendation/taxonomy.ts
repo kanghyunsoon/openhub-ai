@@ -1,15 +1,19 @@
 /**
- * Capability Taxonomy (D-010, taxonomyVersion 1).
+ * Capability Taxonomy (D-010, taxonomyVersion 2).
  *
  * Registry Manifest의 capabilities와 Gap 판정이 같은 기준 ID를 쓰도록 하는 코드 표다.
  * 현재 seed가 쓰는 capability ID 14개를 이름 변경 없이 표준 ID로 채택했다.
  * 표를 바꾸면 TAXONOMY_VERSION을 올리고 golden을 갱신한다.
  * 이 파일은 다른 recommendation·registry 모듈을 import하지 않는다(registry 검증이 이 표를 쓴다).
+ *
+ * taxonomyVersion 2(v0.2.0, docs/specs/stack-coverage.md): v1의 capability 14개·tech ID는 ID와 의미를 그대로 두고
+ * 뒤에 추가만 했다. capability 2개(game-engine-editor, kubernetes-operations), tech ID 10개(go, express, nestjs,
+ * jest, vitest, pytest, playwright, unity, unreal-engine, kubernetes). taxonomyVersion 1 보고서는 schema에서 거부한다.
  */
 
-export const TAXONOMY_VERSION = 1;
+export const TAXONOMY_VERSION = 2;
 
-export const CAPABILITY_DOMAINS = ["browser", "testing", "docs", "vcs-collab", "memory", "database", "code-intelligence"] as const;
+export const CAPABILITY_DOMAINS = ["browser", "testing", "docs", "vcs-collab", "memory", "database", "code-intelligence", "game-dev", "infrastructure"] as const;
 export type CapabilityDomain = (typeof CAPABILITY_DOMAINS)[number];
 
 export interface CapabilityDefinition {
@@ -33,6 +37,9 @@ export const CAPABILITIES: readonly CapabilityDefinition[] = Object.freeze([
   { id: "query-tuning", label: "쿼리 튜닝", domain: "database" },
   { id: "semantic-code-navigation", label: "의미 기반 코드 탐색", domain: "code-intelligence" },
   { id: "code-editing", label: "코드 편집", domain: "code-intelligence" },
+  // taxonomyVersion 2
+  { id: "game-engine-editor", label: "게임 엔진 에디터 연동", domain: "game-dev" },
+  { id: "kubernetes-operations", label: "Kubernetes 클러스터 조작", domain: "infrastructure" },
 ]);
 
 const BY_ID: ReadonlyMap<string, CapabilityDefinition> = new Map(CAPABILITIES.map((c) => [c.id, c]));
@@ -51,11 +58,12 @@ export function capabilityLabel(id: string): string {
  * Need Rule trigger와 Manifest `recommendation.appliesTo.stacks`는 이 집합 안의 값만 쓸 수 있다.
  */
 export const KNOWN_TECH_IDS = Object.freeze({
-  languages: Object.freeze(["typescript", "javascript", "python", "java", "csharp", "rust", "cpp"]),
-  frameworks: Object.freeze(["react", "nextjs", "vue", "spring-boot", "fastapi"]),
+  languages: Object.freeze(["typescript", "javascript", "python", "java", "csharp", "rust", "cpp", "go"]),
+  // 테스트 프레임워크·게임 엔진도 ProjectProfile의 frameworks 카테고리에 둔다(Profile 필드를 늘리지 않는다).
+  frameworks: Object.freeze(["react", "nextjs", "vue", "spring-boot", "fastapi", "express", "nestjs", "jest", "vitest", "pytest", "playwright", "unity", "unreal-engine"]),
   databases: Object.freeze(["postgresql", "mysql", "sqlite", "mongodb"]),
   packageManagers: Object.freeze(["pnpm", "npm", "yarn", "bun", "pip", "uv", "maven", "gradle", "cargo"]),
-  infrastructure: Object.freeze(["docker", "docker-compose", "github-actions", "git"]),
+  infrastructure: Object.freeze(["docker", "docker-compose", "github-actions", "git", "kubernetes"]),
   aiClients: Object.freeze(["claude-code", "codex", "cursor"]),
 } as const);
 export type TechCategory = keyof typeof KNOWN_TECH_IDS;

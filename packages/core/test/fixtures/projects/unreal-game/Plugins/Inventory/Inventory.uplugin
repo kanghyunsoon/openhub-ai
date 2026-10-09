@@ -1,0 +1,10 @@
+{
+  "FileVersion": 3,
+  "FriendlyName": "Inventory",
+  "Modules": [
+    {
+      "Name": "Inventory",
+      "Type": "Runtime"
+    }
+  ]
+}

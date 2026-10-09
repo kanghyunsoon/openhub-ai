@@ -79,7 +79,8 @@ describe("REQ-020 Registry Recommendation Metadata", () => {
   });
 
   it("AC-018-04 appliesTo.stacks에 M2 tech ID가 아닌 값이 있으면 실패한다", async () => {
-    await put("tool-a", manifestYaml("tool-a", "recommendation:\n  appliesTo: { stacks: [postgresql, kubernetes] }"));
+    // kubernetes는 taxonomyVersion 2부터 알려진 tech ID다. 아직 인식하지 않는 기술의 예로 terraform을 쓴다.
+    await put("tool-a", manifestYaml("tool-a", "recommendation:\n  appliesTo: { stacks: [postgresql, terraform] }"));
     await put("tool-b", manifestYaml("tool-b", "recommendation:\n  appliesTo: { stacks: [codex] }"));
     const r = await loadRegistry(root);
     expect(r.entries).toEqual([]);

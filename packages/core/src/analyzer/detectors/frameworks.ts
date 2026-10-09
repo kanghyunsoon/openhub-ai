@@ -7,6 +7,8 @@ import {
   baseName,
   filesMatching,
   filesNamed,
+  isAnalysisCandidate,
+  isRecord,
   normalizeImage,
   readCargo,
   readComposeServices,
@@ -64,6 +66,11 @@ export function createTechDetector(id: string, category: TechRule["category"], r
       for (const s of await collectSignals(ctx)) {
         for (const rule of mine) if (ruleMatches(rule[s.ecosystem], s.value)) found.add(category, rule.id, rule.name, s.evidence);
       }
+      for (const rule of mine) {
+        if (rule.configFiles === undefined) continue;
+        for (const file of filesNamed(ctx, ...rule.configFiles)) found.add(category, rule.id, rule.name, { file, type: "config", value: baseName(file) });
+      }
+      if (category === "frameworks") await detectGameEngines(ctx, found);
       if (category === "databases") {
         for (const file of filesMatching(ctx, COMPOSE_FILE)) {
           for (const svc of (await readComposeServices(ctx, file)) ?? []) {
@@ -92,3 +99,59 @@ export function createTechDetector(id: string, category: TechRule["category"], r
 
 export const frameworkDetector = createTechDetector("frameworks", "frameworks");
 export const databaseDetector = createTechDetector("databases", "databases");
+
+const UNITY_PROJECT_VERSION = /(^|\/)ProjectSettings\/ProjectVersion\.txt$/u;
+const UNITY_PACKAGE_MANIFEST = /(^|\/)Packages\/manifest\.json$/u;
+const SAFE_TOKEN = /^[0-9A-Za-z._{}+-]{1,64}$/u;
+const plainName = (v: unknown): string | undefined =>
+  typeof v === "string" && /^[\p{L}\p{N} ._+-]{1,80}$/u.test(v.trim()) ? v.trim() : undefined;
+
+/**
+ * 게임 엔진(taxonomyVersion 2). 엔진이 만드는 프로젝트 파일만 근거로 쓴다.
+ * - Unity: ProjectSettings/ProjectVersion.txt의 m_EditorVersion 줄, Packages/manifest.json의 com.unity.* 패키지.
+ *   .cs·.csproj만 있는 C# 프로젝트는 Unity가 아니다.
+ * - Unreal Engine: .uproject(EngineAssociation·Modules·FileVersion), .uplugin(FileVersion·Modules).
+ *   C++ 소스만 있는 프로젝트는 Unreal이 아니다. .uproject를 해석하지 못하면 파일 존재 근거만 남긴다(낮은 신뢰도).
+ * 줄 단위·구조 파서로 읽고, 근거 값은 안전한 토큰만 남긴다.
+ */
+async function detectGameEngines(ctx: ScanContext, found: FindingSet): Promise<void> {
+  for (const file of ctx.files.filter((f) => isAnalysisCandidate(f) && UNITY_PROJECT_VERSION.test(f))) {
+    const text = await ctx.readText(file);
+    if (text === undefined) continue;
+    for (const line of text.split(/\r?\n/u)) {
+      if (!line.startsWith("m_EditorVersion:")) continue;
+      const version = line.slice("m_EditorVersion:".length).trim();
+      if (SAFE_TOKEN.test(version)) found.add("frameworks", "unity", "Unity", { file, type: "config", value: "m_EditorVersion: " + version });
+      break;
+    }
+  }
+  for (const file of ctx.files.filter((f) => isAnalysisCandidate(f) && UNITY_PACKAGE_MANIFEST.test(f))) {
+    const json = await ctx.readJson(file);
+    const deps = isRecord(json) && isRecord(json["dependencies"]) ? Object.keys(json["dependencies"]).filter((d) => d.startsWith("com.unity.")) : [];
+    if (deps.length > 0) found.add("frameworks", "unity", "Unity", { file, type: "manifest", value: "com.unity packages: " + String(deps.length) });
+  }
+  for (const file of filesMatching(ctx, /\.uproject$/u)) {
+    const json = await ctx.readJson(file);
+    if (!isRecord(json)) {
+      found.add("frameworks", "unreal-engine", "Unreal Engine", { file, type: "file-presence", value: baseName(file) });
+      continue;
+    }
+    const engine = json["EngineAssociation"];
+    const modules = Array.isArray(json["Modules"]) ? json["Modules"].map((m) => (isRecord(m) ? plainName(m["Name"]) : undefined)).filter((m): m is string => m !== undefined) : [];
+    const value =
+      typeof engine === "string" && SAFE_TOKEN.test(engine)
+        ? "EngineAssociation: " + engine
+        : modules.length > 0
+          ? ("Modules: " + modules.join(", ")).slice(0, 200)
+          : typeof json["FileVersion"] === "number"
+            ? "FileVersion: " + String(json["FileVersion"])
+            : undefined;
+    if (value !== undefined) found.add("frameworks", "unreal-engine", "Unreal Engine", { file, type: "config", value });
+  }
+  for (const file of filesMatching(ctx, /\.uplugin$/u)) {
+    const json = await ctx.readJson(file);
+    if (!isRecord(json) || (typeof json["FileVersion"] !== "number" && !Array.isArray(json["Modules"]))) continue;
+    const name = plainName(json["FriendlyName"]) ?? baseName(file).replace(/\.uplugin$/u, "");
+    found.add("frameworks", "unreal-engine", "Unreal Engine", { file, type: "config", value: ("plugin: " + name).slice(0, 200) });
+  }
+}

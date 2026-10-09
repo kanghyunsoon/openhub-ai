@@ -200,6 +200,10 @@
       "status": "partial"
     },
     {
+      "id": "kubernetes",
+      "status": "ok"
+    },
+    {
       "id": "languages",
       "status": "partial"
     },
