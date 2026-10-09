@@ -1,7 +1,7 @@
 {
   "entries": {
     "project:<projectKey>:claude-code:memory": {
-      "appliedPlanDigest": "sha256:6e9e646d22818e6869997829a2347d4b6cdc9986b43c0353d5faff90eb57e8ea",
+      "appliedPlanDigest": "sha256:89a320d72aa4d969446c9ca081e6b20dba75a3699633272a97be63b898e34178",
       "artifact": {
         "requested": "@modelcontextprotocol/server-memory",
         "resolved": null

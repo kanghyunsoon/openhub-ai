@@ -58,19 +58,22 @@ Registry after batch 1: 8 tools. No taxonomy change was needed (`kubernetes-oper
 | --- | --- |
 | Upstream | github.com/containers/kubernetes-mcp-server, Apache-2.0, not archived, last push 2026-10-09 |
 | Package | npm `kubernetes-mcp-server` 0.0.67 (published 2026-09-18). A small Node launcher plus a Go binary from six platform packages (`kubernetes-mcp-server-{linux,darwin,windows}-{amd64,arm64}`), all pointing to the same repository with SLSA provenance attestations. No install scripts. |
-| Backend | npx: `npx -y kubernetes-mcp-server --read-only`. The version floats like the other npx tools; OpenHub's resolver pins it at install time (floating-artifact approval). |
+| Backend | npx: `npx -y kubernetes-mcp-server --read-only --toolsets core`. The version floats like the other npx tools; OpenHub's resolver pins it at install time (floating-artifact approval). |
 | Clients | Claude Code and Cursor are documented upstream. Codex is not documented upstream; it is a standard stdio server and the OpenHub sandbox test writes and verifies the Codex project config. |
 | Platforms | Windows, macOS, Linux (amd64 and arm64 binaries) |
 | Environment | `KUBECONFIG` (optional, name only). The server uses the current context of the user's kubeconfig. OpenHub never reads or edits the kubeconfig. |
 | Permissions | Whatever the kubeconfig credentials allow in the cluster. Cluster RBAC is the real boundary. |
 | Tools, default | 20 tools; destructive: `pods_delete`, `pods_exec`, `resources_create_or_update`, `resources_delete`, `resources_scale`; not read-only: `pods_run` |
-| Tools, `--read-only` (what OpenHub installs) | 14 tools, all `readOnlyHint=true`: configuration_view, events_list, namespaces_list, nodes_log, nodes_stats_summary, nodes_top, pods_get, pods_list, pods_list_in_namespace, pods_log, pods_top, projects_list, resources_get, resources_list |
-| Read-only is not "no sensitive data" | `resources_get` can read Secret objects if RBAC allows; `pods_log` and `nodes_log` return logs; `configuration_view` returns kubeconfig details (whether credentials are redacted was not verified). Use a least-privilege context. |
+| Tools, `--read-only` only | 14 tools, all `readOnlyHint=true`, including `configuration_view` |
+| Tools, `--read-only --toolsets core` (what OpenHub installs) | 13 tools, all `readOnlyHint=true`: events_list, namespaces_list, nodes_log, nodes_stats_summary, nodes_top, pods_get, pods_list, pods_list_in_namespace, pods_log, pods_top, projects_list, resources_get, resources_list. Calling `configuration_view` returns "unknown tool". |
+| Finding: kubeconfig credentials (blocked) | With `--read-only` alone, `configuration_view` returned the bearer token of the current user unredacted; with `minified: false` it returned every user's token, client key data, username and password. Verified with a synthetic kubeconfig (fake token, throwaway self-signed certificate and key). `--toolsets core` removes the tool; the E2E test asserts it. |
+| Finding: Secret values (not blockable by OpenHub) | `resources_get` with `kind: Secret` returned the Secret's `data` (base64) unredacted. Verified against a local fake Kubernetes API server with one synthetic Secret. Upstream can deny resource kinds only through a config file (`--config` path or the `MCP_CONFIG_PATH` value), which a Manifest cannot express. Exposure therefore depends on the kubeconfig user's RBAC: if it may `get secrets`, the agent can read them. `pods_log` and `nodes_log` can also return secrets printed in logs. |
 | Install vs cluster access | Installing only writes the client config. At startup the server does not contact the cluster (verified with an unreachable API server address); it contacts the cluster only when a tool is called. It refuses to start without a kubeconfig that has a current context, so the Health Check needs one. |
 | Duplicates | None in the Registry. Alias `kubernetes`. |
 | Capability | `kubernetes-operations`; `appliesTo.stacks: [kubernetes]` |
-| Health Check (OpenHub) | `healthy`, tool count 14. Empty npm cache: test finished in about 15 s (under the 20 s startup limit); warm cache: about 1.4 s. |
-| Unverified | Behaviour against a real cluster (not used); redaction in `configuration_view`; Linux and macOS runs (expected in the `registry-remote.yml` sandbox job). |
+| Health Check (OpenHub) | `healthy`, tool count 13 with `--toolsets core` (14 before). Empty npm cache: test finished in about 15 s (under the 20 s startup limit); warm cache: about 1.4 s. |
+| E2E assertions | All three client configs contain both flags and no kubeconfig data; every exposed tool has `readOnlyHint=true` and no `destructiveHint`; no destructive tool or `configuration_view` is listed; calling `configuration_view` is rejected; the fake token never appears in the server output. |
+| Unverified | Behaviour against a real cluster (not used); macOS. |
 
 ### mongodb-js/mongodb-mcp-server (deferred)
 

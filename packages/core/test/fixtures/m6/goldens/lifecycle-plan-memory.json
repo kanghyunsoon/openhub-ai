@@ -36,7 +36,7 @@
   ],
   "source": {
     "manifestDigest": "sha256:b669e396f7dcbd05e48a75440e334fe73432256cd9d249e2b253cb290ce54a1c",
-    "registryDigest": "sha256:8de0a1433d125f28872777cbf961f7803baacfbc2c2778c97896637e76404189",
+    "registryDigest": "sha256:3b63e9ae66462cf66b61e0a151e2594380b8107d3ff1afcae73f4949a9a2c45a",
     "stateDigest": "<stateDigest: Version State 파일 byte의 sha256, projectKey에 따라 다름>"
   },
   "status": "ready",

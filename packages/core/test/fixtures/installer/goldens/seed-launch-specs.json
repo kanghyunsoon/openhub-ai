@@ -71,13 +71,17 @@
         "args": [
           "-y",
           "kubernetes-mcp-server",
-          "--read-only"
+          "--read-only",
+          "--toolsets",
+          "core"
         ],
         "clientSpec": {
           "args": [
             "-y",
             "kubernetes-mcp-server",
-            "--read-only"
+            "--read-only",
+            "--toolsets",
+            "core"
           ],
           "command": "npx"
         },
@@ -245,7 +249,9 @@
         "args": [
           "-y",
           "kubernetes-mcp-server",
-          "--read-only"
+          "--read-only",
+          "--toolsets",
+          "core"
         ],
         "clientSpec": {
           "args": [
@@ -254,7 +260,9 @@
             "npx",
             "-y",
             "kubernetes-mcp-server",
-            "--read-only"
+            "--read-only",
+            "--toolsets",
+            "core"
           ],
           "command": "cmd"
         },

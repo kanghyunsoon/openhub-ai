@@ -1,7 +1,7 @@
 schemaVersion: 1
 name: kubernetes-mcp-server
 displayName: Kubernetes MCP Server
-summary: kubeconfig의 현재 context로 리소스·Pod 로그·이벤트를 조회하는 Kubernetes MCP 서버(OpenHub는 --read-only로 설치)
+summary: kubeconfig의 현재 context로 리소스·Pod 로그·이벤트를 조회하는 Kubernetes MCP 서버(OpenHub는 --read-only --toolsets core로 설치)
 repository:
   github: containers/kubernetes-mcp-server
 category: [mcp, automation]
@@ -15,8 +15,10 @@ env:
 install:
   preferredAdapter: npx
   options:
-    # --read-only: readOnlyHint 도구만 노출한다(pod 삭제·exec, 리소스 생성·수정·삭제·scale 제외). 검증 기록: docs/specs/registry-expansion.md
-    command: "npx -y kubernetes-mcp-server --read-only"
+    # --read-only: readOnlyHint 도구만 노출한다(pod 삭제·exec, 리소스 생성·수정·삭제·scale 제외).
+    # --toolsets core: config toolset(configuration_view)을 뺀다. configuration_view는 read-only여도 kubeconfig의 token·client key·password를 그대로 돌려준다.
+    # 남는 위험: resources_get은 RBAC가 허용하면 Secret 값을 돌려준다(플래그로 막을 수 없음). 검증 기록: docs/specs/registry-expansion.md
+    command: "npx -y kubernetes-mcp-server --read-only --toolsets core"
 healthCheck:
   type: mcp-handshake
 update:
