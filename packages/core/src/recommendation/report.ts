@@ -71,7 +71,14 @@ export const needReportSchema = z.strictObject({
 });
 
 /** URL에 담긴 계정·비밀번호, 대표적인 token 형태. 보고서 문자열에 있으면 안 된다. */
-export const URL_CREDENTIAL_PATTERN = /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@/u;
+/**
+ * scheme://user:password@ 형태의 URL credential.
+ * 예전 패턴(/[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@/u)은 긴 영숫자 구간의 모든 위치를 scheme 시작점으로
+ * 다시 시도해서 입력 길이의 제곱으로 느려졌다(외부 npm deprecated·release title·discovery 설명 64 KiB에 수 초).
+ * 가장 왼쪽 일치의 시작은 언제나 "scheme 문자 구간의 첫 글자"이므로, lookbehind로 그 위치에서만 시작하게 했다.
+ * match·replace 결과는 예전 패턴과 같다(test/recommendation/url-credential.test.ts가 대조한다).
+ */
+export const URL_CREDENTIAL_PATTERN = /[A-Za-z](?<=(?:^|[^A-Za-z0-9+.-])[0-9+.-]*[A-Za-z])[A-Za-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@/u;
 export const TOKEN_PATTERN = /\b(?:ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|xox[abpr]-[A-Za-z0-9-]{10,})\b/u;
 
 function strings(value: unknown, path: (string | number)[] = []): { path: (string | number)[]; value: string }[] {
