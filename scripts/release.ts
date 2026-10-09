@@ -13,6 +13,14 @@
  *   sums        --dir <dist>                       SHA256SUMS 작성(installer·AppImage·tgz·SBOM)
  *   verify-sums --dir <dist>                       SHA256SUMS 재계산 비교
  *   coverage    --dir <dist> --reports <dir>       job별 보고서를 합쳐 release-coverage.json 작성·검사
+ *
+ * GitHub Release 단계(release job·release-verify.yml). GitHub API 호출은 workflow의 gh가 하고, 이 명령은 그 JSON만 읽는다.
+ *   check-tag      --tag <vX.Y.Z>                                    SemVer tag이고 package 버전과 같은지
+ *   release-assets --dir <dist> [--list <file>]                       필수 asset 8개·버전·SHA256SUMS 확인, 올릴 경로 목록 작성
+ *   github-plan    --tag <t> --releases <json> --github-output <file> 같은 tag Release 판정(create·reuse, 공개됐거나 여럿이면 중단)
+ *   github-notes   --tag <t> --releases <json> --notes-file <md> --out <json>   tag_name을 보존하는 draft notes PATCH 본문
+ *   github-verify  --tag <t> --releases <json> --expect draft|published (--dir <dist> | --sums <file>) [--before <json> --release-id <id>]
+ *                  Release API 기준 asset 검증. --before·--release-id를 주면 재사용한 draft의 id·tag·target·제목·본문이 그대로인지도 본다.
  * 각 명령은 --report <file>에 자기 결과를 합쳐 쓴다(job별 부분 보고서).
  */
 import { execFileSync, execSync, spawnSync } from "node:child_process";
@@ -49,6 +57,18 @@ import {
   type RuntimeEvidence,
   type RuntimeTarget,
 } from "./release-lib";
+import {
+  SHA256SUMS_FILE,
+  checkLocalAssets,
+  checkReleaseTag,
+  draftNotesUpdate,
+  flattenReleases,
+  planDraftRelease,
+  releaseAssetNames,
+  verifyGithubRelease,
+  type LocalAsset,
+  type GithubRelease,
+} from "./release-github-lib";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const [command, ...rest] = process.argv.slice(2);
@@ -58,6 +78,8 @@ const { values } = parseArgs({
     out: { type: "string" }, dir: { type: "string" }, name: { type: "string" }, kind: { type: "string" }, tgz: { type: "string" }, file: { type: "string" },
     installer: { type: "string" }, report: { type: "string" }, reports: { type: "string" }, artifact: { type: "string" }, "count-only": { type: "boolean", default: false },
     "cli-metafile": { type: "string" }, "desktop-metafile": { type: "string" },
+    tag: { type: "string" }, releases: { type: "string" }, sums: { type: "string" }, expect: { type: "string" }, "notes-file": { type: "string" }, list: { type: "string" }, "github-output": { type: "string" },
+    before: { type: "string" }, "release-id": { type: "string" },
   },
   strict: true,
 });
@@ -376,6 +398,70 @@ function coverage() {
   console.log("✓ release-coverage.json: artifact " + rows.length + "개 모두 SBOM·검사·Electron evidence 있음");
 }
 
+function localAssets(dir: string): LocalAsset[] {
+  return readdirSync(dir)
+    .filter((f) => statSync(path.join(dir, f)).isFile())
+    .map((f) => {
+      const buf = readFileSync(path.join(dir, f));
+      return { name: f, size: buf.length, sha256: sha256(buf) };
+    });
+}
+const readReleasesFrom = (file: string) => flattenReleases(JSON.parse(readFileSync(path.resolve(file), "utf8")));
+const readReleases = () => readReleasesFrom(need(values.releases, "--releases"));
+const printIssues = (warnings: readonly string[]) => {
+  for (const w of warnings) console.log("  경고: " + w);
+};
+function checkTag() {
+  const errors = checkReleaseTag(need(values.tag, "--tag"), version);
+  if (errors.length > 0) fail(errors.join("; "));
+  console.log("✓ tag " + values.tag + " = package v" + version);
+}
+function releaseAssets() {
+  const dir = path.resolve(need(values.dir, "--dir"));
+  const sumsPath = path.join(dir, SHA256SUMS_FILE);
+  const sumsEntries = existsSync(sumsPath) ? parseSha256Sums(readFileSync(sumsPath, "utf8")) : [];
+  const errors = checkLocalAssets(version, localAssets(dir), sumsEntries);
+  if (errors.length > 0) fail("Release asset 계약 위반:\n  " + errors.join("\n  "));
+  const names = releaseAssetNames(version);
+  if (values.list !== undefined) writeFileSync(path.resolve(values.list), names.map((n) => path.join(dir, n)).join("\n") + "\n");
+  console.log("✓ Release asset " + names.length + "개 (" + names.join(", ") + ")");
+}
+function githubPlan() {
+  const tag = need(values.tag, "--tag");
+  const plan = planDraftRelease(readReleases(), tag);
+  if (plan.action === "stop") fail(plan.reason);
+  const lines = "action=" + plan.action + "\nrelease_id=" + (plan.action === "reuse" ? String(plan.releaseId) : "") + "\n";
+  if (values["github-output"] !== undefined) writeFileSync(path.resolve(values["github-output"]), lines, { flag: "a" });
+  console.log("✓ " + tag + ": " + (plan.action === "reuse" ? "기존 draft 재사용(id " + plan.releaseId + ")" : "새 draft 생성"));
+}
+function githubNotes() {
+  const tag = need(values.tag, "--tag");
+  const plan = planDraftRelease(readReleases(), tag);
+  if (plan.action !== "reuse") return fail(tag + "에 고칠 draft가 하나 있어야 합니다(" + (plan.action === "stop" ? plan.reason : "Release 없음") + ")");
+  const release = readReleases().find((r) => r.id === plan.releaseId)!;
+  const payload = draftNotesUpdate(release, tag, { body: readFileSync(path.resolve(need(values["notes-file"], "--notes-file")), "utf8") });
+  writeFileSync(path.resolve(need(values.out, "--out")), JSON.stringify(payload) + "\n");
+  console.log("✓ draft id " + release.id + " notes 갱신 본문(tag_name " + payload.tag_name + " 유지)");
+}
+function githubVerify() {
+  const tag = need(values.tag, "--tag");
+  const expect = values.expect === "draft" || values.expect === "published" ? values.expect : fail("--expect draft|published가 필요합니다");
+  const dir = values.dir === undefined ? null : path.resolve(values.dir);
+  const sumsText = readFileSync(dir === null ? path.resolve(need(values.sums, "--sums 또는 --dir")) : path.join(dir, SHA256SUMS_FILE), "utf8");
+  let preserved: GithubRelease | undefined;
+  if (values.before !== undefined || values["release-id"] !== undefined) {
+    const id = Number(need(values["release-id"], "--release-id"));
+    preserved = readReleasesFrom(need(values.before, "--before")).find((r) => r.id === id) ?? fail("--before에 Release id " + String(id) + "가 없습니다");
+  }
+  const result = verifyGithubRelease({ tag, version, releases: readReleases(), expect, sums: parseSha256Sums(sumsText), ...(dir === null ? {} : { local: localAssets(dir) }), ...(preserved === undefined ? {} : { preserved }) });
+  printIssues(result.warnings);
+  if (!result.ok) fail("GitHub Release 검증 실패(id " + String(result.releaseId) + "):\n  " + result.errors.join("\n  "));
+  console.log("✓ GitHub Release id " + result.releaseId + " (" + expect + "): 필수 asset " + releaseAssetNames(version).length + "개 이름·중복·상태·크기 확인");
+  if (preserved !== undefined) console.log("  재사용한 draft의 id·tag·target·제목·Release Notes 본문 그대로");
+  console.log("  digest 일치(독립 기대 해시와 비교): " + result.digestVerified.length + "개 — " + result.digestVerified.join(", "));
+  if (result.digestUnchecked.length > 0) console.log("  digest 비교 안 함(독립 기대 해시 없음): " + result.digestUnchecked.join(", "));
+}
+
 const commands: Record<string, () => unknown> = {
   "deps-sbom": depsSbom,
   "artifact-sbom": artifactSbom,
@@ -388,6 +474,11 @@ const commands: Record<string, () => unknown> = {
   sums,
   "verify-sums": verifySums,
   coverage,
+  "check-tag": checkTag,
+  "release-assets": releaseAssets,
+  "github-plan": githubPlan,
+  "github-notes": githubNotes,
+  "github-verify": githubVerify,
 };
 const run = commands[command ?? ""];
 if (run === undefined) fail("알 수 없는 명령: " + String(command) + " (" + Object.keys(commands).join(", ") + ")");

@@ -67,5 +67,32 @@ The dry-run opens the real artifacts and fails if a notice is missing: OpenHub `
 ## Publishing (manual)
 
 1. Run the release workflow on the release tag with `dry_run=false` and `publish=true`.
-2. Review the draft Release, its `SHA256SUMS`, SBOMs and `release-coverage.json`.
-3. Publish the draft. npm publishing is not part of this workflow.
+   The `release` job checks that the tag equals the package version and that the eight required assets exist locally (installer, AppImage, CLI tgz, three SBOMs, `release-coverage.json`, `SHA256SUMS`). It then looks up existing Releases for the tag:
+   - none: it creates a draft Release with the assets attached;
+   - exactly one draft: it reuses that draft and re-uploads the assets only. The draft's Release Notes, title, tag and target are left as they are, so notes written by a maintainer survive a rerun; the verification step fails if any of them changed;
+   - a published Release, or more than one draft: it stops without changing anything.
+   Finally it reads the draft back from the GitHub Release API and fails unless every required asset is present exactly once, is fully uploaded and has the local size, and every one of the eight assets has a GitHub digest (`sha256:<64 hex>`) equal to the hash of the local file (and, for the six checksummed files, to `SHA256SUMS`). A missing or malformed digest is a failure. A workflow artifact alone is not enough to pass. Rerunning the workflow for the same tag reuses the same draft instead of creating another one.
+2. Open **that** draft from the repository's Releases list (drafts appear only there). Do not use "Draft a new release" or create a Release from the tag page: GitHub allows several Releases per tag, and a second Release starts with no assets.
+3. Review the draft Release, its `SHA256SUMS`, SBOMs and `release-coverage.json`.
+4. Publish the draft: on the draft's page choose **Edit**, then **Publish release**. From the command line, publish it by id and keep the tag in the same request:
+   `gh api -X PATCH "repos/<owner>/<repo>/releases/<draft id>" -f tag_name=vX.Y.Z -F draft=false`.
+   npm publishing is not part of this workflow.
+5. Publishing triggers `.github/workflows/release-verify.yml`. It checks the published Release: one published Release for the tag, all eight assets present once, uploaded and non-empty, and the GitHub digests of the six checksummed files equal to the published `SHA256SUMS`. It does not claim to verify the digests of `SHA256SUMS` and `release-coverage.json` themselves (there is no independent expected hash for them after publishing; the draft check compared them with the built files). It only reads; a failure means the published Release is incomplete and must be fixed by hand.
+
+   Limitation: this workflow runs with `contents: read`, and a read-only token does not list draft Releases. A leftover draft for the same tag is therefore not visible here; the release job (which has `contents: write`) refuses to run when a published Release or several drafts exist for the tag.
+
+### Editing a draft's notes safely
+
+When a draft Release is updated through the API without `tag_name`, GitHub detaches the draft from its tag (the tag shows as `untagged-…` and the draft URL changes). Always send the tag with the notes:
+
+```sh
+gh api --paginate --slurp "repos/<owner>/<repo>/releases?per_page=100" > releases.json
+pnpm release github-notes --tag vX.Y.Z --releases releases.json --notes-file notes.md --out notes.json
+gh api -X PATCH "repos/<owner>/<repo>/releases/<draft id>" --input notes.json
+gh api --paginate --slurp "repos/<owner>/<repo>/releases?per_page=100" > releases.json
+pnpm release github-verify --tag vX.Y.Z --releases releases.json --sums SHA256SUMS --expect draft
+```
+
+`github-notes` refuses to edit a published Release or a draft whose tag is already detached, and the payload never touches assets.
+
+For v0.1.0 the workflow's draft (with all eight assets) stayed unpublished, and a second Release created for the same tag was published without assets; the assets were then attached by hand. The checks above make both situations fail loudly.
