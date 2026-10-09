@@ -15,6 +15,6 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["packages/*/src", "packages/*/test", "apps/*/src", "apps/*/test", "test", "vitest.config.ts"],
+  "include": ["packages/*/src", "packages/*/test", "apps/*/src", "apps/*/test", "test", "scripts", "vitest.config.ts"],
   "exclude": ["packages/*/test/fixtures"]
 }
