@@ -16,6 +16,7 @@
  *
  * GitHub Release 단계(release job·release-verify.yml). GitHub API 호출은 workflow의 gh가 하고, 이 명령은 그 JSON만 읽는다.
  *   check-tag      --tag <vX.Y.Z>                                    SemVer tag이고 package 버전과 같은지
+ *   check-notes    --tag <vX.Y.Z>                                    사용자용 Release Notes(docs/release-notes/<tag>.md) 계약 확인
  *   release-assets --dir <dist> [--list <file>]                       필수 asset 8개·버전·SHA256SUMS 확인, 올릴 경로 목록 작성
  *   github-plan    --tag <t> --releases <json> --github-output <file> 같은 tag Release 판정(create·reuse, 공개됐거나 여럿이면 중단)
  *   github-notes   --tag <t> --releases <json> --notes-file <md> --out <json>   tag_name을 보존하는 draft notes PATCH 본문
@@ -60,11 +61,13 @@ import {
 import {
   SHA256SUMS_FILE,
   checkLocalAssets,
+  checkReleaseNotes,
   checkReleaseTag,
   draftNotesUpdate,
   flattenReleases,
   planDraftRelease,
   releaseAssetNames,
+  releaseNotesPath,
   verifyGithubRelease,
   type LocalAsset,
   type GithubRelease,
@@ -416,6 +419,14 @@ function checkTag() {
   if (errors.length > 0) fail(errors.join("; "));
   console.log("✓ tag " + values.tag + " = package v" + version);
 }
+function checkNotes() {
+  const tag = need(values.tag, "--tag");
+  const file = releaseNotesPath(tag);
+  if (!existsSync(path.join(ROOT, file))) fail("사용자용 Release Notes가 없습니다: " + file);
+  const errors = [...checkReleaseTag(tag, version), ...checkReleaseNotes(tag, version, readFileSync(path.join(ROOT, file), "utf8"))];
+  if (errors.length > 0) fail(file + " 계약 위반:\n  " + errors.join("\n  "));
+  console.log("✓ Release Notes " + file);
+}
 function releaseAssets() {
   const dir = path.resolve(need(values.dir, "--dir"));
   const sumsPath = path.join(dir, SHA256SUMS_FILE);
@@ -475,6 +486,7 @@ const commands: Record<string, () => unknown> = {
   "verify-sums": verifySums,
   coverage,
   "check-tag": checkTag,
+  "check-notes": checkNotes,
   "release-assets": releaseAssets,
   "github-plan": githubPlan,
   "github-notes": githubNotes,

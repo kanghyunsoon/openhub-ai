@@ -2,7 +2,7 @@
  * OpenHub Core 공개 API. 하위 모듈을 다시 내보내기만 한다.
  * 각 기능의 설명과 계약은 하위 모듈 파일에 있다.
  */
-export const OPENHUB_CORE_VERSION = "0.1.0";
+export const OPENHUB_CORE_VERSION = "0.1.1";
 
 export * from "./manifest/index";
 export * from "./registry/index";

@@ -22,7 +22,7 @@ describe("REQ-065 TASK-071 배포 산출물", () => {
   it("AC-071-02·03 CLI tgz는 단일 bundle·registry·snapshot·LICENSE·NOTICES를 담고 의존이 없으며 임시 prefix 설치 후 저장소 밖에서 실행된다", { timeout: 180_000 }, () => {
     const out = path.join(scratch, "out");
     execFileSync(process.execPath, [tsxCli, "scripts/pack-cli.ts", "--metadata", SEED, "--out", out], { cwd: ROOT, stdio: "pipe" });
-    const tgz = path.join(out, "openhub-ai-0.1.0.tgz");
+    const tgz = path.join(out, "openhub-ai-0.1.1.tgz");
     expect(existsSync(tgz)).toBe(true);
     const list = execFileSync("tar", ["-tzf", tgz], { encoding: "utf8" }).split(/\r?\n/u).filter(Boolean).sort();
     for (const f of ["package/dist/openhub.cjs", "package/dist/registry/catalog.yaml", "package/dist/registry/metadata.snapshot.json", "package/dist/registry/database/postgres-mcp.yaml", "package/LICENSE", "package/THIRD_PARTY_NOTICES.md", "package/package.json"]) expect(list).toContain(f);
@@ -33,7 +33,7 @@ describe("REQ-065 TASK-071 배포 산출물", () => {
     execFileSync("tar", ["-xzf", tgz, "-C", extract]);
     const pkgText = readFileSync(path.join(extract, "package", "package.json"), "utf8");
     const pkg = JSON.parse(pkgText) as Record<string, unknown>;
-    expect(pkg).toMatchObject({ name: "openhub-ai", version: "0.1.0", bin: { openhub: "dist/openhub.cjs" }, license: "MIT", private: true });
+    expect(pkg).toMatchObject({ name: "openhub-ai", version: "0.1.1", bin: { openhub: "dist/openhub.cjs" }, license: "MIT", private: true });
     expect(pkg["dependencies"]).toBeUndefined();
     expect(pkgText).not.toMatch(/workspace:|tsx/u);
     const bundle = readFileSync(path.join(extract, "package", "dist", "openhub.cjs"), "utf8");
@@ -47,7 +47,7 @@ describe("REQ-065 TASK-071 배포 산출물", () => {
     const bin = win ? path.join(prefix, "openhub.cmd") : path.join(prefix, "bin", "openhub");
     const env = { ...process.env, OPENHUB_REGISTRY: "", OPENHUB_METADATA: "" };
     const run = (args: string) => execSync(JSON.stringify(bin) + " " + args, { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-    expect(run("--version").trim()).toBe("0.1.0");
+    expect(run("--version").trim()).toBe("0.1.1");
     expect((JSON.parse(run("registry list --json")) as unknown[]).length).toBe(7);
     expect(JSON.parse(run("project scan " + JSON.stringify(path.join(ROOT, "packages/core/test/fixtures/projects/react-spring-monorepo")) + " --json"))).toMatchObject({ schemaVersion: expect.any(Number) });
     expect((JSON.parse(run("doctor --json")) as { registry: { source: string } }).registry.source).toBe("설치 패키지의 registry");
