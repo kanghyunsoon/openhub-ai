@@ -98,6 +98,10 @@
       "status": "ok"
     },
     {
+      "id": "kubernetes",
+      "status": "ok"
+    },
+    {
       "id": "languages",
       "status": "ok"
     },

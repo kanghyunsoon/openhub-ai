@@ -5,6 +5,7 @@ import {
   DEFAULT_METADATA_CACHE,
   analyzeProject,
   capabilityLabel,
+  diagnoseRecommendation,
   fingerprintServers,
   formatRegistryIssue,
   identityHintsFrom,
@@ -17,6 +18,7 @@ import {
   type HostEnvironment,
   type MetadataSnapshot,
   type ProjectDetector,
+  type RecommendationDiagnosis,
   type RecommendationReport,
 } from "@openhub/core";
 import { metadataOf, registryDirOf } from "./paths";
@@ -49,7 +51,16 @@ const STATE_LABEL: Readonly<Record<string, string>> = {
 const SCOPE_LABEL: Readonly<Record<string, string>> = { project: "프로젝트", user: "사용자" };
 const score = (n: number | null) => (n === null ? "—" : n.toFixed(2));
 
-export function formatRecommendations(report: RecommendationReport): string[] {
+/** 추천이 비었을 때의 이유(v0.2.0 P0-1). 보고서 계약은 바꾸지 않고 사람용 출력에만 쓴다. */
+const EMPTY_REASON_LABEL: Readonly<Record<NonNullable<RecommendationDiagnosis["emptyReason"]>, string>> = {
+  "no-stack-detected": "언어·프레임워크·DB·인프라를 인식하지 못했습니다(README 언급은 근거로 쓰지 않습니다)",
+  "no-mapped-need": "인식한 기술에 연결된 Capability 규칙이 없습니다",
+  "no-verified-tool": "필요한 Capability는 있지만 Verified Registry에 해당 도구가 없습니다",
+  "all-satisfied": "필요한 Capability가 모두 설치된 도구로 충족됐습니다",
+  "candidates-excluded": "후보 도구가 호환성·설치 상태로 모두 제외됐습니다",
+};
+
+export function formatRecommendations(report: RecommendationReport, diagnosis?: RecommendationDiagnosis): string[] {
   const lines = [`OpenHub Recommendations — ${report.project.name}`, ""];
   const userInspected = report.assessment.inspectedScopes.includes("user");
   lines.push(`검사 범위  ${userInspected ? "프로젝트 + 사용자" : "프로젝트 (사용자 범위 미검사 — --include-host로 확인)"}`);
@@ -59,7 +70,10 @@ export function formatRecommendations(report: RecommendationReport): string[] {
   );
   if (report.assessment.unresolvedInstalledTools > 0) lines.push(`  식별되지 않은 MCP ${report.assessment.unresolvedInstalledTools}개가 있어 Gap을 confirmed로 단정하지 않습니다`);
   lines.push("", "추천");
-  if (report.recommendations.length === 0) lines.push("  (추천할 도구 없음)");
+  if (report.recommendations.length === 0) {
+    const reason = diagnosis?.emptyReason;
+    lines.push(reason === undefined || reason === null ? "  (추천할 도구 없음)" : `  (추천할 도구 없음) ${EMPTY_REASON_LABEL[reason]}`);
+  }
   for (const r of report.recommendations) {
     const primary = r.covers.find((c) => c.capability === r.primaryCapability);
     lines.push(`${String(r.rank).padStart(2)}. ${r.displayName} (${r.toolId})  [${STATE_LABEL[primary?.state ?? ""]} · ${primary?.priority} · ${capabilityLabel(r.primaryCapability)}]`);
@@ -77,6 +91,10 @@ export function formatRecommendations(report: RecommendationReport): string[] {
   if (noCandidate.length > 0) {
     lines.push("", "후보 없는 Gap");
     for (const n of noCandidate) lines.push(`  - ${n.label} [${STATE_LABEL[n.state]}]: ${n.reasons[0]?.message}`);
+  }
+  if (diagnosis !== undefined && diagnosis.unmappedTechs.length > 0) {
+    lines.push("", "추천으로 연결되지 않은 기술");
+    lines.push(`  - ${diagnosis.unmappedTechs.join(", ")}: 연결된 Capability 규칙이 없습니다`);
   }
   if (report.assessment.warnings.length > 0) {
     lines.push("", `Warnings (${report.assessment.warnings.length})`);
@@ -137,6 +155,6 @@ export async function runRecommend(argv: readonly string[], io: RecommendCommand
     io.out(serializeRecommendationReport(report).trimEnd());
     return 0;
   }
-  for (const line of formatRecommendations(report)) io.out(line);
+  for (const line of formatRecommendations(report, diagnoseRecommendation(analysis.profile, report))) io.out(line);
   return 0;
 }

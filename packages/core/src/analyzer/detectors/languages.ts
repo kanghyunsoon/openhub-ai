@@ -23,8 +23,20 @@ const LANG = {
   csharp: "C#",
   rust: "Rust",
   cpp: "C++",
+  go: "Go",
 } as const;
 type LangId = keyof typeof LANG;
+
+/** go.mod의 module 경로(첫 module 지시문). 없거나 형식이 맞지 않으면 undefined. 줄 단위로만 읽는다. */
+function goModulePath(text: string): string | undefined {
+  for (const raw of text.split(/\r?\n/u)) {
+    const line = raw.trim();
+    if (!line.startsWith("module")) continue;
+    const rest = line.slice("module".length).trim().replace(/^"(.*)"$/u, "$1");
+    return /^[A-Za-z0-9._~/-]{1,200}$/u.test(rest) ? rest : undefined;
+  }
+  return undefined;
+}
 
 /** 확장자 개수는 보조 Evidence(가중치 0.4)로만 쓴다. */
 const EXTENSIONS: [LangId, RegExp, string][] = [
@@ -35,6 +47,7 @@ const EXTENSIONS: [LangId, RegExp, string][] = [
   ["csharp", /\.cs$/u, ".cs"],
   ["rust", /\.rs$/u, ".rs"],
   ["cpp", /\.(cpp|cc|cxx|hpp|hh|h)$/u, ".cpp/.h"],
+  ["go", /\.go$/u, ".go"],
 ];
 
 export const languageDetector: ProjectDetector = {
@@ -74,6 +87,13 @@ export const languageDetector: ProjectDetector = {
     for (const file of filesNamed(ctx, "Cargo.toml")) {
       const cargo = await readCargo(ctx, file);
       lang("rust", file, cargo?.isPackageOrWorkspace === true ? "manifest" : "file-presence", "Cargo.toml");
+    }
+
+    for (const file of filesNamed(ctx, "go.mod")) {
+      const text = await ctx.readText(file);
+      const module = text === undefined ? undefined : goModulePath(text);
+      if (module === undefined) lang("go", file, "file-presence", "go.mod");
+      else lang("go", file, "manifest", ("module " + module).slice(0, 200));
     }
 
     for (const file of filesMatching(ctx, /\.uproject$/u)) {

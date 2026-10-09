@@ -64,7 +64,21 @@
       ]
     }
   ],
-  "frameworks": [],
+  "frameworks": [
+    {
+      "id": "unreal-engine",
+      "name": "Unreal Engine",
+      "scope": "project",
+      "confidence": 1,
+      "evidence": [
+        {
+          "file": "Game.uproject",
+          "type": "config",
+          "value": "EngineAssociation: 5.4"
+        }
+      ]
+    }
+  ],
   "databases": [],
   "packageManagers": [
     {
@@ -104,6 +118,10 @@
     },
     {
       "id": "infrastructure",
+      "status": "ok"
+    },
+    {
+      "id": "kubernetes",
       "status": "ok"
     },
     {

@@ -7,5 +7,6 @@
   "releaseSummarySchema": "d83397bc27ab0d67423cd42b061e8d90409efc858522edcf254cf45de829eb2b",
   "updateImpactSchema": "fa4ede85cee393a059ba37818ed6a7681b0f783463a8e8bf91e8cc38304b86c3",
   "pinokioPlanSchema": "3f06f8d7bdc902024eacfe26d524862b26ad572824472bc71b4c18e22bcb679a",
-  "recommendationReportSchema": "3e98a13383c89af07b84d4480c1d770c041246695e874d5e8a72a8552a100d53"
+  "recommendationReportSchema": "9b81000771b3adb1b3be1e748e8b7090365370e3666cb86c7ba3018362d15665",
+  "recommendationReportSchemaNote": "v0.2.0 P0-1: only generatedFrom.taxonomyVersion const 1 -> 2 (schemaVersion stays 1). Reverting that literal reproduces the M6 digest 3e98a13383c89af07b84d4480c1d770c041246695e874d5e8a72a8552a100d53. See docs/specs/stack-coverage.md."
 }

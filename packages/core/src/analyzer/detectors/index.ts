@@ -2,6 +2,7 @@ import type { ProjectDetector } from "../detector";
 import { aiEnvironmentDetector } from "./ai-environment";
 import { databaseDetector, frameworkDetector } from "./frameworks";
 import { infrastructureDetector } from "./infrastructure";
+import { kubernetesDetector } from "./kubernetes";
 import { languageDetector, packageManagerDetector } from "./languages";
 
 /**
@@ -9,5 +10,5 @@ import { languageDetector, packageManagerDetector } from "./languages";
  * Analyzer(analyze.ts)는 개별 Detector 구현을 알지 못한다.
  */
 export function defaultDetectors(): ProjectDetector[] {
-  return [languageDetector, packageManagerDetector, frameworkDetector, databaseDetector, infrastructureDetector, aiEnvironmentDetector];
+  return [languageDetector, packageManagerDetector, frameworkDetector, databaseDetector, infrastructureDetector, kubernetesDetector, aiEnvironmentDetector];
 }

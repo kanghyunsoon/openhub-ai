@@ -1,0 +1,1 @@
+go.mod, ProjectVersion.txt and .uproject files will be added later.

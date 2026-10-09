@@ -20,8 +20,9 @@ const summary = (p: Parameters<typeof deriveNeeds>[0]) => deriveNeeds(p).map((n)
 
 describe("REQ-020 Capability Taxonomy와 Need Rules", () => {
   it("AC-017-01 taxonomy는 seed capability 14개를 포함하고 kebab-case·중복 없음·label·domain을 가진다", async () => {
-    expect(TAXONOMY_VERSION).toBe(1);
-    expect(CAPABILITIES).toHaveLength(14);
+    // v0.2.0 taxonomyVersion 2: v1의 14개는 그대로 두고 game-engine-editor·kubernetes-operations 2개를 추가했다(test/stack-coverage.test.ts).
+    expect(TAXONOMY_VERSION).toBe(2);
+    expect(CAPABILITIES).toHaveLength(16);
     const ids = CAPABILITIES.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const c of CAPABILITIES) {
@@ -43,11 +44,15 @@ describe("REQ-020 Capability Taxonomy와 Need Rules", () => {
   });
 
   it("AC-017-02 KNOWN_TECH_IDS는 M2 Detector가 실제로 만드는 ID 집합과 같다", async () => {
-    const ids = (category: string) => DEFAULT_TECH_RULES.filter((r) => r.category === category).map((r) => r.id).sort();
-    expect([...KNOWN_TECH_IDS.frameworks].sort()).toEqual(ids("frameworks"));
-    expect([...KNOWN_TECH_IDS.databases].sort()).toEqual(ids("databases"));
-    expect([...KNOWN_TECH_IDS.aiClients].sort()).toEqual([...AI_CLIENT_IDS].sort());
     const src = (file: string) => readFile(path.join(REPO_ROOT, "packages/core/src/analyzer/detectors", file), "utf8");
+    // 규칙 표 밖에서 직접 만드는 ID(Unity·Unreal Engine·Kubernetes 등)도 Detector 소스의 found.add 호출로 확인한다.
+    const direct = async (category: string, ...files: string[]) =>
+      (await Promise.all(files.map(src))).flatMap((text) => [...text.matchAll(new RegExp(`found\\.add\\("${category}", "([a-z][a-z0-9-]*)"`, "gu"))].map((m) => m[1]!));
+    const ids = async (category: string) =>
+      [...new Set([...DEFAULT_TECH_RULES.filter((r) => r.category === category).map((r) => r.id), ...(await direct(category, "frameworks.ts"))])].sort();
+    expect([...KNOWN_TECH_IDS.frameworks].sort()).toEqual(await ids("frameworks"));
+    expect([...KNOWN_TECH_IDS.databases].sort()).toEqual(await ids("databases"));
+    expect([...KNOWN_TECH_IDS.aiClients].sort()).toEqual([...AI_CLIENT_IDS].sort());
     const keysOf = (text: string, constName: string) => {
       const body = new RegExp(`const ${constName} = \\{([^}]*)\\}`, "u").exec(text)?.[1] ?? "";
       return [...body.matchAll(/(?:^|[\s,{])"?([a-z][a-z0-9-]*)"?\s*:/gu)].map((m) => m[1]).sort();
@@ -55,7 +60,7 @@ describe("REQ-020 Capability Taxonomy와 Need Rules", () => {
     const languages = await src("languages.ts");
     expect([...KNOWN_TECH_IDS.languages].sort()).toEqual(keysOf(languages, "LANG"));
     expect([...KNOWN_TECH_IDS.packageManagers].sort()).toEqual(keysOf(languages, "PM_NAME"));
-    expect([...KNOWN_TECH_IDS.infrastructure].sort()).toEqual(keysOf(await src("infrastructure.ts"), "NAMES"));
+    expect([...KNOWN_TECH_IDS.infrastructure].sort()).toEqual([...keysOf(await src("infrastructure.ts"), "NAMES"), ...(await direct("infrastructure", "kubernetes.ts"))].sort());
   });
 
   it("AC-017-03 react-pnpm fixture의 need 목록이 golden과 일치한다(시나리오 1)", async () => {

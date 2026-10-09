@@ -1,0 +1,13 @@
+{
+  "name": "billing",
+  "private": true,
+  "dependencies": {
+    "@nestjs/core": "^10.3.0",
+    "@nestjs/common": "^10.3.0",
+    "reflect-metadata": "^0.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}

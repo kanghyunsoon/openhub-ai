@@ -13,3 +13,4 @@ export * from "./explain";
 export * from "./report";
 export * from "./rank";
 export * from "./recommend";
+export * from "./diagnose";

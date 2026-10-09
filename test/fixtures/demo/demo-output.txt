@@ -26,7 +26,7 @@ AI Clients
 AI Tools
   memory [mcp-server; claude-code]   1.00  .mcp.json (config: memory (stdio, npx))
 
-Detectors  ai-environment:ok  databases:ok  frameworks:ok  infrastructure:ok  languages:ok  package-managers:ok
+Detectors  ai-environment:ok  databases:ok  frameworks:ok  infrastructure:ok  kubernetes:ok  languages:ok  package-managers:ok
 (exit 0)
 
 == 2. Existing tools — 이미 설정된 MCP 서버
@@ -85,6 +85,9 @@ OpenHub Recommendations — demo-project
 
 충족된 Capability
   - 지식 그래프 메모리: memory (프로젝트)
+
+추천으로 연결되지 않은 기술
+  - docker-compose: 연결된 Capability 규칙이 없습니다
 
 OpenScore는 저장소 유지관리·활동성·커뮤니티 신호이며 보안·코드 품질 평가가 아닙니다
 (exit 0)
