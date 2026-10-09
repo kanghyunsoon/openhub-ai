@@ -45,7 +45,7 @@ Each step is described in [Architecture](architecture.md) and [Approval model](a
 Spec: [docs/specs/v0.2.0.md](specs/v0.2.0.md)
 
 - **P0-1 Stack coverage**: recognize Go, Express, NestJS, Jest, Vitest, pytest, Playwright, Unity, Unreal Engine and Kubernetes from project files; connect them to Need Rules; explain empty results. Details: [stack-coverage.md](specs/stack-coverage.md).
-- **P0-2 Registry expansion**: grow the Verified Registry from 7 to 25-40 tools, only with tools that pass the verification criteria.
+- **P0-2 Registry expansion**: grow the Verified Registry from 7 to 25-40 tools, only with tools that pass the verification criteria. Details and batch records: [registry-expansion.md](specs/registry-expansion.md).
 - **P0-3 Desktop UX**: English by default with Korean selectable and persisted, user-scope install, client choice, guidance for empty results.
 
 ## v0.3.0 and later (Proposal)

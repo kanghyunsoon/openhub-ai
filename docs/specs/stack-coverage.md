@@ -126,7 +126,7 @@ Measured with `openhub project scan` and `openhub project recommend --json` on t
 | Jest app | javascript | Serena | + jest | Serena; jest listed as not mapped |
 | Vitest + React + Playwright | javascript, typescript, react | Chrome DevTools, Playwright MCP, Serena, Context7 | + playwright, vitest | unchanged; e2e-testing need now also cites playwright |
 | pytest app | python | Serena | + pytest | Serena; pytest listed as not mapped |
-| Kubernetes deploy | docker, docker-compose | none | + kubernetes | none; reason `no-verified-tool` for kubernetes-operations |
+| Kubernetes deploy | docker, docker-compose | none | + kubernetes | none; reason `no-verified-tool` for kubernetes-operations (P0-1). P0-2 batch 1 then added Kubernetes MCP Server, which is now recommended ([registry-expansion.md](registry-expansion.md)). |
 | README mentions only | nothing | none | nothing | none; reason `no-stack-detected` |
 | C# console, C++ CMake | csharp / cpp | Serena | unchanged (no Unity, no Unreal) | unchanged |
 | React + Spring monorepo | 9 items | 5 tools | unchanged | unchanged |
