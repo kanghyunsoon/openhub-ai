@@ -13,7 +13,8 @@ import type { TechCategory } from "./taxonomy";
  *   - no-verified-tool: 충족되지 않은 need 모두에 대해 Verified Registry 후보 도구가 없다.
  *   - all-satisfied: 모든 need가 이미 설치된 도구로 충족됐다.
  *   - candidates-excluded: 후보는 있지만 호환성·설치 상태로 모두 제외됐다.
- * - unmappedTechs: 인식했지만 Need Rule이 없는 기술 ID(오름차순). 패키지 관리자와 의도적으로 need를 만들지 않는 git은 제외한다.
+ * - unmappedTechs: 인식했지만 Need Rule이 없는 기술 ID(오름차순). 패키지 관리자, 의도적으로 need를 만들지 않는 git,
+ *   실행 환경 정보인 Docker·Docker Compose는 제외한다. 이것들만 있고 추천이 비면 emptyReason(no-mapped-need)은 그대로 보인다.
  * - needsWithoutVerifiedTool: 충족되지 않았고 Registry 후보가 0개인 capability(오름차순).
  */
 export const EMPTY_REASONS = ["no-stack-detected", "no-mapped-need", "no-verified-tool", "all-satisfied", "candidates-excluded"] as const;
@@ -27,8 +28,12 @@ export interface RecommendationDiagnosis {
 
 const STACK_CATEGORIES: readonly TechCategory[] = ["languages", "frameworks", "databases", "infrastructure"];
 const DIAGNOSED_CATEGORIES: readonly TechCategory[] = [...STACK_CATEGORIES, "aiClients"];
-/** D-010: git만으로 GitHub need를 만들지 않는다. 연결 규칙이 없는 것이 정상이므로 진단에서 뺀다. */
-const INTENTIONALLY_UNMAPPED: ReadonlySet<string> = new Set(["git"]);
+/**
+ * 연결 규칙이 없는 것이 정상인 기술. 진단 목록에서 뺀다.
+ * - git: D-010, git만으로 GitHub need를 만들지 않는다.
+ * - docker, docker-compose: 실행 환경 정보다. 컨테이너 조작 capability가 taxonomy에 생기면 다시 본다.
+ */
+const INTENTIONALLY_UNMAPPED: ReadonlySet<string> = new Set(["git", "docker", "docker-compose"]);
 
 const byCode = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 

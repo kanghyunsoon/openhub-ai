@@ -27,13 +27,29 @@ const LANG = {
 } as const;
 type LangId = keyof typeof LANG;
 
-/** go.mod의 module 경로(첫 module 지시문). 없거나 형식이 맞지 않으면 undefined. 줄 단위로만 읽는다. */
-function goModulePath(text: string): string | undefined {
+/**
+ * go.mod의 module 지시문 한 줄: `module <path>` 또는 `module "<path>"`, 뒤에 // 주석 허용.
+ * 키워드 뒤에 공백이 있어야 한다(modulefoo·module123은 지시문이 아니다). 블록 형식 `module (`은 인정하지 않는다.
+ */
+const GO_MODULE_DIRECTIVE = /^module[ \t]+(?:"([^"\s]{1,200})"|([^"\s]{1,200}))[ \t]*(?:\/\/.*)?$/u;
+const GO_PATH_ELEMENT = /^[A-Za-z0-9+_~-][A-Za-z0-9+._~-]{0,99}$/u;
+
+/** module path 형식 검사: 빈 요소·`.`·`..`·앞뒤 `/`·`.`으로 시작하거나 끝나는 요소를 거부한다. */
+function isGoModulePath(path: string): boolean {
+  return path.split("/").every((e) => GO_PATH_ELEMENT.test(e) && !e.endsWith("."));
+}
+
+/**
+ * go.mod의 module 경로. 첫 module 지시문만 본다. 지시문이 없거나 경로 형식이 맞지 않으면 undefined
+ * (그 경우 go.mod는 파일 존재 근거만 남는다). 줄 단위로만 읽는다.
+ */
+export function goModulePath(text: string): string | undefined {
   for (const raw of text.split(/\r?\n/u)) {
     const line = raw.trim();
-    if (!line.startsWith("module")) continue;
-    const rest = line.slice("module".length).trim().replace(/^"(.*)"$/u, "$1");
-    return /^[A-Za-z0-9._~/-]{1,200}$/u.test(rest) ? rest : undefined;
+    if (!/^module[ \t(]/u.test(line)) continue;
+    const m = GO_MODULE_DIRECTIVE.exec(line);
+    const path = m === null ? undefined : (m[1] ?? m[2]);
+    return path !== undefined && isGoModulePath(path) ? path : undefined;
   }
   return undefined;
 }

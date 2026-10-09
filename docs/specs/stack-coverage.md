@@ -23,7 +23,7 @@ Detection reads files only. Nothing in the project is executed. Each item carrie
 
 | ID | Category | Evidence that counts | Evidence type |
 | --- | --- | --- | --- |
-| `go` | languages | `go.mod` with a valid `module` line | manifest (`module <path>`) |
+| `go` | languages | `go.mod` with a valid `module <path>` directive (keyword followed by whitespace; optional quotes and trailing `//` comment; path elements checked; `modulefoo`, commented lines and the block form are not accepted) | manifest (`module <path>`) |
 | | | `go.mod` that cannot be read as a module | file-presence (weak) |
 | | | `.go` file count | extension-count (supporting only) |
 | `express` | frameworks | `express` in a package.json dependency section | dependency |
@@ -107,7 +107,7 @@ When no tool can be recommended, OpenHub explains which layer is empty instead o
 | Field | Meaning |
 | --- | --- |
 | `emptyReason` | Only when there are no recommendations: `no-stack-detected`, `no-mapped-need`, `no-verified-tool`, `all-satisfied` or `candidates-excluded` |
-| `unmappedTechs` | Recognized technologies with no Need Rule (package managers and `git` are excluded on purpose) |
+| `unmappedTechs` | Recognized technologies with no Need Rule. Package managers, `git`, `docker` and `docker-compose` are excluded on purpose: they describe the environment and are expected to have no rule. If they are the only technologies and nothing is recommended, `emptyReason` is still `no-mapped-need`. |
 | `needsWithoutVerifiedTool` | Open needs with zero Registry candidates |
 
 The diagnosis is derived data. It is not added to RecommendationReport v1, and `--json` output is unchanged. Compatibility and exclusion reasons still come from the existing report fields (`candidates[].excludedBy`, `reasons`).
@@ -138,7 +138,7 @@ Reading the table: the number of recommendations grew only where a verified tool
 
 Under `packages/core/test/fixtures/projects`: `go-service`, `express-postgres-ts`, `nestjs-app`, `unity-game`, `unreal-game`, `jest-app`, `vitest-app`, `pytest-app`, `k8s-deploy`, `csharp-console`, `cpp-cmake`, `readme-mentions`, `malformed-stack`, `polyglot-monorepo`, plus the existing `react-spring-monorepo` as a regression check.
 
-Existing analyzer goldens changed in two expected ways only: the detector list gains `kubernetes`, and `polyglot-native` (which contains a real `Game.uproject`) is now recognized as Unreal Engine. Recommendation goldens change only `taxonomyVersion` and the detector list. The `pnpm demo` golden gains the new CLI section that lists `docker-compose` as recognized but not mapped.
+Existing analyzer goldens changed in two expected ways only: the detector list gains `kubernetes`, and `polyglot-native` (which contains a real `Game.uproject`) is now recognized as Unreal Engine. Recommendation goldens change only `taxonomyVersion` and the detector list. The `pnpm demo` golden changes only in the detector list.
 
 ## 8. CLI and desktop impact
 
