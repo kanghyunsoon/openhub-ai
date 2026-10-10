@@ -15,6 +15,8 @@
 
   const panel = document.getElementById("install-panel");
   let current = null;
+  // 요청 번호: 선택 화면·계획 요청마다 올린다. 응답이 왔을 때 번호가 다르면(더 새 요청·프로젝트 변경) 그 응답은 버린다.
+  let seq = 0;
   /** toolId → 마지막으로 계획한 Client 목록(PLAN_STALE 재계획에 쓴다). */
   const lastSelection = new Map();
   let chooser = null;
@@ -49,6 +51,10 @@
     if (response.status === "rejected") {
       status.textContent = t("install.rejected");
       return { status: "rejected", stages: [] };
+    }
+    if (response.status === "plan-changed") {
+      status.textContent = response.message;
+      return { status: "plan-changed", stages: [] };
     }
     if (response.status !== "done") {
       status.textContent = t("install.cannotRun", { message: response.message || response.status });
@@ -116,6 +122,7 @@
     "no-project": t("install.msg.noProject"),
     "not-recommended": t("install.msg.notRecommended"),
     "no-client": t("install.msg.noClient"),
+    superseded: t("install.msg.superseded"),
   };
 
   /** Client 선택 화면. 지원하지 않는 Client는 고를 수 없고 이유를 보여 준다. 선택을 바꾸면 보이던 계획을 지운다. */
@@ -151,8 +158,13 @@
     for (const input of inputs) {
       input.addEventListener("change", () => {
         sync();
-        // 보이던 계획은 다른 선택의 계획이다. 지우고 다시 계획하게 한다.
-        if (panel.querySelector(".install-preview")) show([el("p", "install-warning", t("install.clients.changed"))]);
+        // 보이던 계획(또는 계획 중인 요청)은 다른 선택의 것이다. 응답을 버리고, 화면을 지우고, main의 Pending Plan도 버린다.
+        seq += 1;
+        void window.openhub.discardInstallPlan(view.toolId);
+        if (panel.querySelector(".install-preview") || panel.dataset.planState === "planning") {
+          show([el("p", "install-warning", t("install.clients.changed"))]);
+          panel.dataset.planState = "changed";
+        }
       });
     }
     reviewButton.addEventListener("click", () => void review(view.toolId, selected()));
@@ -163,10 +175,11 @@
 
   async function open(toolId) {
     current = toolId;
+    const my = ++seq;
     chooser = null;
     show([el("p", "todo", t("install.planning"))]);
     const response = await window.openhub.installOptions(toolId);
-    if (current !== toolId) return null;
+    if (my !== seq || current !== toolId) return null;
     if (response.status !== "ok") {
       show([el("p", "install-warning", MESSAGES[response.status] || t("install.planFailed", { message: response.message || response.status }))]);
       return null;
@@ -179,15 +192,27 @@
 
   async function review(toolId, clients) {
     current = toolId;
+    const my = ++seq;
     lastSelection.set(toolId, clients);
     panel.dataset.planState = "planning";
     show([el("p", "todo", t("install.planning"))]);
     const response = await window.openhub.planInstall(toolId, clients === undefined ? undefined : { clients });
-    if (current !== toolId) return null;
+    // 더 새 요청이 있었거나 선택·프로젝트가 바뀌었으면 이 응답은 화면에 쓰지 않는다.
+    if (my !== seq || current !== toolId) return null;
     if (response.status !== "ok") {
       show([el("p", "install-warning", MESSAGES[response.status] || t("install.planFailed", { message: response.message || response.status }))]);
       panel.dataset.planState = "failed:" + response.status;
       return null;
+    }
+    // 사용자가 고른 Client와 실제 Plan 대상이 같은지 확인한다(다르면 승인 화면을 만들지 않고 main의 Plan도 버린다).
+    if (Array.isArray(clients)) {
+      const planned = [...new Set(response.view.targets.map((x) => x.client))].sort().join(",");
+      if (planned !== [...new Set(clients)].sort().join(",")) {
+        void window.openhub.discardInstallPlan(toolId);
+        show([el("p", "install-warning", t("install.selectionMismatch"))]);
+        panel.dataset.planState = "failed:selection-mismatch";
+        return null;
+      }
     }
     renderPlan(response.view);
     return response.view;
@@ -204,10 +229,18 @@
     }
   }
   new MutationObserver(decorate).observe(document.getElementById("for-you-list"), { childList: true });
+  // 프로젝트를 다시 고르면 진행 중인 요청의 응답을 버리고 설치 화면을 비운다(main도 Pending Plan을 버린다).
+  new MutationObserver(() => {
+    seq += 1;
+    current = null;
+    chooser = null;
+    show([]);
+  }).observe(document.getElementById("project-body"), { childList: true });
 
   // 스모크(--smoke + OPENHUB_SMOKE_INSTALL): 화면과 같은 경로로 계획 → 체크 → 확인 → 결과를 기다린다.
   // clients가 있으면 Client 선택 화면에서 그 Client만 체크한다(없으면 기본 선택 그대로).
-  window.__openhubInstall = async (toolId, clients) => {
+  // race가 있으면(OPENHUB_SMOKE_INSTALL_RACE) race.first만 체크하고 [계획 보기]를 누른 직후, 응답을 기다리지 않고 clients로 바꿔 다시 누른다.
+  window.__openhubInstall = async (toolId, clients, race) => {
     decorate();
     const card = [...document.querySelectorAll("#for-you-list li.rec")].find((li) => li.dataset.toolId === toolId);
     if (!card) return { status: "not-recommended", stages: [] };
@@ -220,7 +253,19 @@
         input.dispatchEvent(new Event("change"));
       }
     }
+    const setChecks = (wanted) => {
+      for (const input of panel.querySelectorAll(".install-clients input[type=checkbox]")) {
+        input.checked = wanted.includes(input.dataset.client);
+        input.dispatchEvent(new Event("change"));
+      }
+    };
     const reviewButton = panel.querySelector(".install-review");
+    if (race && Array.isArray(race.first) && reviewButton) {
+      // 첫 계획 요청(A)을 보내고 바로 선택을 바꾼다. A의 응답은 화면에 쓰이지 않아야 한다.
+      setChecks(race.first);
+      reviewButton.click();
+      setChecks(clients || []);
+    }
     if (!reviewButton || reviewButton.disabled) return { status: "no-client", stages: [], choices };
     // 사람처럼 [선택한 Client로 계획 보기]를 누르고 계획 화면이 그려질 때까지 기다린다(planState가 planning에서 바뀔 때).
     panel.dataset.planState = "planning";

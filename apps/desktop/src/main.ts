@@ -56,6 +56,8 @@ const screenshot = process.env["OPENHUB_SCREENSHOT"] || undefined;
 const smokeInstall = smoke ? process.env["OPENHUB_SMOKE_INSTALL"] || undefined : undefined;
 /** 스모크 설치에서 Client 선택 화면에 체크할 Client(쉼표 목록, v0.2.0 P0-3 PR C). 없으면 기본 선택 그대로. */
 const smokeInstallClients = smokeInstall === undefined || !process.env["OPENHUB_SMOKE_INSTALL_CLIENTS"] ? undefined : process.env["OPENHUB_SMOKE_INSTALL_CLIENTS"].split(",").map((s) => s.trim()).filter((s) => s !== "");
+/** 스모크 경쟁 조건(v0.2.0 P0-3 PR C 보완): 먼저 이 Client로 계획을 요청하고 응답 전에 OPENHUB_SMOKE_INSTALL_CLIENTS로 바꾼다. */
+const smokeInstallRaceFirst = smokeInstallClients === undefined || !process.env["OPENHUB_SMOKE_INSTALL_RACE"] ? undefined : process.env["OPENHUB_SMOKE_INSTALL_RACE"].split(",").map((s) => s.trim()).filter((s) => s !== "");
 /** 스모크에서 [프로젝트 선택] 대신 분석할 폴더(TASK-015). 스모크 설치면 임시 복사본을 쓴다. */
 const smokeProjectSource = process.env["OPENHUB_SMOKE_PROJECT"] || undefined;
 const smokeProject =
@@ -208,7 +210,12 @@ async function createWindow(): Promise<void> {
         smokeInstall === undefined || recommendations === undefined
           ? undefined
           : ((await win.webContents.executeJavaScript(
-              "window.__openhubInstall(" + JSON.stringify(smokeInstall) + (smokeInstallClients === undefined ? "" : ", " + JSON.stringify(smokeInstallClients)) + ")",
+              "window.__openhubInstall(" +
+                JSON.stringify(smokeInstall) +
+                ", " +
+                JSON.stringify(smokeInstallClients ?? null) +
+                (smokeInstallRaceFirst === undefined ? "" : ", " + JSON.stringify({ first: smokeInstallRaceFirst })) +
+                ")",
             )) as { status: string; stages: string[]; choices?: unknown[]; targets?: string[]; configChanges?: string[] });
       const update =
         smokeUpdate === undefined || install === undefined

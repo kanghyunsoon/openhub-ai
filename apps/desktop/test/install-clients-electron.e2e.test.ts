@@ -24,11 +24,12 @@ const scratch = path.join(tmpdir(), "openhub-desktop-clients-e2e-" + process.pid
 
 type InstallSmoke = { status: string; stages: string[]; choices: { client: string; enabled: boolean; checked: boolean; verification: string }[]; targets: string[]; configChanges: string[]; dialogs: number; spawned: number };
 
-async function launch(locale: string, clients?: string): Promise<{ code: number | null; install: InstallSmoke }> {
+async function launch(locale: string, clients?: string, raceFirst?: string): Promise<{ code: number | null; install: InstallSmoke }> {
   const out = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
     const env: Record<string, string> = { ...(process.env as Record<string, string>), OPENHUB_SMOKE_USER_DATA: path.join(scratch, "ud-" + locale + "-" + (clients ?? "default")), OPENHUB_SMOKE_SYSTEM_LOCALE: locale, OPENHUB_SMOKE_PROJECT: path.join(ROOT, "examples", "demo-project"), OPENHUB_SMOKE_INSTALL: "serena" };
-    for (const k of ["ELECTRON_RUN_AS_NODE", "OPENHUB_SMOKE_UPDATE", "OPENHUB_SMOKE_REPAIR", "OPENHUB_SMOKE_RELEASE", "OPENHUB_SMOKE_ADOPT", "OPENHUB_SMOKE_HOME", "OPENHUB_SMOKE_I18N_SWITCH", "OPENHUB_SCREENSHOT", "OPENHUB_SMOKE_INSTALL_CLIENTS"]) delete env[k];
+    for (const k of ["ELECTRON_RUN_AS_NODE", "OPENHUB_SMOKE_UPDATE", "OPENHUB_SMOKE_REPAIR", "OPENHUB_SMOKE_RELEASE", "OPENHUB_SMOKE_ADOPT", "OPENHUB_SMOKE_HOME", "OPENHUB_SMOKE_I18N_SWITCH", "OPENHUB_SCREENSHOT", "OPENHUB_SMOKE_INSTALL_CLIENTS", "OPENHUB_SMOKE_INSTALL_RACE"]) delete env[k];
     if (clients !== undefined) env["OPENHUB_SMOKE_INSTALL_CLIENTS"] = clients;
+    if (raceFirst !== undefined) env["OPENHUB_SMOKE_INSTALL_RACE"] = raceFirst;
     const child = spawn(electronBin!, [".", "--smoke"], { cwd: DESKTOP, env, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
@@ -65,5 +66,11 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || electronBin === null)("v0.
     expect(none.install).toMatchObject({ status: "no-client", dialogs: 0, spawned: 0 });
     console.log("desktop clients: " + JSON.stringify({ default: def.install.configChanges, codex: codex.install.configChanges, two: two.install.configChanges, verification: def.install.choices.map((c) => c.verification) }));
   }, 300_000);
+
+  it("경쟁 조건: Claude Code로 계획을 요청한 직후 Cursor로 바꿔 다시 요청하면 화면 대상·승인·설치가 모두 Cursor뿐이다", async () => {
+    const race = await launch("en-US", "cursor", "claude-code");
+    expect(race.code).toBe(0);
+    expect(race.install).toMatchObject({ status: "succeeded", dialogs: 1, targets: [".cursor/mcp.json · cursor · project scope"], configChanges: [".cursor/mcp.json (project scope): written"] });
+  }, 120_000);
 });
 

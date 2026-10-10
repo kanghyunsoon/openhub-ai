@@ -46,6 +46,8 @@ import { tr } from "./i18n/index";
 export const INSTALL_PLAN_CHANNEL = "install:plan";
 export const INSTALL_RUN_CHANNEL = "install:run";
 export const INSTALL_OPTIONS_CHANNEL = "install:options";
+/** Client 선택을 바꾸는 즉시 renderer가 알린다. 그 toolId의 Pending Plan을 버린다(승인 가능 상태 해제). */
+export const INSTALL_DISCARD_CHANNEL = "install:discard";
 
 type Listener = (...args: unknown[]) => unknown;
 interface IpcMainLike {
@@ -96,7 +98,7 @@ export interface InstallPlanView {
 
 export type InstallPlanResponse =
   | { status: "ok"; view: InstallPlanView }
-  | { status: "no-project" | "not-recommended" | "no-client" }
+  | { status: "no-project" | "not-recommended" | "no-client" | "superseded" }
   | { status: "error"; code: string; message: string };
 
 export type ClientVerificationView = "launch-verified" | "spec-launch-verified" | "config-recognized" | "not-verified" | "platform-unverified" | "not-recorded";
@@ -145,7 +147,7 @@ export interface InstallResultView {
 export type InstallRunResponse =
   | { status: "done"; result: InstallResultView }
   | { status: "rejected" | "no-plan" }
-  | { status: "project-changed"; message: string }
+  | { status: "project-changed" | "plan-changed"; message: string }
   | { status: "error"; code: string; message: string };
 
 /** Plan → 화면 데이터. 문자열은 renderer가 textContent로만 넣는다. */
@@ -214,16 +216,31 @@ export function nativeDialogPrompter(dialog: NativeDialogLike): ApprovalPrompter
   };
 }
 
-/** 마지막으로 고른 프로젝트 폴더와 화면에 보여 준 Plan을 기억한다. */
+/** 계획 요청 하나의 표(세대 번호 + 프로젝트 epoch). 이 표가 지금도 최신일 때만 Plan을 기억·실행한다. */
+export interface PlanTicket {
+  readonly generation: number;
+  readonly epoch: number;
+}
+
+/**
+ * 마지막으로 고른 프로젝트 폴더와 화면에 보여 준 Plan을 기억한다(v0.2.0 P0-3 PR C 보완: 계획 일관성).
+ * - toolId마다 세대 번호를 둔다. 새 계획 요청·선택 화면 열기·선택 변경(install:discard)은 이전 Pending Plan을 지우고 세대를 올린다.
+ *   잘못된 선택·계획 실패·선택 해제도 먼저 세대를 올리므로 이전 Plan이 남지 않는다(자동 복귀 없음).
+ * - 프로젝트를 다시 고르면 epoch를 올리고 모든 Pending Plan을 지운다.
+ * - 비동기 계획이 끝났을 때 세대·epoch·프로젝트가 그대로일 때만 기억한다(늦게 온 이전 요청은 기억하지 않는다).
+ */
 export class InstallSession {
   #dir: string | undefined;
-  readonly #pending = new Map<string, { planned: PlannedInstall; request: InstallRequest }>();
+  #epoch = 0;
+  readonly #pending = new Map<string, { planned: PlannedInstall; request: InstallRequest; ticket: PlanTicket }>();
+  readonly #generation = new Map<string, number>();
 
   /** [프로젝트 선택] picker를 감싸 고른 폴더를 기억한다(결과는 바꾸지 않는다). */
   trackPicker(pick: DirectoryPicker): DirectoryPicker {
     return async () => {
       const dir = await pick();
       this.#dir = dir;
+      this.#epoch += 1;
       this.#pending.clear();
       return dir;
     };
@@ -232,13 +249,27 @@ export class InstallSession {
   get projectDir(): string | undefined {
     return this.#dir;
   }
-  remember(toolId: string, planned: PlannedInstall, request: InstallRequest): void {
-    this.#pending.set(toolId, { planned, request });
+  /** 새 계획 요청(또는 선택 변경): 이전 Pending Plan을 버리고 새 표를 준다. */
+  begin(toolId: string): PlanTicket {
+    const generation = (this.#generation.get(toolId) ?? 0) + 1;
+    this.#generation.set(toolId, generation);
+    this.#pending.delete(toolId);
+    return { generation, epoch: this.#epoch };
   }
-  take(toolId: string): { planned: PlannedInstall; request: InstallRequest } | undefined {
+  /** 이 표가 아직 이 toolId의 최신 요청이고 프로젝트가 바뀌지 않았는가. */
+  isCurrent(toolId: string, ticket: PlanTicket): boolean {
+    return this.#generation.get(toolId) === ticket.generation && this.#epoch === ticket.epoch;
+  }
+  /** 최신 표이고 같은 프로젝트일 때만 기억한다. 아니면 false(이전 요청의 늦은 응답). */
+  remember(toolId: string, ticket: PlanTicket, planned: PlannedInstall, request: InstallRequest): boolean {
+    if (!this.isCurrent(toolId, ticket) || request.projectRoot !== this.#dir) return false;
+    this.#pending.set(toolId, { planned, request, ticket });
+    return true;
+  }
+  take(toolId: string): { planned: PlannedInstall; request: InstallRequest; ticket: PlanTicket } | undefined {
     const found = this.#pending.get(toolId);
     this.#pending.delete(toolId);
-    return found;
+    return found !== undefined && this.isCurrent(toolId, found.ticket) ? found : undefined;
   }
 }
 
@@ -305,6 +336,8 @@ export function parseClientSelection(selection: unknown, supported: (c: InstallC
 /** install:options — 현재 추천 목록에 있는 toolId의 Client 선택 화면 데이터. 계획·쓰기·실행 0. */
 export async function optionsForRenderer(session: InstallSession, deps: InstallDeps, toolId: unknown): Promise<InstallOptionsResponse> {
   try {
+    // 선택 화면을 다시 열면 그 toolId의 이전 Pending Plan은 쓸 수 없다.
+    if (typeof toolId === "string") session.begin(toolId);
     const found = await recommendedTool(session, deps, toolId);
     if (found.status !== "ok") return { status: found.status };
     const platform = toRecommendPlatform(deps.platform);
@@ -339,10 +372,12 @@ function clientNote(supported: boolean, detected: boolean, verification: ClientV
 
 /** install:plan — 현재 추천 목록에 있는 toolId와 사용자가 고른 Client만 받는다. */
 export async function planForRenderer(session: InstallSession, deps: InstallDeps, toolId: unknown, selection?: unknown): Promise<InstallPlanResponse> {
+  if (typeof toolId !== "string") return { status: "not-recommended" };
+  // 어떤 결과든(잘못된 선택·실패·선택 없음 포함) 이전 Pending Plan은 먼저 버린다.
+  const ticket = session.begin(toolId);
   const profile = deps.recommend.profile;
   const dir = session.projectDir;
   if (profile === undefined || dir === undefined) return { status: "no-project" };
-  if (typeof toolId !== "string") return { status: "not-recommended" };
   const platform = toRecommendPlatform(deps.platform);
   if (platform === undefined) return { status: "error", code: "platform-unsupported", message: tr("install.platformUnsupported") };
   try {
@@ -353,12 +388,21 @@ export async function planForRenderer(session: InstallSession, deps: InstallDeps
     if (chosen.clients.length === 0) return { status: "no-client" };
     const request: InstallRequest = { toolId, projectRoot: dir, homeDir: deps.homeDir, targets: chosen.clients.map((client: InstallClient) => ({ client, scope: "project" as const })), includeHost: false, platform };
     const { result } = await planInstall(request, environment(deps, found.entries));
+    // 계획하는 동안 더 새 요청이 왔거나 프로젝트가 바뀌었으면 이 결과는 버린다(화면에도 보이지 않는다).
+    if (!session.isCurrent(toolId, ticket) || session.projectDir !== dir) return { status: "superseded" };
     if (!result.ok) return { status: "error", code: result.code, message: tr("install.manifestRejected") };
-    session.remember(toolId, result.planned, request);
+    if (!session.remember(toolId, ticket, result.planned, request)) return { status: "superseded" };
     return { status: "ok", view: buildInstallPlanView(result.planned) };
   } catch {
     return { status: "error", code: "plan-failed", message: tr("install.planFailedMain") };
   }
+}
+
+/** install:discard — Client 선택을 바꿨다. 그 toolId의 Pending Plan을 버린다(쓰기·실행 0). */
+export function discardForRenderer(session: InstallSession, toolId: unknown): { status: "ok" } | { status: "invalid" } {
+  if (typeof toolId !== "string") return { status: "invalid" };
+  session.begin(toolId);
+  return { status: "ok" };
 }
 
 /** install:run — 화면에 보여 준 Plan을 네이티브 대화상자로 승인받아 실행한다. renderer가 보낸 digest·승인은 받지 않는다. */
@@ -378,6 +422,8 @@ export async function runForRenderer(session: InstallSession, deps: InstallDeps,
     if (outcome.status !== "approved") return { status: "rejected" };
     // 대화상자가 열린 동안 다른 프로젝트를 골랐으면 방금 받은 승인도 쓰지 않는다.
     if (session.projectDir !== pending.request.projectRoot) return changed;
+    // 대화상자가 열린 동안 Client 선택을 바꾸거나 새 계획을 요청했으면 이 승인은 이전 Plan의 것이다. 실행하지 않는다.
+    if (!session.isCurrent(toolId, pending.ticket)) return { status: "plan-changed", message: tr("install.planChanged") };
     const result = await runInstallTransaction(pending.planned, outcome.approval, pending.request, env);
     const view = buildInstallResultView(result, pending.planned.plan);
     await recordDesktopInstall(pending.planned, result, pending.request, deps, view);
@@ -402,6 +448,7 @@ async function recordDesktopInstall(planned: PlannedInstall, result: InstallResu
 export function registerInstall(ipc: IpcMainLike, session: InstallSession, deps: InstallDeps): void {
   ipc.handle(INSTALL_OPTIONS_CHANNEL, (_event: unknown, toolId: unknown) => optionsForRenderer(session, deps, toolId));
   ipc.handle(INSTALL_PLAN_CHANNEL, (_event: unknown, toolId: unknown, selection: unknown) => planForRenderer(session, deps, toolId, selection));
+  ipc.handle(INSTALL_DISCARD_CHANNEL, (_event: unknown, toolId: unknown) => discardForRenderer(session, toolId));
   ipc.handle(INSTALL_RUN_CHANNEL, (_event: unknown, toolId: unknown) => runForRenderer(session, deps, toolId));
 }
 

@@ -26,6 +26,14 @@ FOR YOU card → **View install plan** → client choice → **Review plan for s
 - Changing the selection after a plan is shown removes that plan from the screen; the user must review again. Only the last plan can be approved and run.
 - The default selection keeps the previous behavior (detected and supported clients). A project with no detected client is no longer a dead end: the user can choose clients.
 
+## Plan consistency (Decision, review follow-up)
+
+- Main keeps a generation number per tool and a project epoch. Every plan request, opening the client screen and every selection change (`install:discard`, toolId only) first drops the pending plan and raises the generation. An invalid selection, an empty selection or a failed plan therefore never leaves an older plan behind, and there is no fallback to a previous selection. Choosing another project raises the epoch and drops every pending plan.
+- A plan is remembered only if, when planning finishes, its generation is still the latest, the epoch is unchanged and the project is the same; otherwise the response is `superseded` and nothing can run.
+- After the native approval dialog closes, main checks again: a newer request or a selection change during the dialog → `plan-changed`, nothing runs; a project change → `project-changed`.
+- The renderer numbers each request and ignores responses that are not the latest; a selection change immediately removes the shown plan and tells main to drop it; a project change clears the install panel. Before showing approval items it checks that the plan's clients equal the selected clients; otherwise it drops the plan.
+- Tests (main IPC, direct calls): valid A → invalid B → run = `no-plan`, 0 runs and writes; empty selection, discard, reopening the client screen and project change each make A unrunnable; A request → B request → B response → A response = A `superseded`, pending and run = B; A request → project change → A response = `superseded`, `no-plan`; selection change during the approval dialog = `plan-changed`, 0 writes. Electron: request Claude Code, switch to Cursor before the response → the screen, approval and files are Cursor only.
+
 ## Verification (Fact)
 
 - `apps/desktop/test/install-clients.test.ts` (main IPC, real Core plans, temporary project, fake probe and executor): options data and no side effects; OS × client levels for `kubernetes-mcp-server` on Windows, Linux, macOS equal Core's table; Codex only writes only `.codex/config.toml` (`.mcp.json` byte-identical); no detected client → choose and plan; invalid selections (outside the allowlist, not supported by the Manifest, not an array, too many) plan nothing and leave nothing to run; path and Plan arguments ignored; re-planning with another selection runs only the last plan; English notes.

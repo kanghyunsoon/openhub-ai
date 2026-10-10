@@ -45,6 +45,7 @@ const installBridge = {
     return ipcRenderer.invoke("install:plan", String(toolId), clients === undefined ? undefined : { clients });
   },
   runInstall: (toolId: unknown) => ipcRenderer.invoke("install:run", String(toolId)),
+  discardInstallPlan: (toolId: unknown) => ipcRenderer.invoke("install:discard", String(toolId)),
 };
 
 /**

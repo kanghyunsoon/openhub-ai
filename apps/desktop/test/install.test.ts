@@ -20,7 +20,7 @@ import {
   type ExecChild,
   type ExecSpawner,
 } from "@openhub/core";
-import { INSTALL_OPTIONS_CHANNEL, INSTALL_PLAN_CHANNEL, INSTALL_RUN_CHANNEL, InstallSession, buildInstallPlanView, nativeDialogPrompter, registerInstall, smokeInstallDeps, type InstallPlanResponse, type InstallRunResponse, type NativeDialogLike } from "../src/install";
+import { INSTALL_DISCARD_CHANNEL, INSTALL_OPTIONS_CHANNEL, INSTALL_PLAN_CHANNEL, INSTALL_RUN_CHANNEL, InstallSession, buildInstallPlanView, nativeDialogPrompter, registerInstall, smokeInstallDeps, type InstallPlanResponse, type InstallRunResponse, type NativeDialogLike } from "../src/install";
 import { PROJECT_SCAN_CHANNEL, fixedDirectory, registerProjectScan } from "../src/project-scan";
 import { PROJECT_RECOMMEND_CHANNEL, RecommendSession, registerProjectRecommend } from "../src/recommend";
 
@@ -105,7 +105,8 @@ describe("REQ-034 Desktop 설치 흐름", () => {
     for (const bad of ["no-such-tool", "../registry/x", 42, { toolId: "postgres-mcp" }]) expect((await w.plan(bad)).status, String(bad)).toBe("not-recommended");
     // v0.2.0 P0-3 PR C: Client 선택 화면 채널(install:options, toolId만)이 추가됐다. install:plan의 두 번째 인자는 clients 속성이 있는
     // 객체일 때만 Client 선택으로 쓰고(엄격 검증), 위처럼 경로·Plan을 보내면 여전히 무시한다.
-    expect([...w.handlers.keys()].filter((c) => c.startsWith("install:")).sort()).toEqual([INSTALL_OPTIONS_CHANNEL, INSTALL_PLAN_CHANNEL, INSTALL_RUN_CHANNEL].sort());
+    // install:discard(toolId만): Client 선택을 바꾸면 그 toolId의 Pending Plan을 버린다(쓰기·실행 0).
+    expect([...w.handlers.keys()].filter((c) => c.startsWith("install:")).sort()).toEqual([INSTALL_DISCARD_CHANNEL, INSTALL_OPTIONS_CHANNEL, INSTALL_PLAN_CHANNEL, INSTALL_RUN_CHANNEL].sort());
     const preload = await read("src/preload.ts");
     expect(preload).toContain('installOptions: (toolId: unknown) => ipcRenderer.invoke("install:options", String(toolId))');
     expect(preload).toContain('return ipcRenderer.invoke("install:plan", String(toolId), clients === undefined ? undefined : { clients });');

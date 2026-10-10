@@ -8,6 +8,7 @@ import type { BackendProbeReport, ExecChild, ExecSpawner, InstallClient } from "
 import { setDesktopLocale } from "../src/i18n/index";
 import {
   INSTALL_OPTIONS_CHANNEL,
+  INSTALL_DISCARD_CHANNEL,
   INSTALL_PLAN_CHANNEL,
   INSTALL_RUN_CHANNEL,
   InstallSession,
@@ -40,7 +41,7 @@ const PROBES: BackendProbeReport = {
   docker: { name: "docker", available: true, version: "27.3.1", status: "ok" },
 };
 
-async function wired(o: { files?: Record<string, string>; platform?: string; registryDir?: string } = {}) {
+async function wired(o: { files?: Record<string, string>; platform?: string; registryDir?: string; duringDialog?: (call: (channel: string, ...args: unknown[]) => unknown) => Promise<void> } = {}) {
   const base = await mkdtemp(path.join(scratch, "case-"));
   const project = path.join(base, "project");
   const home = path.join(base, "home");
@@ -55,24 +56,41 @@ async function wired(o: { files?: Record<string, string>; platform?: string; reg
   const ipc = { handle: (channel: string, fn: (...args: unknown[]) => unknown) => void handlers.set(channel, fn) };
   const rs = new RecommendSession();
   const is = new InstallSession();
-  registerProjectScan(rs.observe(ipc), is.trackPicker(fixedDirectory(project)));
+  // 테스트가 프로젝트를 바꿀 수 있는 picker(fixedDirectory와 같은 동작 + 대상 교체).
+  let pickDir = project;
+  registerProjectScan(rs.observe(ipc), is.trackPicker(async () => pickDir));
   const deps = { registryDir: o.registryDir ?? REGISTRY, metadataFile: SEED_SNAPSHOT, platform: o.platform ?? "linux" };
   registerProjectRecommend(ipc, rs, deps);
   const dialogs: string[] = [];
   const spawns: string[][] = [];
+  // 계획 도중(backend probe)에서 멈췄다가 풀 수 있는 문(응답 순서 제어용). 먼저 도착한 요청 하나가 하나씩 가져간다.
+  const holds: { wait: Promise<void>; reached: () => void }[] = [];
   const spawner: ExecSpawner = (executable, args) => {
     spawns.push([executable, ...args]);
     const events = new EventEmitter();
     queueMicrotask(() => events.emit("close", 0, null));
     return { stdout: null, stderr: null, on: (e: string, l: (...a: unknown[]) => void) => events.on(e, l), kill: () => true } as ExecChild;
   };
-  const dialog: NativeDialogLike = { showMessageBox: async (x) => (dialogs.push(x.title), { response: 1 }) };
+  const dialog: NativeDialogLike = {
+    showMessageBox: async (x) => {
+      dialogs.push(x.title);
+      await o.duringDialog?.(call);
+      return { response: 1 };
+    },
+  };
   registerInstall(ipc, is, {
     ...deps,
     homeDir: home,
     recommend: rs,
     dialog,
-    probe: async () => PROBES,
+    probe: async () => {
+      const hold = holds.shift();
+      if (hold !== undefined) {
+        hold.reached();
+        await hold.wait;
+      }
+      return PROBES;
+    },
     spawner,
     isolatedDir: async () => {
       const dir = await mkdtemp(path.join(base, "iso-"));
@@ -80,6 +98,7 @@ async function wired(o: { files?: Record<string, string>; platform?: string; reg
     },
   });
   const call = (channel: string, ...args: unknown[]) => handlers.get(channel)!({}, ...args);
+  void fixedDirectory;
   await call(PROJECT_SCAN_CHANNEL);
   const recommended = ((await call(PROJECT_RECOMMEND_CHANNEL)) as { view?: { items: { toolId: string }[] } }).view?.items.map((i) => i.toolId) ?? [];
   return {
@@ -88,6 +107,23 @@ async function wired(o: { files?: Record<string, string>; platform?: string; reg
     dialogs,
     spawns,
     recommended,
+    /** 다음 계획 요청을 probe 단계에서 멈춘다. reached는 그 요청이 실제로 멈췄을 때, release는 풀 때. */
+    hold: () => {
+      let release!: () => void;
+      let reached!: () => void;
+      const arrived = new Promise<void>((r) => (reached = r));
+      holds.push({ wait: new Promise<void>((r) => (release = r)), reached });
+      return { arrived, release };
+    },
+    switchProject: async (files: Record<string, string>) => {
+      const other = path.join(base, "other-" + String(Date.now()));
+      await mkdir(other);
+      for (const [rel, text] of Object.entries(files)) await writeFile(path.join(other, rel), text);
+      pickDir = other;
+      await call(PROJECT_SCAN_CHANNEL);
+      return other;
+    },
+    discard: (...a: unknown[]) => call(INSTALL_DISCARD_CHANNEL, ...a),
     options: (...a: unknown[]) => call(INSTALL_OPTIONS_CHANNEL, ...a) as Promise<InstallOptionsResponse>,
     plan: (...a: unknown[]) => call(INSTALL_PLAN_CHANNEL, ...a) as Promise<InstallPlanResponse>,
     run: (...a: unknown[]) => call(INSTALL_RUN_CHANNEL, ...a) as Promise<InstallRunResponse>,
@@ -205,6 +241,84 @@ describe("v0.2.0 P0-3 PR C Desktop 설치 Client 선택", () => {
       "Not detected in this project · No OpenHub run record for this client on Linux (the Manifest lists it as supported)",
     ]);
     for (const c of r.view.clients) expect(c.note).not.toMatch(HANGUL);
+  });
+});
+
+
+describe("v0.2.0 P0-3 PR C 계획 일관성(main IPC 직접 호출)", () => {
+  const onlyMcp = async (w: { project: string }) => (await readFile(path.join(w.project, ".mcp.json"), "utf8")) === '{ "mcpServers": {} }\n';
+
+  it("정상 Plan A → 잘못된 Plan B → install:run은 no-plan이고 실행·쓰기가 0이다(이전 Plan 재사용 없음)", async () => {
+    const w = await wired();
+    expect((await w.plan("postgres-mcp", { clients: ["claude-code"] })).status).toBe("ok");
+    expect(await w.plan("postgres-mcp", { clients: ["vscode"] })).toMatchObject({ status: "error", code: "invalid-selection" });
+    expect(await w.run("postgres-mcp")).toEqual({ status: "no-plan" });
+    expect(w.spawns).toEqual([]);
+    expect(w.dialogs).toEqual([]);
+    expect(await onlyMcp(w)).toBe(true);
+    expect(await projectFiles(w.project)).toEqual([".mcp.json", "package.json"]);
+  });
+
+  it("Client 전체 해제(빈 선택)·선택 변경 알림(install:discard)·선택 화면 다시 열기·프로젝트 변경은 모두 이전 Plan을 실행할 수 없게 한다", async () => {
+    const w = await wired();
+    for (const invalidate of [
+      () => w.plan("postgres-mcp", { clients: [] }),
+      () => w.discard("postgres-mcp"),
+      () => w.options("postgres-mcp"),
+      () => w.switchProject({ "package.json": '{ "name": "other", "dependencies": { "pg": "^8.13.0" } }\n', ".mcp.json": '{ "mcpServers": {} }\n' }),
+    ]) {
+      expect((await w.plan("postgres-mcp", { clients: ["claude-code"] })).status).toBe("ok");
+      await invalidate();
+      expect(await w.run("postgres-mcp")).toEqual({ status: "no-plan" });
+    }
+    expect(w.spawns).toEqual([]);
+    expect(w.dialogs).toEqual([]);
+    expect(await w.discard(42)).toEqual({ status: "invalid" });
+  });
+
+  it("A 요청 → B 요청 → B 응답 → A 응답: A는 superseded이고 Pending Plan·실행은 B다", async () => {
+    const w = await wired();
+    const holdA = w.hold();
+    const a = w.plan("postgres-mcp", { clients: ["claude-code"] });
+    await holdA.arrived;
+    const b = await w.plan("postgres-mcp", { clients: ["cursor"] });
+    expect(b.status === "ok" && b.view.targets.map((t) => t.client)).toEqual(["cursor"]);
+    holdA.release();
+    expect(await a).toEqual({ status: "superseded" });
+    const run = await w.run("postgres-mcp");
+    expect(run.status === "done" && run.result.status).toBe("succeeded");
+    expect(await onlyMcp(w)).toBe(true);
+    expect(await projectFiles(w.project)).toEqual([".cursor", ".cursor/mcp.json", ".mcp.json", "package.json"]);
+  });
+
+  it("A 요청 → 프로젝트 변경 → A 응답: 이전 프로젝트 Plan은 기억되지 않고 실행할 수 없다", async () => {
+    const w = await wired();
+    const holdA = w.hold();
+    const a = w.plan("postgres-mcp", { clients: ["claude-code"] });
+    await holdA.arrived;
+    const other = await w.switchProject({ "package.json": '{ "name": "other", "dependencies": { "pg": "^8.13.0" } }\n', ".mcp.json": '{ "mcpServers": {} }\n' });
+    holdA.release();
+    expect(await a).toEqual({ status: "superseded" });
+    expect(await w.run("postgres-mcp")).toEqual({ status: "no-plan" });
+    expect(await onlyMcp(w)).toBe(true);
+    expect(await readFile(path.join(other, ".mcp.json"), "utf8")).toBe('{ "mcpServers": {} }\n');
+    expect(w.spawns).toEqual([]);
+  });
+
+  it("A Plan 승인 대화상자가 열린 동안 Client 선택을 바꾸면(새 계획·discard) 받은 승인으로 실행하지 않는다", async () => {
+    for (const during of [
+      async (call: (channel: string, ...args: unknown[]) => unknown) => void (await call(INSTALL_DISCARD_CHANNEL, "postgres-mcp")),
+      async (call: (channel: string, ...args: unknown[]) => unknown) => void (await call(INSTALL_PLAN_CHANNEL, "postgres-mcp", { clients: ["cursor"] })),
+    ]) {
+      const w = await wired({ duringDialog: during });
+      expect((await w.plan("postgres-mcp", { clients: ["claude-code"] })).status).toBe("ok");
+      const r = await w.run("postgres-mcp");
+      expect(r.status).toBe("plan-changed");
+      expect(w.dialogs).toHaveLength(1);
+      expect(w.spawns).toEqual([]);
+      expect(await onlyMcp(w)).toBe(true);
+      expect((await projectFiles(w.project)).filter((f) => f.startsWith(".cursor"))).toEqual([]);
+    }
   });
 });
 
