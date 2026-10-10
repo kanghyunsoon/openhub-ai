@@ -49,8 +49,8 @@ describe("Registry Kubernetes Manifest", () => {
     for (const platform of ["linux", "windows", "macos"] as const) {
       const { plan } = await plannedOf(h, { ...h.request("kubernetes-mcp-server", CLIENTS), platform });
       const notices = plan.warnings.filter((w) => w.code === "client-launch-unverified" || w.code === "platform-unverified").map((w) => w.message);
-      // Codex: 같은 실행 명령으로 시작·호출은 확인(spec-launch-verified), 프로젝트 파일에서 직접 시작은 미검증 → 경고는 남는다.
-      expect(notices.some((m) => m.startsWith("Codex: OpenHub가 쓰는 실행 명령으로") && m.includes("검증하지 않았습니다"))).toBe(true);
+      // Codex: 프로젝트 설정 파일에서 실제 시작·호출까지 확인(launch-verified) → 경고 없음. Cursor는 미검증 경고가 남는다.
+      expect(notices.some((m) => m.startsWith("Codex"))).toBe(false);
       expect(notices.some((m) => m.startsWith("Cursor:"))).toBe(true);
       expect(notices.some((m) => m.startsWith("Claude Code"))).toBe(false);
       expect(notices.some((m) => m.startsWith("macos"))).toBe(platform === "macos");

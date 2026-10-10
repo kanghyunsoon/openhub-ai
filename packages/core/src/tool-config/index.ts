@@ -55,9 +55,10 @@ export const REVIEWED_TOOL_CONFIGS: Readonly<Record<string, ReviewedToolConfig>>
     content: KUBERNETES_TOOL_CONFIG,
     notice:
       "OpenHub가 ~/.openhub/tool-config 아래에 서버 정책 파일(read_only, core toolset, Secret 조회 거부)을 만들고 Client 설정의 --config로 넘깁니다. 서버는 kubeconfig의 current context 사용자 권한으로 동작하며 OpenHub는 kubeconfig를 읽지 않습니다. Pod·Node 로그에 비밀정보가 있으면 막지 못합니다. 읽기 전용 RBAC 사용자를 쓰세요.",
-    // 2026-10-10 기록: Claude Code 2.1.258 실제 연결. Codex CLI 0.147.0은 프로젝트 설정 인식(codex mcp list) + 같은 command·args로
-    // codex exec 실제 시작·tools/call(ConfigMap 성공, Secret 거부)까지. Cursor 미설치. Windows·Linux E2E, macOS 미검증.
-    clientVerification: Object.freeze({ "claude-code": "launch-verified", codex: "spec-launch-verified", cursor: "not-verified" } as const),
+    // 2026-10-10 기록: Claude Code 2.1.258 실제 연결. Codex CLI 0.147.0(Windows): 격리 CODEX_HOME에서 trust한 프로젝트의
+    // .codex/config.toml(OpenHub가 쓴 항목)로 서버를 실제로 시작하고 tools/call(ConfigMap 성공, Secret 거부)까지 확인(app-server, 모델 호출 0,
+    // trust 없는 대조군은 서버 0개). Cursor 미설치. Windows·Linux E2E, macOS 미검증.
+    clientVerification: Object.freeze({ "claude-code": "launch-verified", codex: "launch-verified", cursor: "not-verified" } as const),
     platformVerified: Object.freeze({ windows: true, linux: true, macos: false }),
   }),
 });
