@@ -291,3 +291,106 @@ describe("v0.2.0 tool config: Status·Repair·Health·Rollback·Update(Lifecycle
   });
 });
 
+
+describe("v0.2.0 tool config: 같은 프로젝트 repair(경로만 다른 항목)", () => {
+  async function installed() {
+    const h = await createHarness(scratch, { entries });
+    const { planned, run, request } = await install(h);
+    const result = await run();
+    await recordInstallInState(planned, result, { projectRoot: request.projectRoot, homeDir: h.homeDir, now: () => new Date() });
+    return { h, loc: await projectLoc(h) };
+  }
+  const FILES = { "claude-code": ".mcp.json", cursor: path.join(".cursor", "mcp.json"), codex: path.join(".codex", "config.toml") } as const;
+  /** Client 파일에서 문자열 하나를 바꾼다(JSON·TOML 모두 JSON 문자열 escape를 쓴다). */
+  async function rewrite(h: Harness, client: keyof typeof FILES, from: string, to: string) {
+    const file = path.join(h.projectRoot, FILES[client]);
+    const text = await readFile(file, "utf8");
+    expect(text).toContain(JSON.stringify(from));
+    await writeFile(file, text.split(JSON.stringify(from)).join(JSON.stringify(to)));
+  }
+  const otherManaged = (h: Harness) => toolConfigLocation({ homeDir: h.homeDir, scope: "user", toolId: "kubernetes-mcp-server" })!.file;
+
+  for (const client of ["codex", "claude-code", "cursor"] as const) {
+    it("A·B·C " + client + ": --config 경로만 바뀐 항목은 승인 뒤 repair가 고치고 다른 항목·사용자 TOML은 그대로다", async () => {
+      const { h, loc } = await installed();
+      const codexFile = path.join(h.projectRoot, FILES.codex);
+      // F: 사용자 TOML(최상위 설정은 앞에, 다른 MCP 항목은 뒤에)을 둔다. repair 뒤 byte 그대로 남아야 한다.
+      const userHead = '# user\nmodel = "o3"\n\n';
+      const userToml = '\n[mcp_servers.other]\ncommand = "uvx"\nargs = ["other-mcp"]\n';
+      await writeFile(codexFile, userHead + (await readFile(codexFile, "utf8")) + userToml);
+      // Codex block을 덧붙였으므로 Version State(파일 digest가 아닌 항목 digest)는 그대로 일치한다.
+      await rewrite(h, client, loc.file, otherManaged(h));
+      const states = await statusOf(h);
+      expect(states).toContain(client + ":config-drift");
+      const repair = await lifecycle(h, "repair");
+      if (!repair.built.ok) throw new Error(repair.built.code);
+      expect(repair.built.planned.plan.status, JSON.stringify(repair.built.planned.plan.warnings.filter((x) => x.code.toUpperCase() === x.code))).toBe("ready");
+      const result = await repair.run();
+      expect(result, JSON.stringify(result.steps)).toMatchObject({ status: "repaired", stateCommitted: true });
+      expect(await statusOf(h)).toEqual(["claude-code:state-consistent", "codex:state-consistent", "cursor:state-consistent"]);
+      const after = await readFile(codexFile, "utf8");
+      expect(after.startsWith(userHead)).toBe(true);
+      expect(after.endsWith(userToml)).toBe(true);
+      expect(after).toContain(JSON.stringify(loc.file));
+      expect(after).not.toContain(JSON.stringify(otherManaged(h)));
+    });
+  }
+
+  it("D: 명령 인자가 바뀐 항목은 repair하지 않는다(CONFIG_DRIFT)", async () => {
+    const { h } = await installed();
+    await rewrite(h, "claude-code", "kubernetes-mcp-server@0.0.67", "kubernetes-mcp-server@0.0.66");
+    const repair = await lifecycle(h, "repair");
+    expect(repair.built.ok && repair.built.planned.plan.status).toBe("blocked");
+    expect(repair.built.ok && repair.built.planned.plan.warnings.map((w) => w.code)).toContain("CONFIG_DRIFT");
+  });
+
+  it("E: 보안 플래그(--read-only·--toolsets)가 바뀐 항목, OpenHub 관리 위치가 아닌 --config는 repair하지 않는다", async () => {
+    const { h, loc } = await installed();
+    await rewrite(h, "codex", "--read-only", "--log-level");
+    const a = await lifecycle(h, "repair");
+    expect(a.built.ok && a.built.planned.plan.warnings.map((w) => w.code)).toContain("CONFIG_DRIFT");
+    const second = await installed();
+    await rewrite(second.h, "cursor", second.loc.file, path.join(second.h.base, "evil", "config.toml"));
+    const b = await lifecycle(second.h, "repair");
+    expect(b.built.ok && b.built.planned.plan.warnings.map((w) => w.code)).toContain("CONFIG_DRIFT");
+    expect(loc.file).not.toBe("");
+  });
+
+  it("G: 승인 뒤 항목이 다시 바뀌면 PLAN_STALE이고 아무것도 쓰지 않는다", async () => {
+    const { h, loc } = await installed();
+    await rewrite(h, "codex", loc.file, otherManaged(h));
+    const repair = await lifecycle(h, "repair");
+    if (!repair.built.ok) throw new Error(repair.built.code);
+    const outcome = await requestLifecycleApproval(repair.built.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
+    if (outcome.status !== "approved") throw new Error(outcome.status);
+    const moved = path.join(h.base, "x", ".openhub", "tool-config", "user", "kubernetes-mcp-server", "config.toml");
+    await rewrite(h, "codex", otherManaged(h), moved);
+    const before = await readFile(path.join(h.projectRoot, FILES.codex), "utf8");
+    const result = await runLifecycleTransaction(repair.built.planned, outcome.approval, repair.request, repair.env);
+    expect(result).toMatchObject({ status: "stale", code: "PLAN_STALE" });
+    expect(await readFile(path.join(h.projectRoot, FILES.codex), "utf8")).toBe(before);
+  });
+
+  it("H: 보상 중 다른 프로세스가 바꾼 Client 설정은 덮어쓰지 않고 rollback-failed(CONFIG_RESTORE_FAILED)로 남긴다", async () => {
+    const { h, loc } = await installed();
+    await rewrite(h, "claude-code", loc.file, otherManaged(h));
+    const repair = await lifecycle(h, "repair");
+    if (!repair.built.ok) throw new Error(repair.built.code);
+    const outcome = await requestLifecycleApproval(repair.built.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
+    if (outcome.status !== "approved") throw new Error(outcome.status);
+    const mcp = path.join(h.projectRoot, FILES["claude-code"]);
+    const external = '{ "mcpServers": { "kubernetes": { "command": "someone-else", "args": [] } } }\n';
+    const env: LifecycleEnvironment = {
+      ...repair.env,
+      runHealth: async () => {
+        await writeFile(mcp, external);
+        return { ok: true as const, result: { status: "unhealthy" as const, reason: null, toolCount: null, environmentUnverified: false, terminated: true, excerpt: null } };
+      },
+    };
+    const result = await runLifecycleTransaction(repair.built.planned, outcome.approval, repair.request, env);
+    expect(result).toMatchObject({ status: "rollback-failed", code: "CONFIG_RESTORE_FAILED", stateCommitted: false });
+    expect(await readFile(mcp, "utf8")).toBe(external);
+  });
+});
+
+

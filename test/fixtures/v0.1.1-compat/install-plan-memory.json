@@ -1,0 +1,99 @@
+{
+  "approvalRequirements": [
+    "base",
+    "floating-artifact"
+  ],
+  "artifact": {
+    "kind": "npm-package",
+    "pinned": false,
+    "preparation": "launch-on-demand",
+    "spec": "@modelcontextprotocol/server-memory"
+  },
+  "backend": {
+    "adapter": "npx",
+    "probe": {
+      "available": true,
+      "name": "npx",
+      "status": "shim-not-executed",
+      "version": "10.9.2"
+    },
+    "selection": "preferred",
+    "skipped": []
+  },
+  "displayName": "Memory MCP",
+  "launch": {
+    "args": [
+      "-y",
+      "@modelcontextprotocol/server-memory"
+    ],
+    "clientSpec": {
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
+      "command": "npx"
+    },
+    "envNames": [],
+    "executable": "npx",
+    "platform": "linux"
+  },
+  "operation": "install",
+  "requiredEnv": [],
+  "schemaVersion": 1,
+  "sideEffects": [
+    "file-write"
+  ],
+  "source": {
+    "manifestDigest": "sha256:b669e396f7dcbd05e48a75440e334fe73432256cd9d249e2b253cb290ce54a1c",
+    "recommendation": {
+      "inspectedScopes": [
+        "project"
+      ],
+      "installationStatus": "not-installed",
+      "primaryCapability": null
+    },
+    "registryDigest": "sha256:5cd0dc1391c3b15b8c52490b7e8f1cd6c6fb26a71cbfd161cd667fcc383e458c"
+  },
+  "status": "installable",
+  "steps": [
+    {
+      "client": "claude-code",
+      "file": ".mcp.json",
+      "id": "config-claude-code-project",
+      "kind": "config-patch",
+      "path": [
+        "mcpServers",
+        "memory"
+      ],
+      "scope": "project",
+      "value": {
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-memory"
+        ],
+        "command": "npx"
+      }
+    }
+  ],
+  "targets": [
+    {
+      "client": "claude-code",
+      "envReference": "claude-dollar-brace",
+      "file": ".mcp.json",
+      "precondition": {
+        "exists": false,
+        "fileDigest": null,
+        "keyAbsent": true
+      },
+      "scope": "project",
+      "serverName": "memory"
+    }
+  ],
+  "toolId": "memory-mcp",
+  "warnings": [
+    {
+      "code": "floating-artifact",
+      "message": "이 설치 계획은 실행 명령과 설정을 고정하지만, 원격 패키지 내용 자체는 고정하지 않습니다. 동일한 계획을 나중에 실행하면 다른 artifact가 내려올 수 있습니다."
+    }
+  ]
+}

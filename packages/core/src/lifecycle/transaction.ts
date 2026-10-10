@@ -1,6 +1,6 @@
 import type { FetchLike } from "../discovery/github";
 import path from "node:path";
-import { restoreConfig, type ConfigFs, type ConfigWriteReceipt } from "../installer/config-writer";
+import { readConfiguredEntry, restoreConfig, type ConfigFs, type ConfigWriteReceipt } from "../installer/config-writer";
 import type { ConfigScope, InstallClient, ServerEntry, ToolConfigStep } from "../installer/plan";
 import { toolConfigLocationFor } from "../installer/transaction";
 import {
@@ -337,11 +337,18 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
   for (const step of configSteps) {
     const target = plan.targets.find((t) => "config-" + t.client + "-" + t.scope === step.id)!;
     const source = states.get(target.entryKey) ?? (target.relocatedFrom === undefined ? undefined : stateRead.state.entries[target.relocatedFrom]);
+    // repair(v0.2.0): Plan이 "OpenHub 관리 경로만 다르다"고 판정한 항목은 기록된 block이 아니라 지금 파일의 실제 block을 교체한다.
+    // 지금 항목이 승인 때 확인한 digest(precondition)와 같을 때만이다. 다르면(승인 뒤 변경) 교체하지 않는다(CONFIG_DRIFT).
+    let expectedBlockDigest = source?.config.tomlBlockDigest ?? null;
+    if (plan.operation === "repair" && target.client === "codex" && source !== undefined && target.precondition.entryDigest !== source.config.entryDigest) {
+      const current = await readConfiguredEntry(target.client, target.scope, target.serverName, roots).catch(() => undefined);
+      expectedBlockDigest = current !== undefined && configEntryDigest(current) === target.precondition.entryDigest ? tomlBlockDigest(target.serverName, current as ServerEntry) : null;
+    }
     let r: Awaited<ReturnType<typeof replaceConfigEntry>>;
     try {
       const m = usesToolConfig ? materialize(step.scope) : undefined;
       if (m !== undefined) written.set(step.id, m(step.value));
-      r = await replaceConfigEntry(step, { ...roots, acknowledgements: verified.acknowledgements, expectedBlockDigest: source?.config.tomlBlockDigest ?? null, ...(m === undefined ? {} : { materialize: m }) });
+      r = await replaceConfigEntry(step, { ...roots, acknowledgements: verified.acknowledgements, expectedBlockDigest, ...(m === undefined ? {} : { materialize: m }) });
     } catch (error) {
       r = { ok: false, code: "MANUAL_SETUP_REQUIRED", message: (error as Error).message };
     }
