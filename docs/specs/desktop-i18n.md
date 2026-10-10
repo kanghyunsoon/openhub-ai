@@ -33,36 +33,52 @@ Decisions:
 
 ## Translated in English mode (Fact)
 
-Navigation, onboarding, project scan, FOR YOU (badges, scope, capabilities, reasons, OpenScore meaning, empty result), tool detail, DISCOVER (tabs, notices, trend meaning, candidates), install plan preview, native approval dialogs (install, update, rollback, Health, repair), INSTALLED/lifecycle status, Health results, update, rollback, repair, partial failure (`CONFIG_RESTORE_FAILED`, `COMPENSATION_INCOMPLETE`), `PLAN_STALE`, project-changed, error messages, warnings and security notices, Pinokio support notice, dates and numbers.
+Navigation, onboarding, project scan, FOR YOU (badges, scope, capabilities, reasons, OpenScore meaning, empty result), tool detail, DISCOVER (tabs, notices, trend meaning, candidates), install plan preview, native approval dialogs (install, update, rollback, Health, repair, Adopt, Benchmark), INSTALLED/lifecycle status, Health results, update, rollback, repair, Adopt and Benchmark (preview, approval items, blockers, results, errors), partial failure (`CONFIG_RESTORE_FAILED`, `COMPENSATION_INCOMPLETE`), `PLAN_STALE`, project-changed, error messages, warnings and security notices, Pinokio support notice, dates and numbers.
 
-Coverage tests: every install and lifecycle approval requirement ID, every recommendation reason code, every capability ID, and every warning or blocker code that Core installer, lifecycle and tool-config modules emit has an English sentence.
+Coverage tests: every install, lifecycle, Adopt and Benchmark approval requirement ID, every Adopt and Benchmark blocker code, every recommendation reason code, every capability ID, and every warning, blocker or error code that Core installer, lifecycle, tool-config, adopt and benchmark modules emit has an English sentence.
+
+### Adopt and Benchmark (Decision)
+
+These are execution approvals, so English mode never shows the Core Korean preview. `apps/desktop/src/i18n/adopt-en.ts` builds the preview, approval items, blockers, results and errors from AdoptPlan, BenchmarkPlan, AdoptResult and BenchmarkReport fields, in the same order as the Core preview. Approval requirement IDs are unchanged and every ID is listed in the native dialog. The Benchmark preview states, from the plan: the number of server starts (warm-up + measured), the startup, handshake, per-run and total limits, that each run starts third-party code in an isolated temporary directory without a shell, that no MCP tool is called, that environment variables are passed by name only, and that Benchmark is not a Health Check (Version State and the recorded Health status do not change). Korean mode is unchanged (Core sentences).
+
+### Warnings are never dropped (Decision)
+
+`warningsEn()` returns one line per Core warning, in order:
+
+- Known codes get an English sentence built from the plan structure. Codes that occur once per item (required environment variables, manual setup targets, existing entries, client and OS verification gaps) are paired by their position among the plan's warnings of the same code, using the same structure Core used to create them. Client and OS verification lines come from Core's `toolConfigVerificationGaps()`, the same function that creates the Korean warnings.
+- An unknown code, a warning without a code, a code whose structure count does not match the number of Core warnings, or a single-sentence code that appears with different Core texts keeps its warning ID and the original Core text, prefixed with "(not translated)".
+- Only exact duplicates (same code and same text) are shown once.
+
+The same rule applies to lifecycle result warnings and Adopt/Benchmark errors.
 
 ## Not translated or reduced in English mode (Fact, with Proposal)
 
 | Area | What English mode shows | Needed change (Proposal, additive) |
 | --- | --- | --- |
-| Adopt and Benchmark plan previews | Core Korean lines (`formatAdoptPlanPreview`, `formatBenchmarkPlanPreview`) | Structured preview items (`{ id, params }`) next to the formatted lines |
 | Pinokio plan notices | Core notice text | Notice codes on `PinokioPlan` |
 | Release impact reasons | Codes with level, e.g. `version-major (high)` | Reason parameters (`from`, `to`, `runtime`) |
 | Release summary items | Upstream release-note text (third-party, usually English) | None; third-party text is shown as is |
 | Registry Manifest summaries and validation issues | Authored Manifest text and Core issue sentences | Optional `summary.en` in Manifests; issue codes |
 | Desktop metadata-cache warning | Written to stderr only, not shown in the window | Warning code from `loadMetadataSnapshot` |
 | Recommendation reasons | Generic sentence per reason code, without names or numbers | Reason parameters (`tech`, `file`, `dependency`) |
-| Blockers that name a file | Generic sentence per code | File or entry name as a parameter |
+| Blockers that name a file (install, Adopt, Benchmark) | Generic sentence per code | File or entry name as a parameter |
+| Benchmark run failure reasons | Core reason code as is (e.g. `spawn-failed`) | None needed; codes are already language-neutral |
 | Failed-step excerpts | Omitted (status and code are shown) | Excerpt code |
 | Core `nextActions` | Code-based guidance | Next-action IDs |
 | Client launcher reason | Fixed sentence | Reason code |
 
 ## Verification (Fact)
 
-- Unit (`apps/desktop/test/i18n.test.ts`): locale resolution, preference storage (atomic, other keys kept, unreadable file untouched), catalog parity, placeholders, no HTML, interpolation is text, all used keys exist, Core code coverage, English install preview, repair status, preview and dialog, Health failure, `PLAN_STALE`, project-changed, FOR YOU in both languages, `noticeEn` display-only.
+- Unit (`apps/desktop/test/i18n.test.ts`): locale resolution, preference storage (atomic, other keys kept, unreadable file untouched), catalog parity, placeholders, no HTML, interpolation is text, all used keys exist, Core code coverage, English install preview, repair status, preview and dialog, Health failure, `PLAN_STALE`, project-changed, FOR YOU in both languages, `noticeEn` display-only, warning preservation (unknown code, unknown security notice, no code, multiple warnings of one code, count mismatch, client and OS warnings on Windows, Linux and macOS, Kubernetes Secret and RBAC notice).
+- Adopt and Benchmark (`apps/desktop/test/adopt-i18n.test.ts`): real Core plans, approval kernel and the native dialog interface; English preview, dialog (every approval ID), blockers, results; rejection runs nothing; Korean mode keeps Core sentences.
 - Existing Desktop tests force Korean (`test/locale-ko.ts`) and compare against the Korean catalog. Their behaviour assertions are unchanged.
 - Electron (`apps/desktop/test/i18n-electron.e2e.test.ts`, `OPENHUB_E2E=1`): real app, temporary userData. First launch with `en-US` → English, 0 Korean characters, 0 missing keys; `ko-KR` → Korean, nothing saved; switching en → ko and ko → en through the real language menu (change event → main saves → reload); relaunch keeps the choice even when the OS language differs.
+- Electron Adopt and Benchmark (same file, `OPENHUB_SMOKE_ADOPT=1`): the renderer clicks Adopt, then the Benchmark button that appears in INSTALLED; main's smoke dialog stand-in records title, message and detail and approves; a fake MCP server answers initialize and tools/list (6 starts). English: both dialogs and results have no Korean text and list every approval ID; `ko-KR`: Core Korean sentences.
 - The repair Electron E2E pins `ko-KR` and a temporary userData so it does not depend on the developer's saved choice.
 
 ## Known limitation (Fact)
 
-The Desktop update smoke (`OPENHUB_SMOKE_UPDATE`) uses a fake spawner that exits 0 without creating an npx cache entry, so npx tools stop at npx Prepare verification (`preparation-failed`). This predates this change (the smoke dependencies are unchanged since v0.1.0; npx Prepare arrived in #8). uvx tools such as `serena` pass install → update → Health → release in both languages.
+The Desktop update smoke (`OPENHUB_SMOKE_UPDATE`) uses a fake spawner that exits 0 without creating an npx cache entry, so npx tools stop at npx Prepare verification (`preparation-failed`). This is a test-environment gap, not an update failure, and predates this change (the smoke dependencies are unchanged since v0.1.0; npx Prepare arrived in #8). uvx tools such as `serena` pass install → update → Health → release in both languages. Follow-up (separate pull request, required before the v0.2.0 release): make the fake npm create the cache entry npx Prepare verifies (as the repair smoke already does) and cover npx install → update → Health → rollback.
 
 ## Open Questions
 

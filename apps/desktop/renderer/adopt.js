@@ -88,4 +88,39 @@
   }
   new MutationObserver(() => void refresh()).observe(document.getElementById("project-body"), { childList: true });
   document.addEventListener("openhub:installed-changed", () => void refresh());
+
+  // 스모크(--smoke + OPENHUB_SMOKE_ADOPT): 사람처럼 [Adopt]를 누르고, INSTALLED에 생긴 [Benchmark]를 누른다(대화상자는 main의 자동 확인).
+  // 화면 변화는 MutationObserver로 기다린다. 스모크 전용 안전 장치로만 60초 제한을 둔다.
+  function waitFor(read) {
+    return new Promise((resolve, reject) => {
+      const first = read();
+      if (first) return resolve(first);
+      const guard = setTimeout(() => (observer.disconnect(), reject(new Error("smoke adopt timeout"))), 60000);
+      const observer = new MutationObserver(() => {
+        const v = read();
+        if (v) {
+          clearTimeout(guard);
+          observer.disconnect();
+          resolve(v);
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+    });
+  }
+  window.__openhubAdopt = async () => {
+    const run = await waitFor(() => list.querySelector("button.adopt-run"));
+    const preview = run.parentElement.querySelector("pre").textContent;
+    run.click();
+    const adoptResult = await waitFor(() => {
+      const pre = panel.hidden ? null : panel.querySelector("pre");
+      return pre ? pre.textContent : null;
+    });
+    const bench = await waitFor(() => {
+      const b = installed.querySelector("button.benchmark-run");
+      return b && !b.disabled ? b : null;
+    });
+    bench.click();
+    const benchmarkResult = await waitFor(() => (panel.querySelector("h3") ? panel.querySelector("pre").textContent : null));
+    return { status: "ok", preview, adoptResult, benchmarkResult };
+  };
 })();

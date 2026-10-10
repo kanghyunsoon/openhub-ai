@@ -13,7 +13,7 @@ import {
   resolveMetadataFileSync,
   resolveRegistryDir,
 } from "@openhub/core";
-import { registerAdopt } from "./adopt";
+import { registerAdopt, smokeAdoptDeps } from "./adopt";
 import { registerDiscover, smokeDiscoverCandidates } from "./discover";
 import { InstallSession, registerInstall, smokeInstallDeps } from "./install";
 import { LifecycleSession, registerLifecycle, smokeLifecycleDeps, smokeRepairDeps } from "./lifecycle";
@@ -106,6 +106,12 @@ const smokeLifecycle = smokeUpdate === undefined ? undefined : smokeLifecycleDep
 const smokeRepairTool = smoke && smokeInstall === undefined ? process.env["OPENHUB_SMOKE_REPAIR"] || undefined : undefined;
 const smokeRepairHome = smokeRepairTool === undefined ? undefined : process.env["OPENHUB_SMOKE_HOME"] || undefined;
 const smokeRepair = smokeRepairHome === undefined ? undefined : smokeRepairDeps(path.join(smokeRepairHome, "npm-cache"));
+/**
+ * 스모크 Adopt·Benchmark(v0.2.0 P0-3 PR B): --smoke + OPENHUB_SMOKE_ADOPT=1 + OPENHUB_SMOKE_HOME(빈 임시 home)일 때만. 설치·Repair 스모크와
+ * 함께 쓰지 않는다. 가짜 MCP 서버·자동 확인 대화상자(내용 기록)를 쓴다.
+ */
+const smokeAdoptHome = smoke && smokeInstall === undefined && smokeRepairTool === undefined && process.env["OPENHUB_SMOKE_ADOPT"] === "1" ? process.env["OPENHUB_SMOKE_HOME"] || undefined : undefined;
+const smokeAdopt = smokeAdoptHome === undefined ? undefined : smokeAdoptDeps();
 registerLifecycle(ipcMain, new LifecycleSession(() => installSession.projectDir), {
   registryDir,
   platform: process.platform,
@@ -114,6 +120,8 @@ registerLifecycle(ipcMain, new LifecycleSession(() => installSession.projectDir)
   ...(smokeLifecycle === undefined || smokeDeps === undefined ? {} : { fetch: smokeLifecycle.fetch, runHealth: smokeLifecycle.runHealth, spawner: smokeLifecycle.spawner, probe: smokeDeps.probe }),
   // 스모크 Repair(--smoke + OPENHUB_SMOKE_REPAIR + OPENHUB_SMOKE_HOME일 때만): 준비된 home·자동 확인·가짜 npm·가짜 Health.
   ...(smokeRepair === undefined || smokeRepairHome === undefined ? {} : { homeDir: smokeRepairHome, dialog: smokeRepair.dialog, runHealth: smokeRepair.runHealth, spawner: smokeRepair.spawner, probe: smokeInstallDeps().probe }),
+  // 스모크 Adopt(--smoke + OPENHUB_SMOKE_ADOPT + OPENHUB_SMOKE_HOME일 때만): INSTALLED 목록이 같은 임시 home의 Version State를 읽는다.
+  ...(smokeAdoptHome === undefined ? {} : { homeDir: smokeAdoptHome }),
 });
 
 /**
@@ -161,10 +169,11 @@ registerDiscover(ipcMain, {
 });
 registerAdopt(ipcMain, {
   registryDir,
-  homeDir: desktopHome,
+  homeDir: smokeAdoptHome ?? desktopHome,
   platform: process.platform,
   projectDir: () => installSession.projectDir,
-  dialog: { showMessageBox: (options) => dialog.showMessageBox(options) },
+  dialog: smokeAdopt?.dialog ?? { showMessageBox: (options) => dialog.showMessageBox(options) },
+  ...(smokeAdopt === undefined ? {} : { healthSpawner: smokeAdopt.healthSpawner, killTree: smokeAdopt.killTree }),
 });
 
 /** 앱 창. TASK-015에서 프로젝트 분석 스모크·스크린샷 대기를, TASK-026에서 FOR YOU 추천 대기를 더했다(파일의 셸 자체는 REQ-005). */
@@ -205,6 +214,11 @@ async function createWindow(): Promise<void> {
         smokeRepairTool === undefined || smokeRepair === undefined || project === undefined
           ? undefined
           : ((await win.webContents.executeJavaScript("window.__openhubRepair(" + JSON.stringify(smokeRepairTool) + ")")) as { status: string; outcome?: string; health?: string[]; preview?: number; boxes?: number; confirmDisabledBeforeChecks?: boolean; after?: string[] });
+      // 스모크 Adopt·Benchmark(v0.2.0 P0-3 PR B): 화면의 [Adopt]·[Benchmark] 버튼 click → 네이티브 대화상자 자리(자동 확인, 내용 기록) → 결과.
+      const adopt =
+        smokeAdopt === undefined || project === undefined
+          ? undefined
+          : ((await win.webContents.executeJavaScript("window.__openhubAdopt()")) as { status: string; preview: string; adoptResult: string; benchmarkResult: string });
       const release =
         smokeReleaseTool === undefined || update === undefined
           ? undefined
@@ -232,6 +246,7 @@ async function createWindow(): Promise<void> {
       const installOk = install === undefined || install.status === "succeeded";
       const updateOk = update === undefined || update.status === "updated";
       const repairOk = repair === undefined || (repair.status === "repaired" && repair.outcome === "succeeded" && (repair.after ?? []).length > 0 && (repair.after ?? []).every((s) => s === "state-consistent"));
+      const adoptOk = adopt === undefined || (adopt.status === "ok" && (smokeAdopt?.dialogs.length ?? 0) === 2 && (smokeAdopt?.spawns ?? 0) === 6);
       const i18nOk = i18n.before.missingKeys.length === 0 && (i18n.after === undefined || (i18n.after.locale === smokeI18nSwitch && i18n.after.missingKeys.length === 0));
       const releaseOk = release === undefined || (release.status === "ok" && release.notesText && release.innerHtml === 0 && (smokeRelease?.authorized ?? 0) === 0);
       const onboardingOk = onboarding.visible && onboarding.steps === 7;
@@ -247,13 +262,14 @@ async function createWindow(): Promise<void> {
           ...(install === undefined ? {} : { install: { ...install, spawned: smokeDeps?.spawned.length ?? 0, dialogs: smokeDeps?.dialogs ?? 0 } }),
           ...(update === undefined ? {} : { update: { ...update, fetched: smokeLifecycle?.fetched.length ?? 0, healthRuns: smokeLifecycle?.healthRuns ?? 0, spawned: smokeLifecycle?.spawned.length ?? 0, dialogs: smokeLifecycle?.dialogs ?? 0 } }),
           ...(repair === undefined ? {} : { repair: { ...repair, npmCalls: smokeRepair?.npmCalls.length ?? 0, healthRuns: smokeRepair?.healthRuns ?? 0, dialogs: smokeRepair?.dialogs ?? [] } }),
+          ...(adopt === undefined ? {} : { adopt: { ...adopt, spawns: smokeAdopt?.spawns ?? 0, dialogs: smokeAdopt?.dialogs ?? [] } }),
           ...(release === undefined ? {} : { release: { ...release, fetched: smokeRelease?.fetched.length ?? 0, authorized: smokeRelease?.authorized ?? 0 } }),
           discover,
           ...(detail === undefined ? {} : { detail }),
           i18n,
         })}\n`,
         // pipe로 받는 쪽(release dry-run)이 결과 줄을 놓치지 않도록 stdout에 다 쓴 뒤에 종료한다(TASK-072, Linux AppImage에서 확인).
-        () => app.exit(count > 0 && (project === undefined || project > 0) && repairOk && i18nOk && installOk && updateOk && releaseOk && onboardingOk && discoverOk ? 0 : 1),
+        () => app.exit(count > 0 && (project === undefined || project > 0) && repairOk && adoptOk && i18nOk && installOk && updateOk && releaseOk && onboardingOk && discoverOk ? 0 : 1),
       );
     } catch (error) {
       process.stderr.write(`OPENHUB_SMOKE_FAILED ${String(error)}\n`);

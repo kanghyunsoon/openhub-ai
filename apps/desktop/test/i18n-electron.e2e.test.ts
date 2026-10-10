@@ -26,13 +26,15 @@ const scratch = path.join(tmpdir(), "openhub-desktop-i18n-e2e-" + process.pid);
 const HANGUL = /[\uac00-\ud7a3]/u;
 
 type I18nSmoke = { locale: string; htmlLang: string; selectValue: string; texts: Record<string, string>; hangul: number; missingKeys: string[] };
-type Smoke = { i18n: { before: I18nSmoke; after?: I18nSmoke }; tools: number };
+type AdoptSmoke = { status: string; preview: string; adoptResult: string; benchmarkResult: string; spawns: number; dialogs: { title: string; message: string; detail: string }[] };
+type Smoke = { i18n: { before: I18nSmoke; after?: I18nSmoke }; tools: number; adopt?: AdoptSmoke };
 
-async function launch(userData: string, systemLocale: string, switchTo?: "en" | "ko"): Promise<{ code: number | null; smoke: Smoke }> {
+async function launch(userData: string, systemLocale: string, switchTo?: "en" | "ko", extraEnv: Record<string, string> = {}): Promise<{ code: number | null; smoke: Smoke }> {
   const out = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
     const childEnv: Record<string, string> = { ...(process.env as Record<string, string>), OPENHUB_SMOKE_USER_DATA: userData, OPENHUB_SMOKE_SYSTEM_LOCALE: systemLocale };
     if (switchTo !== undefined) childEnv["OPENHUB_SMOKE_I18N_SWITCH"] = switchTo;
-    for (const k of ["ELECTRON_RUN_AS_NODE", "OPENHUB_SMOKE_PROJECT", "OPENHUB_SMOKE_INSTALL", "OPENHUB_SMOKE_UPDATE", "OPENHUB_SMOKE_REPAIR", "OPENHUB_SMOKE_RELEASE", "OPENHUB_SCREENSHOT"]) delete childEnv[k];
+    for (const k of ["ELECTRON_RUN_AS_NODE", "OPENHUB_SMOKE_PROJECT", "OPENHUB_SMOKE_INSTALL", "OPENHUB_SMOKE_UPDATE", "OPENHUB_SMOKE_REPAIR", "OPENHUB_SMOKE_RELEASE", "OPENHUB_SMOKE_ADOPT", "OPENHUB_SMOKE_HOME", "OPENHUB_SCREENSHOT"]) delete childEnv[k];
+    Object.assign(childEnv, extraEnv);
     const child = spawn(electronBin!, [".", "--smoke"], { cwd: DESKTOP, env: childEnv, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
@@ -101,6 +103,38 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || electronBin === null)("v0.
     expect(relaunchEn.code).toBe(0);
     expectEnglish(relaunchEn.smoke.i18n.before);
     console.log("desktop i18n switch: " + JSON.stringify({ stored: await storedLanguage(dir), after: [toKo.smoke.i18n.after!.locale, relaunchKo.smoke.i18n.before.locale, toEn.smoke.i18n.after!.locale, relaunchEn.smoke.i18n.before.locale] }));
+  }, 300_000);
+
+  it("Adopt·Benchmark: 실제 창에서 버튼 click → 승인 대화상자 → 결과가 English는 영어(승인 ID 유지), ko-KR은 Core 한국어 문장이다", async () => {
+    const { mkdir: mk, writeFile } = await import("node:fs/promises");
+    const run = async (locale: string) => {
+      const base = path.join(scratch, "adopt-" + locale);
+      const project = path.join(base, "project");
+      const home = path.join(base, "home");
+      await mk(project, { recursive: true });
+      await mk(home, { recursive: true });
+      await writeFile(path.join(project, "package.json"), '{ "name": "api", "dependencies": { "pg": "^8.13.0" } }\n');
+      await writeFile(path.join(project, ".mcp.json"), JSON.stringify({ mcpServers: { memory: { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory@1.2.3"] } } }, null, 2) + "\n");
+      const r = await launch(path.join(base, "user-data"), locale, undefined, { OPENHUB_SMOKE_PROJECT: project, OPENHUB_SMOKE_ADOPT: "1", OPENHUB_SMOKE_HOME: home });
+      expect(r.code, JSON.stringify(r.smoke.adopt)).toBe(0);
+      return r.smoke.adopt!;
+    };
+    const en = await run("en-US");
+    expect(en).toMatchObject({ status: "ok", spawns: 6 });
+    expect(en.dialogs.map((d) => d.title)).toEqual(["OpenHub Adopt approval", "OpenHub Benchmark approval"]);
+    for (const s of [en.preview, en.adoptResult, en.benchmarkResult, ...en.dialogs.flatMap((d) => [d.title, d.message, d.detail])]) expect(s).not.toMatch(HANGUL);
+    expect(en.dialogs[0]!.detail).toContain("• [base] I reviewed the adopt plan above");
+    expect(en.dialogs[1]!.detail).toContain("the MCP server is started 6 times");
+    expect(en.dialogs[1]!.detail).toContain("(third-party code)");
+    expect(en.dialogs[1]!.detail).toContain("This is not a Health Check");
+    expect(en.dialogs[1]!.detail).toMatch(/• \[base\] .*• \[artifact-fetch\] /su);
+    expect(en.adoptResult).toContain("Adopt completed: memory-mcp");
+    expect(en.benchmarkResult).toMatch(/^Benchmark memory-mcp — \d of 5 measured runs succeeded/u);
+    const ko = await run("ko-KR");
+    expect(ko.dialogs.map((d) => d.title)).toEqual(["OpenHub Adopt 승인", "OpenHub Benchmark 승인"]);
+    expect(ko.dialogs[0]!.detail).toContain("Adopt 계획: memory-mcp (ready)");
+    expect(ko.dialogs[1]!.detail).toContain("Benchmark 계획: memory-mcp (ready)");
+    console.log("desktop adopt i18n: " + JSON.stringify({ en: en.dialogs.map((d) => d.title), ko: ko.dialogs.map((d) => d.title), spawns: [en.spawns, ko.spawns], enFirstLine: en.benchmarkResult.split("\n")[0] }));
   }, 300_000);
 });
 

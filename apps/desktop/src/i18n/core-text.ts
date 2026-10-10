@@ -3,6 +3,10 @@ import {
   LIFECYCLE_APPROVAL_MESSAGES,
   TREND_SCORE_MEANING,
   TREND_SCORE_MEANING_EN,
+  formatAdoptPlanPreview,
+  formatAdoptResult,
+  formatBenchmarkPlanPreview,
+  formatBenchmarkReport,
   formatInstallPlanPreview,
   formatTrendItem,
   formatLifecyclePlanPreview,
@@ -11,13 +15,19 @@ import {
   healthLines,
   installationStatusLabel,
   stateUnreadableMessage,
+  type AdoptApprovalRequirement,
+  type AdoptResultV1,
   type ApprovalRequirement,
+  type BenchmarkApprovalRequirement,
+  type BenchmarkReportV1,
   type InstallPlanV1,
   type InstallResultV1,
   type LifecycleApprovalRequirement,
   type LifecyclePlanV1,
   type LifecycleResultV1,
   type LifecycleToolStatus,
+  type PlannedAdopt,
+  type PlannedBenchmark,
   type PlannedInstall,
   type PlannedLifecycle,
   type TrendItem,
@@ -39,6 +49,7 @@ import {
   trendItemEn,
   warningsEn,
 } from "./core-en";
+import { ADOPT_APPROVAL_EN, BENCHMARK_APPROVAL_EN, BENCHMARK_BLOCKER_EN, adoptBenchmarkErrorEn, adoptPreviewEn, adoptResultEn, benchmarkPreviewEn, benchmarkReportEn } from "./adopt-en";
 import { formatDateTime, getDesktopLocale } from "./index";
 
 /**
@@ -71,4 +82,16 @@ export const installWarningTexts = (result: InstallResultV1, plan: InstallPlanV1
 export const reasonText = (reason: { code: string; message: string }): string => (en() ? (REASON_EN[reason.code] ?? reason.code) : reason.message);
 /** 능력(capability) 이름. English는 taxonomy ID로 고른다. */
 export const capabilityText = (id: string, label: string): string => (en() ? (CAPABILITY_EN[id] ?? id) : label);
+
+/** Adopt·Benchmark(실행 승인 화면). English는 adopt-en.ts가 Plan·Result 구조에서 만든다. 한국어는 Core 문장 그대로. */
+export const adoptPreviewLines = (planned: PlannedAdopt): string[] => (en() ? adoptPreviewEn(planned) : formatAdoptPlanPreview(planned));
+export const benchmarkPreviewLines = (planned: PlannedBenchmark): string[] => (en() ? benchmarkPreviewEn(planned) : formatBenchmarkPlanPreview(planned));
+export const adoptResultLines = (result: AdoptResultV1): string[] => (en() ? adoptResultEn(result) : formatAdoptResult(result));
+export const benchmarkReportLines = (report: BenchmarkReportV1): string[] => (en() ? benchmarkReportEn(report) : formatBenchmarkReport(report));
+/** 네이티브 승인 대화상자의 승인 요구 문장. 한국어는 Core 승인 요청 문장 그대로. */
+export const adoptApprovalText = (id: AdoptApprovalRequirement, coreMessage: string): string => (en() ? ADOPT_APPROVAL_EN[id] : coreMessage);
+export const benchmarkApprovalText = (id: BenchmarkApprovalRequirement, coreMessage: string): string => (en() ? BENCHMARK_APPROVAL_EN[id] : coreMessage);
+/** Adopt·Benchmark 오류(code는 두 언어 모두 그대로 보인다). */
+export const adoptBenchmarkErrorText = (code: string, message: string): string => (en() ? adoptBenchmarkErrorEn(code, message) : message);
+export const benchmarkBlockerText = (b: { code: string; message: string }): string => b.code + " — " + (en() ? ((BENCHMARK_BLOCKER_EN as Readonly<Record<string, string>>)[b.code] ?? "(not translated) " + b.message) : b.message);
 
