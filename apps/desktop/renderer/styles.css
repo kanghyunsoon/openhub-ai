@@ -60,6 +60,11 @@ button:hover { filter: brightness(1.1); }
 .rec-reasons { margin: 4px 0 0; padding-left: 16px; font-size: 11px; line-height: 1.45; color: #c8ccd6; }
 .rec-reasons .more { color: var(--muted); list-style: none; }
 .no-candidate { font-size: 11px; color: var(--muted); margin: 6px 0 0; }
+.for-you-diagnosis { font-size: 11px; line-height: 1.45; color: var(--muted); }
+.for-you-diagnosis .diag-title { margin: 8px 0 2px; color: #c8ccd6; font-weight: 600; }
+.for-you-diagnosis .diag-empty, .for-you-diagnosis .diag-unmapped, .for-you-diagnosis .diag-verify-notice { margin: 2px 0; }
+.for-you-diagnosis .diag-excluded { margin: 2px 0; padding-left: 16px; }
+.rec-verification { font-size: 10px; color: var(--muted); margin: 4px 0 0; }
 .notice { font-size: 10px; color: var(--muted); margin: 10px 0 0; line-height: 1.4; }
 
 /* 설치 흐름 (TASK-036) */

@@ -29,7 +29,7 @@ jobs:
       - name: Desktop Electron E2E (xvfb)
         # GitHub runner에서는 Chromium SUID sandbox helper를 설정할 수 없어 이 job에서만 Electron sandbox를 끈다(테스트 전용).
         # 각 파일이 beforeAll에서 데스크톱을 빌드하므로(같은 출력 폴더) 파일을 하나씩 실행한다.
-        run: xvfb-run -a pnpm exec vitest run apps/desktop/test/i18n-electron.e2e.test.ts apps/desktop/test/repair-electron.e2e.test.ts apps/desktop/test/install-clients-electron.e2e.test.ts apps/desktop/test/user-scope-electron.e2e.test.ts --no-file-parallelism --reporter=verbose
+        run: xvfb-run -a pnpm exec vitest run apps/desktop/test/i18n-electron.e2e.test.ts apps/desktop/test/repair-electron.e2e.test.ts apps/desktop/test/install-clients-electron.e2e.test.ts apps/desktop/test/user-scope-electron.e2e.test.ts apps/desktop/test/for-you-electron.e2e.test.ts --no-file-parallelism --reporter=verbose
         env:
           OPENHUB_E2E: "1"
           ELECTRON_DISABLE_SANDBOX: "1"

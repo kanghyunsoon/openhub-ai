@@ -253,6 +253,8 @@ async function createWindow(): Promise<void> {
       const onboarding = (await win.webContents.executeJavaScript("window.__openhubOnboarding()")) as { visible: boolean; steps: number };
       const project = smokeProject === undefined ? undefined : await runProjectSmoke(win.webContents);
       const recommendations = project === undefined ? undefined : ((await win.webContents.executeJavaScript("window.__openhubRecommend()")) as number);
+      // 추천 진단(v0.2.0 C3): FOR YOU 화면에 실제로 그려진 진단·검증 문장을 기록한다.
+      const forYou = recommendations === undefined ? undefined : ((await win.webContents.executeJavaScript("window.__openhubForYouDiagnosis()")) as { status: string; emptyReason: string; lines: string[]; verification: string[] });
       const install =
         smokeInstall === undefined || recommendations === undefined
           ? undefined
@@ -363,7 +365,7 @@ async function createWindow(): Promise<void> {
           tools: count,
           runtime,
           onboarding,
-          ...(project === undefined ? {} : { project, recommendations }),
+          ...(project === undefined ? {} : { project, recommendations, forYou }),
           ...(install === undefined ? {} : { install: { ...install, spawned: smokeDeps?.spawned.length ?? 0, dialogs: smokeDeps?.dialogs ?? 0 } }),
           ...(update === undefined ? {} : { update: { ...update, fetched: smokeLifecycle?.fetched.length ?? 0, healthRuns: smokeLifecycle?.healthRuns ?? 0, spawned: smokeLifecycle?.spawned.length ?? 0, dialogs: smokeLifecycle?.dialogs ?? 0 } }),
           ...(rollbackChain === undefined ? {} : { rollbackChain: { ...rollbackChain, healthRuns: smokeLifecycle?.healthRuns ?? 0, npmCalls: (smokeLifecycle?.spawned ?? []).map((c) => c.slice(1).join(" ")), installNpmCalls: (smokeDeps?.spawned ?? []).map((c) => c.slice(1).join(" ")) } }),

@@ -57,7 +57,8 @@ export async function recommendCurrentProject(session: RecommendSession, deps: R
     const [{ entries }, snapshot] = await Promise.all([loadRegistry(deps.registryDir), loadMetadataSnapshot(deps.metadataFile)]);
     const platform = toRecommendPlatform(deps.platform);
     const report = recommend(profile, entries, snapshot, platform === undefined ? {} : { platform });
-    return { status: "ok", view: buildForYouView(report) };
+    // 진단(v0.2.0 C3)은 같은 Profile·Registry·OS로 만든다. 새 점수·후보를 만들지 않는다.
+    return { status: "ok", view: buildForYouView(report, { profile, entries, ...(platform === undefined ? {} : { platform }) }) };
   } catch {
     return { status: "error", code: "recommend-failed", message: tr("recommend.failed") };
   }
