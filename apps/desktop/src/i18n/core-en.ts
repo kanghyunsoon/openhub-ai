@@ -1,6 +1,7 @@
 import {
   CAPABILITIES,
   REVIEWED_TOOL_CONFIGS,
+  toolConfigVerificationGaps,
   type ApprovalRequirement,
   type InstallPlanV1,
   type InstallResultV1,
@@ -11,6 +12,7 @@ import {
   type PlannedInstall,
   type PlannedLifecycle,
   type TrendItem,
+  type ToolConfigVerificationGap,
 } from "@openhub/core";
 
 /**
@@ -109,6 +111,9 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   UP_TO_DATE: "The tool is already at the target version.",
 };
 
+/** 대문자 차단·오류 code 또는 notice code 하나의 영어 문장(없으면 undefined). */
+export const blockerSentenceEn = (code: string): string | undefined => BLOCKER_EN[code] ?? NOTICE_EN[code];
+
 /** 영어 문장이 있는 모든 warning·blocker code(누락 검사용). */
 export const EN_WARNING_CODES: readonly string[] = Object.freeze([
   ...Object.keys(NOTICE_EN),
@@ -127,50 +132,81 @@ type AnyPlan = InstallPlanV1 | LifecyclePlanV1;
 const isInstall = (plan: AnyPlan): plan is InstallPlanV1 => "launch" in plan;
 const requiredNames = (plan: AnyPlan) => plan.requiredEnv.filter((e) => e.required).map((e) => e.name);
 
-/** 검토된 tool config의 Client·플랫폼 검증 수준(Core REVIEWED_TOOL_CONFIGS)으로 영어 경고를 만든다. */
-function verificationLinesEn(plan: AnyPlan, code: "client-launch-unverified" | "platform-unverified"): string[] {
-  const reviewed = REVIEWED_TOOL_CONFIGS[plan.toolId];
-  if (reviewed === undefined) return [];
-  if (code === "platform-unverified") {
-    const platform = isInstall(plan) ? plan.launch?.platform : plan.platform;
-    return platform === undefined || reviewed.platformVerified[platform] ? [] : ["OpenHub has not verified installing or running this tool on " + PLATFORM[platform] + "."];
-  }
-  const clients = [...new Set(plan.targets.map((t) => t.client))];
-  const out: string[] = [];
-  for (const c of clients) {
-    const level = reviewed.clientVerification[c];
-    if (level === "spec-launch-verified") out.push(clientName(c) + ": starting the server and calling tools with the command OpenHub writes was verified, but starting it from this client's project configuration file was not verified by OpenHub.");
-    if (level === "config-recognized") out.push(clientName(c) + ": only configuration recognition was verified. A real MCP connection and tool calls in this client were not verified by OpenHub.");
-    if (level === "not-verified") out.push(clientName(c) + ": running in this client was not verified by OpenHub.");
-  }
-  return out;
+/** Core 검증 수준 구조(toolConfigVerificationGaps)에서 영어 문장 하나. Core 한국어 경고와 같은 정보에서 만든다. */
+function verificationGapEn(g: ToolConfigVerificationGap): string {
+  const os = PLATFORM[g.platform];
+  if (g.client === null) return "OpenHub has not verified installing or running this tool on " + os + ".";
+  const who = clientName(g.client) + " (" + os + ")";
+  if (g.level === "spec-launch-verified") return who + ": starting the server and calling tools with the command OpenHub writes was verified, but starting it from this client's project configuration file was not verified by OpenHub.";
+  if (g.level === "config-recognized") return who + ": only configuration recognition was verified. A real MCP connection and tool calls in this client were not verified by OpenHub.";
+  return who + ": running this client on this OS was not verified by OpenHub.";
 }
 
-/** warning 목록 → 영어 줄. 같은 code가 여러 번 나오는 항목(환경변수·Client 검증)은 구조에서 한 번에 만든다. */
-export function warningsEn(plan: AnyPlan, warnings: readonly { code: string; message: string }[]): { code: string; text: string }[] {
-  const out: { code: string; text: string }[] = [];
-  const done = new Set<string>();
+/** 한 줄 영어 경고. untranslated: Core 원문을 그대로 보여 준다(영어 문장이 없거나 구조와 맞지 않을 때). */
+export interface WarningLineEn {
+  code: string;
+  text: string;
+  untranslated?: true;
+}
+
+/** 영어 문장이 없는 경고: 경고 ID와 Core 원문을 그대로 두고 미번역임을 표시한다(정보를 버리지 않는다). */
+export function untranslatedWarningEn(w: { code: string; message: string }): WarningLineEn {
+  return { code: w.code === "" ? "no-code" : w.code, text: "(not translated) " + w.message, untranslated: true };
+}
+
+/** 문장 하나로 뜻이 정해지는 code. 같은 code의 경고가 서로 다른 원문을 가지면 이 문장으로 합치지 않는다. */
+function singleSentenceEn(plan: AnyPlan | null, code: string): string | undefined {
+  if (code === "tool-config") return plan === null ? undefined : (REVIEWED_TOOL_CONFIGS[plan.toolId]?.noticeEn ?? undefined);
+  if (code === "client-env-parse-risk") return plan === null ? undefined : "You must prepare " + requiredNames(plan).join(", ") + " in the environment where Claude Code runs. OpenHub does not check their values or whether they exist; if they are missing, parsing .mcp.json may be affected.";
+  if (code === "docker-daemon-unchecked") return plan === null ? undefined : "OpenHub did not check whether the docker daemon is reachable. If the daemon is off, the " + (isInstall(plan) ? "preparation step fails." : "preparation and Health steps fail.");
+  return NOTICE_EN[code] ?? BLOCKER_EN[code];
+}
+
+/**
+ * 항목마다 하나씩 나오는 code의 영어 문장 목록(Core가 같은 순서로 만드는 구조에서). Core 경고 수와 다르면 null(원문 유지).
+ * 같은 code가 여러 번 나오는 경고는 Plan 안에서 몇 번째인지로 짝을 짓는다(Core 원문을 번역 키로 쓰지 않는다).
+ */
+function perItemEn(plan: AnyPlan, code: string): string[] | null | undefined {
+  if (code === "required-env" || code === "environment-unverified") return requiredNames(plan).map((n) => requiredEnvEn([n]));
+  if (code === "manual-setup-required") return plan.targets.filter((x) => "envReference" in x && x.envReference === "manual").map((t) => clientName(t.client) + " " + t.scope + " configuration (" + t.file + ") is not written by OpenHub. Set it up yourself.");
+  if (code === "CONFIG_KEY_EXISTS") return isInstall(plan) ? plan.targets.filter((x) => x.envReference !== "manual" && !x.precondition.keyAbsent).map((t) => t.file + " already has a " + t.serverName + " entry; OpenHub does not overwrite it.") : null;
+  if (code === "client-launch-unverified" || code === "platform-unverified") {
+    const platform = isInstall(plan) ? plan.launch?.platform : plan.platform;
+    if (platform === undefined) return null;
+    const clients = plan.targets.filter((t) => !("envReference" in t) || t.envReference !== "manual").map((t) => t.client);
+    return toolConfigVerificationGaps(plan.toolId, clients, platform).filter((g) => g.code === code).map(verificationGapEn);
+  }
+  return undefined;
+}
+
+/**
+ * warning 목록 → 영어 줄(경고 하나에 한 줄, 같은 순서). 원칙:
+ * - 알려진 code는 Plan 구조에서 만든 영어 문장.
+ * - 알려지지 않은 code, code가 없는 경고, 구조와 개수가 맞지 않는 경고는 경고 ID와 Core 원문을 그대로 두고 미번역 표시(조용히 버리지 않는다).
+ * - 완전히 같은 경고(code·원문 모두 같음)만 한 번으로 줄인다.
+ */
+export function warningsEn(plan: AnyPlan | null, warnings: readonly { code: string; message: string }[]): WarningLineEn[] {
+  const out: WarningLineEn[] = [];
+  const seen = new Set<string>();
+  const all = plan === null ? warnings : plan.warnings;
   for (const w of warnings) {
-    if (done.has(w.code)) continue;
-    const once = (text: string) => (done.add(w.code), out.push({ code: w.code, text }));
-    if (w.code === "required-env" || w.code === "environment-unverified") once(requiredEnvEn(requiredNames(plan)));
-    else if (w.code === "client-env-parse-risk") once("You must prepare " + requiredNames(plan).join(", ") + " in the environment where Claude Code runs. OpenHub does not check their values or whether they exist; if they are missing, parsing .mcp.json may be affected.");
-    // 검토된 정책별 영어 고지는 Core 보안 허용 목록(REVIEWED_TOOL_CONFIGS.noticeEn)에 정책과 함께 둔다(Tool ID 상수를 Desktop에 두지 않는다).
-    else if (w.code === "tool-config") once(REVIEWED_TOOL_CONFIGS[plan.toolId]?.noticeEn ?? "OpenHub creates a reviewed server policy file under ~/.openhub/tool-config and passes it to the server through the client configuration.");
-    else if (w.code === "client-launch-unverified" || w.code === "platform-unverified") {
-      done.add(w.code);
-      for (const text of verificationLinesEn(plan, w.code)) out.push({ code: w.code, text });
-    } else if (w.code === "docker-daemon-unchecked")
-      out.push({ code: w.code, text: "OpenHub did not check whether the docker daemon is reachable. If the daemon is off, the " + (isInstall(plan) ? "preparation step fails." : "preparation and Health steps fail.") });
-    else if (w.code === "manual-setup-required") {
-      done.add(w.code);
-      for (const t of plan.targets.filter((x) => "envReference" in x && x.envReference === "manual")) out.push({ code: w.code, text: clientName(t.client) + " " + t.scope + " configuration (" + t.file + ") is not written by OpenHub. Set it up yourself." });
-    } else if (w.code === "CONFIG_KEY_EXISTS" && isInstall(plan)) {
-      done.add(w.code);
-      for (const t of plan.targets.filter((x) => x.envReference !== "manual" && !x.precondition.keyAbsent)) out.push({ code: w.code, text: t.file + " already has a " + t.serverName + " entry; OpenHub does not overwrite it." });
-    } else if (NOTICE_EN[w.code] !== undefined) out.push({ code: w.code, text: NOTICE_EN[w.code]! });
-    else if (BLOCKER_EN[w.code] !== undefined) out.push({ code: w.code, text: BLOCKER_EN[w.code]! });
-    else out.push({ code: w.code, text: "(" + w.code + ")" });
+    const key = w.code + "\u0000" + w.message;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (w.code === "") {
+      out.push(untranslatedWarningEn(w));
+      continue;
+    }
+    const items = plan === null ? undefined : perItemEn(plan, w.code);
+    if (items !== undefined) {
+      const sameCode = all.filter((x) => x.code === w.code);
+      const index = sameCode.findIndex((x) => x === w || (x.code === w.code && x.message === w.message));
+      out.push(items !== null && items.length === sameCode.length && index >= 0 ? { code: w.code, text: items[index]! } : untranslatedWarningEn(w));
+      continue;
+    }
+    const sentence = singleSentenceEn(plan, w.code);
+    const variants = new Set(all.filter((x) => x.code === w.code).map((x) => x.message));
+    out.push(sentence !== undefined && variants.size <= 1 ? { code: w.code, text: sentence } : untranslatedWarningEn(w));
   }
   return out;
 }
@@ -355,7 +391,7 @@ export function lifecycleResultEn(result: LifecycleResultV1, guide: string | nul
   if (result.health !== null) for (const l of healthLinesEn(result.health, formatTime)) lines.push("  " + l);
   if (result.compensated) lines.push("  After the failure, the configuration files were restored to their original content (compensated)");
   for (const s of result.steps.filter((x) => x.status === "failed")) lines.push("  Failed step " + s.id + (s.code === undefined ? "" : " (" + s.code + ")"));
-  for (const w of result.warnings) lines.push("  - [" + w.code + "] " + (NOTICE_EN[w.code] ?? BLOCKER_EN[w.code] ?? "(" + w.code + ")"));
+  for (const w of warningsEn(null, result.warnings)) lines.push("  - [" + w.code + "] " + w.text);
   const notRestored = result.status === "rollback-failed" ? result.targets.filter((t) => t.configApplied && !t.configRestored).map((t) => t.file) : [];
   const next = [...(guide === null ? [] : [guide]), ...(notRestored.length > 0 ? ["Check these files yourself: " + notRestored.join(", ")] : [])];
   if (next.length > 0) {
@@ -410,7 +446,8 @@ export function installResultNextEn(result: InstallResultV1, plan: InstallPlanV1
 
 export function installWarningEn(plan: InstallPlanV1, w: { code: string; message: string }): string {
   if (w.code === "configured-not-detected") return "[configured-not-detected] The configuration was written, but the " + (plan.targets[0]?.serverName ?? plan.toolId) + " server was not found when analyzing again. The configuration files were not restored.";
-  return "[" + w.code + "] " + (warningsEn(plan, [w])[0]?.text ?? "(" + w.code + ")");
+  const line = warningsEn(plan, [w])[0] ?? untranslatedWarningEn(w);
+  return "[" + line.code + "] " + line.text;
 }
 
 /** 추천 이유(영어). Core Reason에는 code만 구조화되어 있어 이름·수치 없이 code 의미만 쓴다(추가형 params 제안: docs/specs/desktop-i18n.md). */

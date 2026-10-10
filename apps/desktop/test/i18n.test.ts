@@ -15,7 +15,7 @@ import {
   toolConfigLocation,
   type HealthRunReport,
 } from "@openhub/core";
-import { CAPABILITY_EN, EN_WARNING_CODES, INSTALL_APPROVAL_EN, LIFECYCLE_APPROVAL_EN, REASON_EN, installPreviewEn } from "../src/i18n/core-en";
+import { CAPABILITY_EN, EN_WARNING_CODES, INSTALL_APPROVAL_EN, LIFECYCLE_APPROVAL_EN, REASON_EN, installPreviewEn, installWarningEn, lifecycleResultEn, warningsEn } from "../src/i18n/core-en";
 import { en } from "../src/i18n/en";
 import { getDesktopLocale, resolveLocale, setDesktopLocale, translate } from "../src/i18n/index";
 import { ko } from "../src/i18n/ko";
@@ -69,6 +69,88 @@ describe("v0.2.0 PR B 언어 결정·저장", () => {
     expect(await readStoredLanguage(dir)).toBeNull();
   });
 });
+
+
+describe("v0.2.0 PR B 경고 보존(English): 알 수 없는 경고·복수 경고·Client·OS 경고를 버리지 않는다", () => {
+  const k8sPlan = async (platform: "windows" | "linux" | "macos", clients: readonly ("claude-code" | "codex" | "cursor")[] = ["claude-code", "codex", "cursor"]) => {
+    const h = await createHarness(scratch, { entries });
+    return plannedOf(h, { ...h.request("kubernetes-mcp-server", clients.map((client) => ({ client, scope: "project" as const }))), platform });
+  };
+
+  it("Plan의 모든 경고가 한 줄씩 영어로 나오고(개수 동일), Kubernetes Secret·RBAC 고지가 그대로 남는다", async () => {
+    for (const platform of ["windows", "linux", "macos"] as const) {
+      const { plan } = await k8sPlan(platform);
+      const lines = warningsEn(plan, plan.warnings);
+      expect(lines.map((l) => l.code), platform).toEqual(plan.warnings.map((x) => x.code));
+      expect(lines.filter((l) => l.untranslated), platform).toEqual([]);
+      for (const l of lines) expect(l.text, platform).not.toMatch(HANGUL);
+      expect(lines.find((l) => l.code === "tool-config")?.text).toBe(REVIEWED_TOOL_CONFIGS["kubernetes-mcp-server"]!.noticeEn);
+    }
+  });
+
+  it("Client·OS 경고: Windows는 Cursor만, macOS는 세 Client와 플랫폼 경고, 선택한 Client 하나만 넘겨도 그 Client 문장이다", async () => {
+    const win = (await k8sPlan("windows")).plan;
+    expect(warningsEn(win, win.warnings).filter((l) => l.code === "client-launch-unverified").map((l) => l.text)).toEqual(["Cursor (Windows): running this client on this OS was not verified by OpenHub."]);
+    const mac = (await k8sPlan("macos")).plan;
+    expect(warningsEn(mac, mac.warnings).filter((l) => l.code === "client-launch-unverified" || l.code === "platform-unverified").map((l) => l.text)).toEqual([
+      "Claude Code (macOS): running this client on this OS was not verified by OpenHub.",
+      "Codex (macOS): running this client on this OS was not verified by OpenHub.",
+      "Cursor (macOS): running this client on this OS was not verified by OpenHub.",
+      "OpenHub has not verified installing or running this tool on macOS.",
+    ]);
+    // 결과 화면처럼 경고 하나만 넘겨도 Plan 안의 순서로 짝을 지어 같은 Client 문장을 만든다.
+    const codexWarning = mac.warnings.filter((x) => x.code === "client-launch-unverified")[1]!;
+    expect(installWarningEn(mac, codexWarning)).toBe("[client-launch-unverified] Codex (macOS): running this client on this OS was not verified by OpenHub.");
+    const claudeOnly = (await k8sPlan("windows", ["claude-code"])).plan;
+    expect(warningsEn(claudeOnly, claudeOnly.warnings).filter((l) => l.code === "client-launch-unverified")).toEqual([]);
+  });
+
+  it("알 수 없는 code·알 수 없는 보안 고지·code 없는 경고는 경고 ID와 원문을 그대로 두고 미번역으로 표시한다", async () => {
+    const { plan } = await k8sPlan("linux");
+    const extra = [
+      { code: "future-warning", message: "새 경고 원문" },
+      { code: "secret-exposure-risk", message: "이 도구는 Secret을 로그에 남길 수 있습니다" },
+      { code: "", message: "code 없는 경고 원문" },
+    ];
+    const lines = warningsEn(plan, extra);
+    expect(lines).toEqual([
+      { code: "future-warning", text: "(not translated) 새 경고 원문", untranslated: true },
+      { code: "secret-exposure-risk", text: "(not translated) 이 도구는 Secret을 로그에 남길 수 있습니다", untranslated: true },
+      { code: "no-code", text: "(not translated) code 없는 경고 원문", untranslated: true },
+    ]);
+    // Plan이 없는 결과 경고(lifecycle 결과)도 같은 규칙이다.
+    const result = { warnings: [{ code: "health-not-verified", message: "Health: Not verified / Reason: Required environment is unchecked" }, ...extra] };
+    const out = lifecycleResultEn({ ...baseLifecycleResult(), ...result } as never, null, (iso) => iso).join("\n");
+    expect(out).toContain("[health-not-verified] Health: Not verified / Reason: Required environment is unchecked");
+    expect(out).toContain("[secret-exposure-risk] (not translated) 이 도구는 Secret을 로그에 남길 수 있습니다");
+    expect(out).toContain("[no-code] (not translated) code 없는 경고 원문");
+  });
+
+  it("같은 code의 복수 경고: 항목별 code는 항목마다 한 줄, 원문이 서로 다른 단일 문장 code는 합치지 않고 원문을 남긴다", async () => {
+    const { plan } = await k8sPlan("linux");
+    const withEnv = { ...plan, requiredEnv: [{ name: "API_TOKEN", required: true }, { name: "API_URL", required: true }], warnings: [{ code: "required-env", message: "A" }, { code: "required-env", message: "B" }] } as typeof plan;
+    expect(warningsEn(withEnv, withEnv.warnings).map((l) => l.text)).toEqual([
+      expect.stringContaining("API_TOKEN"),
+      expect.stringContaining("API_URL"),
+    ]);
+    // 구조(필수 환경변수 2개)와 경고 수(3개)가 맞지 않으면 짝을 짓지 않고 원문을 남긴다.
+    const mismatch = { ...withEnv, warnings: [...withEnv.warnings, { code: "required-env", message: "C" }] } as typeof plan;
+    expect(warningsEn(mismatch, mismatch.warnings).every((l) => l.untranslated === true)).toBe(true);
+    // 단일 문장 code(docker-daemon-unchecked)가 서로 다른 원문으로 두 번 나오면 둘 다 원문 그대로.
+    const twoDocker = { ...plan, warnings: [{ code: "docker-daemon-unchecked", message: "첫째" }, { code: "docker-daemon-unchecked", message: "둘째" }] } as typeof plan;
+    expect(warningsEn(twoDocker, twoDocker.warnings)).toEqual([
+      { code: "docker-daemon-unchecked", text: "(not translated) 첫째", untranslated: true },
+      { code: "docker-daemon-unchecked", text: "(not translated) 둘째", untranslated: true },
+    ]);
+    // 완전히 같은 경고(code·원문 동일)만 한 줄로 줄인다.
+    const dup = { ...plan, warnings: [plan.warnings.find((x) => x.code === "tool-config")!, plan.warnings.find((x) => x.code === "tool-config")!] } as typeof plan;
+    expect(warningsEn(dup, dup.warnings)).toHaveLength(1);
+  });
+});
+
+function baseLifecycleResult() {
+  return { status: "health-checked", operation: "health", changed: undefined, artifact: { from: null, to: null }, targets: [], health: null, compensated: false, steps: [], warnings: [], nextActions: [] };
+}
 
 describe("v0.2.0 PR B 카탈로그", () => {
   it("en·ko key 집합이 같고 key마다 placeholder가 같으며 값이 비어 있지 않고 HTML이 없다", () => {
@@ -195,7 +277,9 @@ describe("v0.2.0 PR B English 표시(실제 Plan·IPC 결과)", () => {
     for (const w of c.planned.plan.warnings) expect(lines).toContain("[" + w.code + "]");
     expect(lines).toContain("Plan digest  " + c.planned.planDigest);
     expect(lines).toMatch(/Secret reads denied[\s\S]*pod or node logs are not blocked[\s\S]*read-only RBAC user/u);
-    expect(lines).toContain("Cursor: running in this client was not verified by OpenHub.");
+    // PR #15: 검증 수준은 OS × Client. 이 Plan은 Linux이고 Linux에서는 Cursor만 미검증이다.
+    expect(lines).toContain("[client-launch-unverified] Cursor (Linux): running this client on this OS was not verified by OpenHub.");
+    expect(lines).not.toMatch(/(Claude Code|Codex) \(Linux\): running/u);
   });
 
   it("Repair: 상태·Preview·승인 대화상자·성공 결과가 영어이고 승인 요구 ID는 그대로다", async () => {
