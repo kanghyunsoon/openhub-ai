@@ -339,6 +339,85 @@ describe("v0.2.0 tool config: Status·Repair·Health·Rollback·Update(Lifecycle
     expect(built.planned.plan.warnings.map((w) => w.code)).toContain("TOOL_CONFIG_VERSION_UNREVIEWED");
   });
 });
++
+describe("v0.2.0 범위별 설치: tool config Tool의 '변경 없음'은 관리 파일까지 정상일 때만이다", () => {
+  const ONE = [{ client: "cursor" as const, scope: "project" as const }];
+  async function installedCursor() {
+    const h = await createHarness(scratch, { entries });
+    const request = { ...h.request("kubernetes-mcp-server", ONE), platform: "linux" as const };
+    const planned = await plannedOf(h, request);
+    const result = await runInstallTransaction(planned, await approveAll(planned), request, h.env);
+    expect(result.status).toBe("succeeded");
+    expect(await recordInstallInState(planned, result, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() })).toMatchObject({ ok: true, recorded: 1 });
+    return { h, request, loc: await projectLoc(h) };
+  }
+  const codes = (p: { plan: { warnings: { code: string }[] } }) => p.plan.warnings.map((w) => w.code);
+
+  it("A: Client 항목·tool config 모두 정상 → already-installed no-op(실행·쓰기 0)", async () => {
+    const { h, request } = await installedCursor();
+    const p = await plannedOf(h, request);
+    expect(p.plan.status).toBe("already-installed");
+    h.reset();
+    expect(await runInstallTransaction(p, undefined, request, h.env)).toMatchObject({ status: "no-op", code: "ALREADY_INSTALLED" });
+    expect([h.spawns, h.writes]).toEqual([[], []]);
+  });
+
+  it("B: Client 항목은 그대로인데 tool config가 없으면 정상 no-op이 아니다(TOOL_CONFIG_MISSING, 승인 불가, 아무것도 쓰지 않음)", async () => {
+    const { h, request, loc } = await installedCursor();
+    await unlink(loc.file);
+    const p = await plannedOf(h, request);
+    expect(p.plan.status).toBe("blocked");
+    expect(codes(p)).toContain("TOOL_CONFIG_MISSING");
+    expect(p.plan.steps).toEqual([]);
+    expect(p.plan.warnings.find((w) => w.code === "TOOL_CONFIG_MISSING")?.message).toMatch(/lifecycle repair로 승인 후 복구/u);
+    h.reset();
+    const result = await runInstallTransaction(p, await approveAll(p).catch(() => undefined), request, h.env);
+    expect(result.status).not.toBe("no-op");
+    expect(result.status).not.toBe("succeeded");
+    expect([h.spawns, h.writes]).toEqual([[], []]);
+    expect(await readFile(loc.file, "utf8").catch(() => null)).toBeNull();
+  });
+
+  it("C: Client 항목은 그대로인데 Secret 거부 규칙이 바뀌면 정상 no-op이 아니다(TOOL_CONFIG_DRIFT, 파일 그대로)", async () => {
+    const { h, request, loc } = await installedCursor();
+    const weakened = KUBERNETES_TOOL_CONFIG.replace('kind = "Secret"', 'kind = "ConfigMap"');
+    expect(weakened).not.toBe(KUBERNETES_TOOL_CONFIG);
+    await writeFile(loc.file, weakened);
+    const p = await plannedOf(h, request);
+    expect(p.plan.status).toBe("blocked");
+    expect(codes(p)).toContain("TOOL_CONFIG_DRIFT");
+    expect(p.plan.warnings.find((w) => w.code === "TOOL_CONFIG_DRIFT")?.message).toMatch(/Secret 거부 규칙/u);
+    // Secret 규칙을 지운 경우도 같다.
+    await writeFile(loc.file, KUBERNETES_TOOL_CONFIG.split("[[denied_resources]]")[0]!);
+    expect(codes(await plannedOf(h, request))).toContain("TOOL_CONFIG_DRIFT");
+    h.reset();
+    expect(h.writes).toEqual([]);
+    expect(await readFile(loc.file, "utf8")).toBe(KUBERNETES_TOOL_CONFIG.split("[[denied_resources]]")[0]!);
+  });
+
+  it("D: 다른 프로젝트의 tool config 경로를 가리키는 항목은 충돌이다", async () => {
+    const { h, request } = await installedCursor();
+    const other = path.join(h.base, "project-other");
+    await mkdir(other);
+    await writeFile(path.join(other, "package.json"), '{ "name": "o", "private": true }\n');
+    await cp(path.join(h.projectRoot, ".cursor"), path.join(other, ".cursor"), { recursive: true });
+    const p = await plannedOf(h, { ...request, projectRoot: other });
+    expect(p.plan.status).toBe("blocked");
+    expect(codes(p)).toContain("CONFIG_KEY_EXISTS");
+  });
+
+  it("E: 승인 기반 repair 뒤 다시 계획하면 already-installed이고 lifecycle status도 일관된다", async () => {
+    const { h, request, loc } = await installedCursor();
+    await writeFile(loc.file, KUBERNETES_TOOL_CONFIG.replace('kind = "Secret"', 'kind = "ConfigMap"'));
+    expect((await plannedOf(h, request)).plan.status).toBe("blocked");
+    expect(await statusOf(h)).toEqual(["cursor:tool-config-drift"]);
+    const repair = await lifecycle(h, "repair");
+    expect(await repair.run()).toMatchObject({ status: "repaired", stateCommitted: true });
+    expect(await readFile(loc.file, "utf8")).toBe(KUBERNETES_TOOL_CONFIG);
+    expect((await plannedOf(h, request)).plan.status).toBe("already-installed");
+    expect(await statusOf(h)).toEqual(["cursor:state-consistent"]);
+  });
+});
 
 
 describe("v0.2.0 tool config: 같은 프로젝트 repair(경로만 다른 항목)", () => {

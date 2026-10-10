@@ -407,9 +407,24 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
   const reviewed = REVIEWED_TOOL_CONFIGS[manifest.name];
   const usesToolConfig = manifest.toolConfig !== undefined && input.launch !== null && input.launch.args.includes(TOOL_CONFIG_PLACEHOLDER);
   const toolConfigSteps: ToolConfigStep[] = [];
+  // "변경 없음" 대상도 서버 안전성은 별도 tool config 파일(read_only·Secret 거부 등)에 달려 있다. 그 scope의 관리 파일이
+  // 검토된 내용과 byte digest가 같을 때만 정상으로 본다(검토된 내용에는 Secret denied_resources 규칙이 있다). 없거나 다르면
+  // 정상 no-op으로 끝내지 않고 막는다. 고치는 것은 승인 기반 lifecycle repair다(여기서는 아무것도 쓰지 않는다).
+  if (usesToolConfig) {
+    const expected = toolConfigDigest(manifest.toolConfig!.content);
+    const unchangedScopes = [...new Set(writable.filter((t) => unchanged.has(t.client + ":" + t.scope)).map((t) => t.scope))].sort((a, b) => SCOPE_ORDER[a] - SCOPE_ORDER[b]);
+    for (const scope of unchangedScopes) {
+      const found = input.toolConfigs?.find((c) => c.scope === scope);
+      if (found === undefined) blockers.push({ code: "TOOL_CONFIG_UNREADABLE", message: scope + " 범위 tool config 상태를 안전하게 확인하지 못해 이미 있는 Client 설정을 정상으로 보지 않습니다" });
+      else if (found.current.state === "absent") blockers.push({ code: "TOOL_CONFIG_MISSING", message: scope + " 범위 tool config 파일이 없습니다(tool-config-missing). 이미 있는 Client 설정이 이 파일에 의존하므로 정상 설치 상태가 아닙니다. lifecycle repair로 승인 후 복구하세요" });
+      else if (found.current.digest !== expected) blockers.push({ code: "TOOL_CONFIG_DRIFT", message: scope + " 범위 tool config가 검토된 내용(Secret 거부 규칙 포함)과 다릅니다(tool-config-drift). 정상 설치 상태가 아닙니다. lifecycle repair로 승인 후 복구하세요" });
+    }
+  }
+  const toolConfigBroken = blockers.some((b) => b.code === "TOOL_CONFIG_UNREADABLE" || b.code === "TOOL_CONFIG_MISSING" || b.code === "TOOL_CONFIG_DRIFT");
   // 고른 대상이 모두 같은 항목으로 이미 설정돼 있으면 "이미 설치됨"이다(대상 단위). 도구 전체 설치 여부(Recommendation)로 판단하지 않는다.
-  const installed = writable.length > 0 && writeTargets.length === 0;
-  if (usesToolConfig && !installed) {
+  // tool config Tool은 그 관리 파일도 정상이어야 한다.
+  const installed = writable.length > 0 && writeTargets.length === 0 && !toolConfigBroken;
+  if (usesToolConfig && writeTargets.length > 0) {
     // 실제로 쓸 대상의 scope만(변경 없는 대상의 tool config는 건드리지 않는다).
     const scopes = [...new Set(writeTargets.map((t) => t.scope))].sort((a, b) => SCOPE_ORDER[a] - SCOPE_ORDER[b]);
     for (const scope of scopes) {
@@ -428,7 +443,9 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
         : "installable";
 
   const steps: InstallPlanV1["steps"] = [];
-  if (!installed && input.launch !== null) {
+  // 쓸 대상이 하나도 없으면(모두 변경 없음, tool config 문제로 막힘) 준비 단계도 만들지 않는다.
+  const nothingToWrite = writable.length > 0 && writeTargets.length === 0;
+  if (!installed && !nothingToWrite && input.launch !== null) {
     steps.push(...input.preparation.map((s) => ({ ...s, args: [...s.args] })));
     steps.push(...toolConfigSteps);
     for (const t of writeTargets) {
