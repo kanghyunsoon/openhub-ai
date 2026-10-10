@@ -1,21 +1,71 @@
 name: Desktop E2E (Linux)
 
-# 데스크톱 실제 Electron E2E를 Linux runner(xvfb)에서 실행한다. 데스크톱·Core를 바꾸는 PR과 수동 실행에서만 돈다(required check 아님).
-# 테스트는 임시 project·home만 쓰고 가짜 npm·Health를 쓴다(실제 MCP 실행·secret 없음).
+# 실제 Electron E2E를 Linux runner(xvfb)에서 실행한다. v0.2.0 merge gate: required check 이름은 "desktop-e2e"(맨 아래 job)다.
+# - 모든 PR과 main push에서 결론을 낸다(paths 필터 없음). 그래서 Desktop과 무관한 PR에서도 required check가 비지 않는다.
+# - Desktop·Core·Registry·의존성·이 워크플로가 바뀌면 Electron E2E 파일을 하나씩 순서대로 실행한다. 바뀌지 않았으면 실행하지 않았다는 결론(성공)을 낸다.
+#   변경을 판단하지 못하면(diff 실패) 실행한다.
+# - 단위 테스트는 CI(check)가 맡는다. 이 워크플로는 실제 Electron 창 테스트만 돌린다(continue-on-error 없음).
+# - 테스트는 임시 project·home, 가짜 npm·Health만 쓴다(실제 MCP 실행·secret 없음). 실제 MCP 검증은 registry-remote.yml(sandbox)에 따로 있다.
 on:
   pull_request:
-    paths:
-      - "apps/desktop/**"
-      - "packages/core/src/**"
-      - ".github/workflows/desktop-e2e.yml"
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: desktop-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  desktop-e2e:
+  changes:
+    name: desktop-e2e / detect changes
     runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.detect.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "manual run: Electron E2E runs"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$EVENT" = "pull_request" ]; then range="$BASE...$HEAD"; else range="$BEFORE..$HEAD"; fi
+          if ! files=$(git diff --name-only "$range"); then
+            echo "could not compute changed files for $range: Electron E2E runs"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s\n' "$files"
+          if printf '%s\n' "$files" | grep -Eq '^(apps/desktop/|packages/core/(src/|package\.json$)|registry/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|scripts/check-e2e-results\.mjs$|\.github/workflows/desktop-e2e\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  electron:
+    name: desktop-e2e / electron
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      OPENHUB_E2E: "1"
+      # GitHub runner에서는 Chromium SUID sandbox helper를 설정할 수 없어 이 job(테스트 전용)에서만 Electron sandbox를 끈다.
+      # 배포물·사용자 실행에는 영향이 없다(main.ts는 sandbox: true로 창을 만든다).
+      ELECTRON_DISABLE_SANDBOX: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -25,12 +75,53 @@ jobs:
           cache: pnpm
       - name: Electron 실행 의존성(xvfb·GTK·NSS)
         run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0t64 libnss3 libxss1 libasound2t64 libgbm1 libnotify4 libsecret-1-0
-      - run: pnpm install --frozen-lockfile
-      - name: Desktop Electron E2E (xvfb)
-        # GitHub runner에서는 Chromium SUID sandbox helper를 설정할 수 없어 이 job에서만 Electron sandbox를 끈다(테스트 전용).
-        # 각 파일이 beforeAll에서 데스크톱을 빌드하므로(같은 출력 폴더) 파일을 하나씩 실행한다.
-        run: xvfb-run -a pnpm exec vitest run apps/desktop/test/i18n-electron.e2e.test.ts apps/desktop/test/repair-electron.e2e.test.ts apps/desktop/test/install-clients-electron.e2e.test.ts apps/desktop/test/user-scope-electron.e2e.test.ts apps/desktop/test/for-you-electron.e2e.test.ts --no-file-parallelism --reporter=verbose
-        env:
-          OPENHUB_E2E: "1"
-          ELECTRON_DISABLE_SANDBOX: "1"
+      - id: install
+        run: pnpm install --frozen-lockfile
+      # 파일마다 한 단계씩 순서대로 실행한다(각 파일이 beforeAll에서 같은 출력 폴더로 데스크톱을 빌드한다).
+      # 앞 파일이 실패해도 나머지 파일은 실행해 결과를 남기고, 하나라도 실패하면 job이 실패한다.
+      - name: E2E i18n
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: xvfb-run -a pnpm exec vitest run apps/desktop/test/i18n-electron.e2e.test.ts --reporter=verbose --reporter=json --outputFile.json=e2e-results/i18n.json
+      - name: E2E repair
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: xvfb-run -a pnpm exec vitest run apps/desktop/test/repair-electron.e2e.test.ts --reporter=verbose --reporter=json --outputFile.json=e2e-results/repair.json
+      - name: E2E install clients
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: xvfb-run -a pnpm exec vitest run apps/desktop/test/install-clients-electron.e2e.test.ts --reporter=verbose --reporter=json --outputFile.json=e2e-results/install-clients.json
+      - name: E2E user scope
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: xvfb-run -a pnpm exec vitest run apps/desktop/test/user-scope-electron.e2e.test.ts --reporter=verbose --reporter=json --outputFile.json=e2e-results/user-scope.json
+      - name: E2E for you (diagnostics, add to another client or scope)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: xvfb-run -a pnpm exec vitest run apps/desktop/test/for-you-electron.e2e.test.ts --reporter=verbose --reporter=json --outputFile.json=e2e-results/for-you.json
+      # 건너뛴 테스트를 통과로 보지 않는다: 파일마다 결과가 있고, 실행된 테스트가 1개 이상이며, 실패·건너뜀·todo가 0이어야 한다.
+      - name: Every Electron E2E ran (no skipped tests)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: node scripts/check-e2e-results.mjs e2e-results i18n repair install-clients user-scope for-you
+
+  desktop-e2e:
+    name: desktop-e2e
+    needs: [changes, electron]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          RUN: ${{ needs.changes.outputs.run }}
+          ELECTRON: ${{ needs.electron.result }}
+        run: |
+          echo "changes=$CHANGES run=$RUN electron=$ELECTRON"
+          if [ "$CHANGES" != "success" ]; then
+            echo "change detection did not succeed"
+            exit 1
+          fi
+          if [ "$RUN" = "true" ]; then
+            if [ "$ELECTRON" != "success" ]; then
+              echo "Electron E2E did not succeed ($ELECTRON)"
+              exit 1
+            fi
+            echo "Electron E2E passed"
+          else
+            echo "No Desktop, Core, Registry, dependency or workflow change: Electron E2E not needed"
+          fi
 
