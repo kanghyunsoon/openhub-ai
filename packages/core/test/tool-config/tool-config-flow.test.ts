@@ -7,8 +7,8 @@ import {
   REVIEWED_TOOL_CONFIGS,
   commitLifecycleState,
   containsAbsolutePath,
+  fastManifestIssues,
   lifecycleStatus,
-  manifestSchema,
   planLifecycle,
   readLifecycleState,
   recordInstallInState,
@@ -29,28 +29,34 @@ import { newScratch } from "../lifecycle/helpers";
 
 /**
  * v0.2.0 tool config 통합: 승인된 InstallPlan·LifecyclePlan으로 실제 임시 파일을 쓴다(가짜 npm·가짜 Health, network 0).
- * Kubernetes Manifest는 Registry에 등록하지 않고(PR #7) 이 테스트 안에서만 만든다.
+ * 실제 Registry Manifest(registry/mcp/kubernetes-mcp-server.yaml)를 쓴다. 검토된 정책과 같은지 먼저 확인한다.
  */
 const scratch = await newScratch("tool-config-flow");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 const seed = await seedEntries();
-const k8s = manifestSchema.parse({
-  name: "kubernetes-mcp-server",
-  displayName: "Kubernetes MCP Server",
-  repository: { github: "containers/kubernetes-mcp-server" },
-  category: ["mcp", "automation"],
-  capabilities: ["kubernetes-operations"],
-  targets: ["claude-code", "codex", "cursor"],
-  platform: { windows: true, macos: true, linux: true },
-  install: { preferredAdapter: "npx", options: { command: REVIEWED_TOOL_CONFIGS["kubernetes-mcp-server"]!.commands[0] } },
-  healthCheck: { type: "mcp-handshake" },
-  update: { source: "npm" },
-  rollback: { supported: true },
-  verification: "community",
-  recommendation: { appliesTo: { stacks: ["kubernetes"] }, identity: { mcpServerNames: ["kubernetes"] }, source: { type: "dedicated" } },
-  toolConfig: { format: "toml", content: KUBERNETES_TOOL_CONFIG },
+const entries: RegistryEntry[] = seed;
+const k8s = seed.find((e) => e.manifest.name === "kubernetes-mcp-server")!.manifest;
+
+describe("Registry Kubernetes Manifest", () => {
+  it("검토된 명령·TOML과 정확히 같고 Registry fast validation을 통과한다", () => {
+    expect(k8s.install.options?.["command"]).toBe(REVIEWED_TOOL_CONFIGS["kubernetes-mcp-server"]!.commands[0]);
+    expect(toolConfigDigest(k8s.toolConfig!.content)).toBe(toolConfigDigest(KUBERNETES_TOOL_CONFIG));
+    expect(fastManifestIssues(k8s)).toEqual([]);
+  });
+
+  it("설치 계획은 Client·플랫폼 검증 수준을 구분하고 RBAC·로그 위험 고지를 유지한다", async () => {
+    const h = await createHarness(scratch, { entries });
+    for (const platform of ["linux", "windows", "macos"] as const) {
+      const { plan } = await plannedOf(h, { ...h.request("kubernetes-mcp-server", CLIENTS), platform });
+      const notices = plan.warnings.filter((w) => w.code === "client-launch-unverified" || w.code === "platform-unverified").map((w) => w.message);
+      expect(notices.some((m) => m.startsWith("Codex: 설정 인식만"))).toBe(true);
+      expect(notices.some((m) => m.startsWith("Cursor:"))).toBe(true);
+      expect(notices.some((m) => m.startsWith("Claude Code"))).toBe(false);
+      expect(notices.some((m) => m.startsWith("macos"))).toBe(platform === "macos");
+      expect(plan.warnings.find((w) => w.code === "tool-config")?.message).toMatch(/Pod·Node 로그.*RBAC/u);
+    }
+  });
 });
-const entries: RegistryEntry[] = [...seed, { ...seed[0]!, manifest: k8s }];
 const CLIENTS = (["claude-code", "codex", "cursor"] as const).map((client) => ({ client, scope: "project" as const }));
 const DIGEST = toolConfigDigest(KUBERNETES_TOOL_CONFIG);
 

@@ -35,6 +35,13 @@ export interface ReviewedToolConfig {
   content: string;
   /** 설치 계획 고지(고정 문구). */
   notice: string;
+  /**
+   * Client별 검증 수준(v0.2.0). launch-verified: 실제 Client가 OpenHub가 쓴 설정으로 서버를 띄움을 확인,
+   * config-recognized: 설정 인식만 확인(실제 MCP 연결·호출 미검증), not-verified: 확인하지 않음. 설치 계획에 그대로 드러낸다.
+   */
+  clientVerification: Readonly<Record<"claude-code" | "codex" | "cursor", "launch-verified" | "config-recognized" | "not-verified">>;
+  /** 플랫폼별 실제 E2E 검증 여부. false인 플랫폼은 설치 계획에 미검증으로 드러낸다. */
+  platformVerified: Readonly<Record<"windows" | "macos" | "linux", boolean>>;
 }
 
 export const KUBERNETES_TOOL_CONFIG = 'read_only = true\ntoolsets = ["core"]\n\n[[denied_resources]]\ngroup = ""\nversion = "v1"\nkind = "Secret"\n';
@@ -46,8 +53,27 @@ export const REVIEWED_TOOL_CONFIGS: Readonly<Record<string, ReviewedToolConfig>>
     content: KUBERNETES_TOOL_CONFIG,
     notice:
       "OpenHub가 ~/.openhub/tool-config 아래에 서버 정책 파일(read_only, core toolset, Secret 조회 거부)을 만들고 Client 설정의 --config로 넘깁니다. 서버는 kubeconfig의 current context 사용자 권한으로 동작하며 OpenHub는 kubeconfig를 읽지 않습니다. Pod·Node 로그에 비밀정보가 있으면 막지 못합니다. 읽기 전용 RBAC 사용자를 쓰세요.",
+    // 2026-10-10 기록: Claude Code 2.1.258 실제 연결, Codex CLI 0.147.0 설정 인식만, Cursor 미설치. Windows·Linux E2E, macOS 미검증.
+    clientVerification: Object.freeze({ "claude-code": "launch-verified", codex: "config-recognized", cursor: "not-verified" } as const),
+    platformVerified: Object.freeze({ windows: true, linux: true, macos: false }),
   }),
 });
+
+const CLIENT_LABEL = { "claude-code": "Claude Code", codex: "Codex", cursor: "Cursor" } as const;
+
+/** 검증 수준 고지(설치 계획 warning). 실제 실행을 확인한 Client·플랫폼은 문구가 없다. */
+export function toolConfigVerificationNotices(toolId: string, clients: readonly ("claude-code" | "codex" | "cursor")[], platform: "windows" | "macos" | "linux"): { code: string; message: string }[] {
+  const reviewed = REVIEWED_TOOL_CONFIGS[toolId];
+  if (reviewed === undefined) return [];
+  const out: { code: string; message: string }[] = [];
+  for (const client of [...new Set(clients)]) {
+    const level = reviewed.clientVerification[client];
+    if (level === "config-recognized") out.push({ code: "client-launch-unverified", message: CLIENT_LABEL[client] + ": 설정 인식만 확인했습니다. 이 Client에서 실제 MCP 연결·호출은 OpenHub가 검증하지 않았습니다." });
+    if (level === "not-verified") out.push({ code: "client-launch-unverified", message: CLIENT_LABEL[client] + ": 이 Client에서의 실제 실행은 OpenHub가 검증하지 않았습니다." });
+  }
+  if (!reviewed.platformVerified[platform]) out.push({ code: "platform-unverified", message: platform + "에서는 OpenHub가 이 도구의 설치·실행을 실제로 검증하지 않았습니다." });
+  return out;
+}
 export const TOOL_CONFIG_ALLOWLIST: readonly string[] = Object.freeze(Object.keys(REVIEWED_TOOL_CONFIGS));
 
 const TOOL_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;

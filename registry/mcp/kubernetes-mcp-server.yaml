@@ -1,0 +1,43 @@
+schemaVersion: 1
+name: kubernetes-mcp-server
+displayName: Kubernetes MCP Server
+summary: kubeconfig의 현재 context로 리소스·Pod 로그·이벤트를 읽기 전용으로 조회하는 Kubernetes MCP 서버(Secret 조회는 OpenHub 정책 파일로 거부)
+repository:
+  github: containers/kubernetes-mcp-server
+category: [mcp, automation]
+capabilities: [kubernetes-operations]
+targets: [claude-code, codex, cursor]
+platform: { windows: true, macos: true, linux: true }
+env:
+  - name: KUBECONFIG
+    required: false
+    description: 사용할 kubeconfig(없으면 기본 위치). 읽기 전용 RBAC 사용자를 권장한다. OpenHub는 이 파일을 읽거나 바꾸지 않는다
+install:
+  preferredAdapter: npx
+  options:
+    # 검토된 명령과 정확히 같아야 한다(tool-config/index.ts REVIEWED_TOOL_CONFIGS). 0.0.67 고정 → 승인 뒤 npx Prepare.
+    # --read-only: 읽기 도구만, --toolsets core: configuration_view 제외, --config {toolConfig}: OpenHub 관리 정책 파일(Secret 거부).
+    # Client별·플랫폼별 검증 수준은 설치 계획에 표시된다. 검증 기록: docs/specs/registry-kubernetes-mcp-server.md
+    command: "npx -y kubernetes-mcp-server@0.0.67 --read-only --toolsets core --config {toolConfig}"
+toolConfig:
+  format: toml
+  content: |
+    read_only = true
+    toolsets = ["core"]
+
+    [[denied_resources]]
+    group = ""
+    version = "v1"
+    kind = "Secret"
+healthCheck:
+  type: mcp-handshake
+update:
+  source: npm
+rollback:
+  supported: true
+verification: community
+# 추천 메타데이터(D-008): canonical MCP alias는 normalized lowercase, Registry 전체에서 유일
+recommendation:
+  appliesTo: { stacks: [kubernetes] }
+  identity: { mcpServerNames: [kubernetes] }
+  source: { type: dedicated }

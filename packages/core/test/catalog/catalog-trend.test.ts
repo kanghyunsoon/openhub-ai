@@ -192,10 +192,14 @@ describe("REQ-060 Catalog Metadata v1과 Trend Score", () => {
 
   it("AC-061-12 Registry Tool ID 목록 상수가 소스에 없고 Manifest + catalog entry만으로 새 Tool이 동작한다", async () => {
     const dirs = ["packages/core/src", "apps/cli/src", "apps/desktop/src", "apps/desktop/renderer"];
+    // 예외 1개(v0.2.0 PR #9 Decision): 검토된 tool config 보안 허용 목록은 OpenHub 소스에 둔다(Registry Manifest가 파일 생성을 스스로 허용할 수 없게).
+    // 이 파일은 Tool 목록이 아니라 검토된 정책이며, 일반 Tool은 여전히 Manifest + catalog만으로 동작한다(아래).
+    const SECURITY_ALLOWLIST = new Set(["packages/core/src/tool-config/index.ts"]);
     const offenders: string[] = [];
     for (const d of dirs) {
       for (const f of readdirSync(path.join(REPO_ROOT, d), { recursive: true }) as string[]) {
         if (!/\.(ts|js|mjs)$/u.test(f)) continue;
+        if (SECURITY_ALLOWLIST.has(d + "/" + f.replace(/\\/gu, "/"))) continue;
         const src = readFileSync(path.join(REPO_ROOT, d, f), "utf8");
         if (TOOLS.some((id) => src.includes('"' + id + '"') || src.includes("'" + id + "'"))) offenders.push(d + "/" + f);
       }

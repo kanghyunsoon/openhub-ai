@@ -25,4 +25,4 @@ Warnings
   - [floating-artifact] 원격 패키지 버전이 고정되어 있지 않습니다. 나중에 실행하면 다른 artifact가 내려올 수 있습니다.
   - [client-env-parse-risk] Claude Code가 실행되는 환경에 필요한 환경변수를 직접 준비해야 합니다. OpenHub는 값이나 존재 여부를 확인하지 않습니다.
 
-Plan digest  sha256:dec252017cd533c41acc0ef7f25574e8bd39a1596c31421f166feedd919a4309
+Plan digest  sha256:e0f060b3e5eabf45e58270b157162f211637615df2cd7c2de95615cd0b687931

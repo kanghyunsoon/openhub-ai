@@ -124,7 +124,7 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     expect(tokenizeManifestCommand("npx ~/evil", "npx")).toMatchObject({ ok: false });
   });
 
-  it("AC-030-05 seed Registry의 launch spec이 golden과 같다(npx 5, uvx 2, docker 1, linux·windows)", async () => {
+  it("AC-030-05 seed Registry의 launch spec이 golden과 같다(npx 6, uvx 2, docker 1, linux·windows)", async () => {
     // D-016 반영으로 launch에 platform·clientSpec(Client config에 실제 기록될 command/args)이 추가돼 golden을 두 플랫폼으로 갱신했다.
     const specsFor = (platform: "linux" | "windows") =>
       Object.fromEntries(
@@ -136,7 +136,8 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     const linux = specsFor("linux");
     const counts = Object.values(linux).reduce<Record<string, number>>((acc, s) => ((acc[s.backend ?? "none"] = (acc[s.backend ?? "none"] ?? 0) + 1), acc), {});
     // v0.2.0 P0-2: mongodb-mcp-server(npx, 정확한 버전) 추가. 기존 7개 항목은 그대로다.
-    expect(counts).toEqual({ npx: 5, uvx: 2, docker: 1 });
+    // v0.2.0 P0-3: kubernetes-mcp-server(npx, 정확한 버전 + 검토된 toolConfig) 추가. 기존 8개 항목은 그대로다.
+    expect(counts).toEqual({ npx: 6, uvx: 2, docker: 1 });
     await expectInstallerGolden("seed-launch-specs.json", json({ linux, windows: specsFor("windows") }));
   });
 
@@ -202,8 +203,9 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     const seedArtifacts = Object.fromEntries(SEED_IDS.map((id) => [id, planned(build(id)).plan.artifact]));
     expect(Object.values(seedArtifacts).every((a) => a !== null)).toBe(true);
     // v0.2.0 P0-2: mongodb-mcp-server는 npx pkg@X.Y.Z로 고정한 첫 seed다(npx Prepare 대상). 나머지 7개는 그대로 floating이다.
+    // v0.2.0 P0-3: kubernetes-mcp-server도 kubernetes-mcp-server@0.0.67로 고정한다(검토된 toolConfig 버전).
     const pinnedIds = SEED_IDS.filter((id) => seedArtifacts[id]!.pinned);
-    expect(pinnedIds).toEqual(["mongodb-mcp-server"]);
+    expect(pinnedIds).toEqual(["kubernetes-mcp-server", "mongodb-mcp-server"]);
     for (const id of SEED_IDS) {
       const requirements = planned(build(id)).plan.approvalRequirements;
       if (pinnedIds.includes(id)) expect(requirements, id).not.toContain("floating-artifact");

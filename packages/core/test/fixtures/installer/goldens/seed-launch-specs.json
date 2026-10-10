@@ -65,6 +65,35 @@
         "platform": "linux"
       }
     },
+    "kubernetes-mcp-server": {
+      "backend": "npx",
+      "launch": {
+        "args": [
+          "-y",
+          "kubernetes-mcp-server@0.0.67",
+          "--read-only",
+          "--toolsets",
+          "core",
+          "--config",
+          "{toolConfig}"
+        ],
+        "clientSpec": {
+          "args": [
+            "-y",
+            "kubernetes-mcp-server@0.0.67",
+            "--read-only",
+            "--toolsets",
+            "core",
+            "--config",
+            "{toolConfig}"
+          ],
+          "command": "npx"
+        },
+        "envNames": [],
+        "executable": "npx",
+        "platform": "linux"
+      }
+    },
     "memory-mcp": {
       "backend": "npx",
       "launch": {
@@ -246,6 +275,36 @@
           "GITHUB_PERSONAL_ACCESS_TOKEN"
         ],
         "executable": "docker",
+        "platform": "windows"
+      }
+    },
+    "kubernetes-mcp-server": {
+      "backend": "npx",
+      "launch": {
+        "args": [
+          "-y",
+          "kubernetes-mcp-server@0.0.67",
+          "--read-only",
+          "--toolsets",
+          "core",
+          "--config",
+          "{toolConfig}"
+        ],
+        "clientSpec": {
+          "args": [
+            "{npxCli}",
+            "-y",
+            "kubernetes-mcp-server@0.0.67",
+            "--read-only",
+            "--toolsets",
+            "core",
+            "--config",
+            "{toolConfig}"
+          ],
+          "command": "node"
+        },
+        "envNames": [],
+        "executable": "npx",
         "platform": "windows"
       }
     },

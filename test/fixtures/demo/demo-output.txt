@@ -254,7 +254,8 @@ TRENDING — OpenHub Trend Score (historical star growth가 아니라 현재 pop
   5. serena — Trend 79 (popularity 43 · release 18 · activity 18; stars 20000, release 2025-10-23, push 2025-12-22)
   6. memory-mcp — Trend 67 (popularity 24 · release 18 · activity 25; stars 80000, release 2025-11-02, push 2025-12-28, shared-repository)
   7. postgres-mcp — Trend 43 (popularity 33 · release 0 · activity 10; stars 2500, release 2024-11-27, push 2025-11-17)
-  8. mongodb-mcp-server — metadata unavailable
+  8. kubernetes-mcp-server — metadata unavailable
+  9. mongodb-mcp-server — metadata unavailable
 (exit 0)
 
 == 10. Benchmark preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)

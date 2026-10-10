@@ -22,10 +22,16 @@ describe("project recommend 결과 진단(v0.2.0 P0-1)", () => {
     expect(await human("readme-mentions")).toContain("(추천할 도구 없음) 언어·프레임워크·DB·인프라를 인식하지 못했습니다");
   });
 
-  it("Kubernetes는 need는 있지만 Verified Registry에 도구가 없다고 설명한다", async () => {
-    const out = await human("k8s-deploy");
+  it("Verified 도구가 없는 need만 있으면 그렇게 설명한다(C# 소스 없는 Unity 에디터 프로젝트)", async () => {
+    const out = await human("unity-editor-only");
     expect(out).toContain("(추천할 도구 없음) 필요한 Capability는 있지만 Verified Registry에 해당 도구가 없습니다");
     expect(out).toContain("후보 없는 Gap");
+  });
+
+  it("Kubernetes 프로젝트는 read-only로 설치되는 Kubernetes MCP Server를 추천한다(v0.2.0 P0-2 batch 1)", async () => {
+    const out = await human("k8s-deploy");
+    expect(out).toMatch(/Kubernetes MCP Server \(kubernetes-mcp-server\)/u);
+    expect(out).not.toContain("(추천할 도구 없음)");
   });
 
   it("Jest만 있으면 연결 규칙이 없는 기술로 보여준다", async () => {
