@@ -3,6 +3,7 @@ import * as nodeFs from "node:fs/promises";
 import path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { WINDOWS_CMD_EXTRA_METACHARACTERS, tokenizeManifestCommand } from "./command";
+import { NPX_CLI_PLACEHOLDER, TOOL_CONFIG_PLACEHOLDER } from "../tool-config/index";
 import { canonicalize, type ApprovalRequirement, type ConfigPatchStep, type ConfigScope, type EnvReferenceStyle, type InstallClient, type PlanTargetInput, type ServerEntry } from "./plan";
 
 /**
@@ -213,7 +214,7 @@ export function fileSha256(bytes: Buffer): string {
   return "sha256:" + createHash("sha256").update(bytes).digest("hex");
 }
 
-const CLIENT_COMMANDS = ["npx", "uvx", "docker", "cmd"];
+const CLIENT_COMMANDS = ["npx", "uvx", "docker", "cmd", "node"];
 
 /**
  * D-016 Windows npx wrapper 검증. args가 정확히 ["/d", "/c", "npx", ...]이고 나머지 인자가 strict tokenizer와
@@ -226,6 +227,19 @@ function isSafeWindowsNpxWrapper(args: readonly string[]): boolean {
   return tokenizeManifestCommand(["npx", ...rest].join(" "), "npx", { windowsCmdWrapper: true }).ok;
 }
 
+/**
+ * v0.2.0 tool config Tool의 Windows 직접 실행 형태(placeholder): command "node", args ["{npxCli}", ...npx 인자],
+ * {toolConfig}가 정확히 한 번, "--config" 바로 뒤. 실제 절대 경로는 쓰는 순간 materialize가 넣는다.
+ */
+function isToolConfigNodeEntry(args: readonly string[]): boolean {
+  if (args[0] !== NPX_CLI_PLACEHOLDER) return false;
+  const rest = args.slice(1);
+  const i = rest.indexOf(TOOL_CONFIG_PLACEHOLDER);
+  if (i < 1 || rest[i - 1] !== "--config" || rest.filter((a) => a === TOOL_CONFIG_PLACEHOLDER).length !== 1) return false;
+  const tokens = rest.map((a) => (a === TOOL_CONFIG_PLACEHOLDER ? "openhub-tool-config-placeholder" : a));
+  return tokenizeManifestCommand(["npx", ...tokens].join(" "), "npx").ok;
+}
+
 /** Client별 공식 형식(과 D-016 Windows compatibility policy)인지 확인한다. 확인되지 않은 필드·reference·command는 쓰지 않는다. */
 export function isOfficialServerEntry(client: InstallClient, value: ServerEntry): boolean {
   const keys = Object.keys(value).sort();
@@ -234,6 +248,8 @@ export function isOfficialServerEntry(client: InstallClient, value: ServerEntry)
   if (typeof value.command !== "string" || !Array.isArray(value.args)) return false;
   if (!CLIENT_COMMANDS.includes(value.command)) return false;
   if (value.command === "cmd" && !isSafeWindowsNpxWrapper(value.args)) return false;
+  if (value.command === "node" && !isToolConfigNodeEntry(value.args)) return false;
+  if (value.command !== "node" && value.args.includes(NPX_CLI_PLACEHOLDER)) return false;
   if (client === "codex") return value.env === undefined;
   for (const [name, ref] of Object.entries(value.env ?? {})) {
     const expected = client === "cursor" ? "$" + "{env:" + name + "}" : "$" + "{" + name + "}";
@@ -308,6 +324,8 @@ export interface ConfigWriteReceipt {
   readonly serverName: string;
   readonly absolutePath: string;
   readonly original: Buffer | null;
+  /** 이번에 쓴 byte. 복구 직전 파일이 이것과 다르면(다른 프로세스가 바꿨으면) 덮어쓰지 않는다. */
+  readonly written: Buffer;
   readonly createdDirs: readonly string[];
 }
 
@@ -325,6 +343,11 @@ export async function atomicWrite(fs: ConfigFs, file: string, data: Buffer): Pro
 export interface ApplyConfigOptions extends ConfigRoots {
   /** VerifiedPlan의 acknowledgements. user scope는 user-scope-config가 있어야 쓴다. */
   acknowledgements: readonly ApprovalRequirement[];
+  /**
+   * placeholder 형태({toolConfig}·node+{npxCli})를 실제로 쓸 값으로 바꾼다(v0.2.0 tool config). 검증은 placeholder 형태로 하고
+   * 파일에는 바꾼 값을 쓴다. 바꿀 수 없으면 ConfigWriteError(MANUAL_SETUP_REQUIRED)를 던진다.
+   */
+  materialize?: (value: ServerEntry) => ServerEntry;
 }
 
 /** config-patch 단계 하나를 적용한다. 실패하면 파일을 바꾸지 않는다. */
@@ -342,7 +365,7 @@ export async function applyConfigPatch(step: ConfigPatchStep, options: ApplyConf
   const fs = options.fs ?? nodeConfigFs;
   const { file, root } = await resolveInside(target, options, fs);
   const original = await readOptional(fs, file);
-  const next = patchConfigText(original, target.format, serverName, step.value);
+  const next = patchConfigText(original, target.format, serverName, options.materialize === undefined ? step.value : options.materialize(step.value));
   const missing: string[] = [];
   for (let dir = path.dirname(file); dir !== root && sameOrInside(dir, root); dir = path.dirname(dir)) {
     try {
@@ -364,12 +387,17 @@ export async function applyConfigPatch(step: ConfigPatchStep, options: ApplyConf
     for (const d of [...createdDirs].reverse()) await fs.rmdir(d).catch(() => undefined);
     throw error instanceof ConfigWriteError ? error : new ConfigWriteError("CONFIG_WRITE_FAILED", "설정 디렉터리를 만들지 못했습니다");
   }
-  return Object.freeze({ client: step.client, scope: step.scope, file: target.logical, serverName, absolutePath: file, original, createdDirs: Object.freeze(createdDirs) });
+  return Object.freeze({ client: step.client, scope: step.scope, file: target.logical, serverName, absolutePath: file, original, written: next, createdDirs: Object.freeze(createdDirs) });
 }
 
-/** 영수증대로 원본 byte를 되돌린다(없던 파일은 지우고 만든 디렉터리를 비어 있으면 지운다). */
+/**
+ * 영수증대로 원본 byte를 되돌린다(없던 파일은 지우고 만든 디렉터리를 비어 있으면 지운다).
+ * 지금 파일이 이번에 쓴 byte와 다르면(그 사이 다른 프로세스가 바꿨으면) 덮어쓰지 않고 false다.
+ */
 export async function restoreConfig(receipt: ConfigWriteReceipt, fs: ConfigFs = nodeConfigFs): Promise<boolean> {
   try {
+    const now = await readOptional(fs, receipt.absolutePath);
+    if (now === null || !now.equals(receipt.written)) return false;
     if (receipt.original === null) {
       await fs.rm(receipt.absolutePath);
       for (const d of [...receipt.createdDirs].reverse()) await fs.rmdir(d).catch(() => undefined);
@@ -422,7 +450,7 @@ export async function applyLoopbackHttpEntry(
     for (const d of [...createdDirs].reverse()) await fs.rmdir(d).catch(() => undefined);
     throw error instanceof ConfigWriteError ? error : new ConfigWriteError("CONFIG_WRITE_FAILED", "설정 디렉터리를 만들지 못했습니다");
   }
-  return Object.freeze({ client: target.client, scope: target.scope, file: configTarget.logical, serverName: target.serverName, absolutePath: file, original, createdDirs: Object.freeze(createdDirs) });
+  return Object.freeze({ client: target.client, scope: target.scope, file: configTarget.logical, serverName: target.serverName, absolutePath: file, original, written: next, createdDirs: Object.freeze(createdDirs) });
 }
 
 /** 설정 파일을 다시 읽어 서버 항목을 돌려준다(Configured 확인용). */

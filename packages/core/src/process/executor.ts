@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { containsAbsolutePath } from "../analyzer/index";
 import { isVerifiedPlan, type VerifiedPlan } from "../installer/approval-v1";
-import type { ConfigPatchStep, RunStep } from "../installer/plan";
+import type { ConfigPatchStep, RunStep, ToolConfigStep } from "../installer/plan";
 import { isVerifiedLifecyclePlan, type VerifiedLifecyclePlan } from "../lifecycle/plan";
 import { redactSensitive } from "../recommendation/index";
 import { nodeNpxSpawner, prepareNpxPackage, type NpxPrepareContext } from "./npx-prepare";
@@ -78,6 +78,8 @@ export interface ExecutorOptions {
   isolatedDir?: () => Promise<IsolatedDir>;
   /** config-patch 단계 적용(TASK-032 Config Writer·TASK-033 Transaction). 준비 단계가 모두 성공한 뒤에만 호출된다. */
   onConfigStep?: (step: ConfigPatchStep) => Promise<StepOutcome>;
+  /** tool-config 단계 적용(v0.2.0). 준비 단계가 모두 성공한 뒤, config-patch 전에 호출된다. 없으면 실패다(파일을 쓰지 않는다). */
+  onToolConfigStep?: (step: ToolConfigStep) => Promise<StepOutcome>;
   /** npx Prepare 실행 문맥(플랫폼·Windows npx 경로·tree killer). 없으면 npx 준비 단계는 NPX_PREPARE_UNAVAILABLE로 실패한다. */
   npx?: Omit<NpxPrepareContext, "spawner" | "timeoutMs">;
 }
@@ -218,6 +220,12 @@ export async function executeVerifiedPlan(verified: VerifiedPlan, options: Execu
       const outcome = options.onConfigStep === undefined ? { id: step.id, status: "skipped" as const, code: "NO_CONFIG_WRITER" } : await options.onConfigStep(step);
       steps.push(outcome);
       if (outcome.status === "failed") failedStep = step.id;
+      continue;
+    }
+    if (step.kind === "tool-config") {
+      const outcome = options.onToolConfigStep === undefined ? { id: step.id, status: "failed" as const, code: "NO_TOOL_CONFIG_WRITER" } : await options.onToolConfigStep(step);
+      steps.push(outcome);
+      if (outcome.status !== "done") failedStep = step.id;
       continue;
     }
     const cwd = await resolveCwd(step.cwd, options);

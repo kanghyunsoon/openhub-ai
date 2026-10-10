@@ -5,6 +5,7 @@ import type { Manifest } from "../manifest/index";
 import type { RegistryEntry } from "../registry/index";
 import { TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, type RecommendationReport } from "../recommendation/index";
 import { parseNpxPrepareArgs } from "../process/npx-prepare";
+import { NPX_CLI_PLACEHOLDER, REVIEWED_TOOL_CONFIGS, TOOL_CONFIG_MAX_BYTES, TOOL_CONFIG_PLACEHOLDER, toolConfigDigest, toolConfigFileId } from "../tool-config/index";
 
 /**
  * Immutable InstallPlan v1(TASK-027, D-012).
@@ -30,6 +31,7 @@ export const APPROVAL_REQUIREMENTS = [
   "fallback-backend",
   "floating-artifact",
   "client-env-parse-risk",
+  "tool-config",
 ] as const;
 export type ApprovalRequirement = (typeof APPROVAL_REQUIREMENTS)[number];
 export const PLAN_STATUSES = ["installable", "already-installed", "unsupported", "blocked"] as const;
@@ -91,6 +93,40 @@ export const configPatchStepSchema = z.strictObject({
   value: serverEntrySchema,
 });
 export type ConfigPatchStep = z.output<typeof configPatchStepSchema>;
+
+/**
+ * OpenHub 관리 tool config 단계(v0.2.0). 승인 뒤, 준비 단계 다음, Client 설정 전에 실행한다.
+ * 위치는 논리 ID와 scope로만 적는다(절대 경로 없음). 내용은 검토된 고정 TOML이며 digest와 기대 이전 상태가 Plan digest에 들어간다.
+ */
+export const toolConfigStepSchema = z.strictObject({
+  id: text,
+  kind: z.literal("tool-config"),
+  toolId: text,
+  fileId: text,
+  scope: z.enum(CONFIG_SCOPES),
+  content: z.string().min(1).max(TOOL_CONFIG_MAX_BYTES),
+  contentDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  expected: z.strictObject({ state: z.enum(["absent", "present"]), digest: z.string().regex(/^sha256:[0-9a-f]{64}$/u).nullable() }),
+  action: z.enum(["create", "replace", "keep"]),
+});
+export type ToolConfigStep = z.output<typeof toolConfigStepSchema>;
+export type ToolConfigStateInput = { state: "absent" } | { state: "present"; digest: string };
+
+/** 승인 전 확인한 tool config의 현재 상태로 단계를 만든다. */
+export function toolConfigStepFor(toolId: string, content: string, scope: ConfigScope, current: ToolConfigStateInput): ToolConfigStep {
+  const contentDigest = toolConfigDigest(content);
+  return {
+    id: "tool-config-" + scope,
+    kind: "tool-config",
+    toolId,
+    fileId: toolConfigFileId(scope, toolId),
+    scope,
+    content,
+    contentDigest,
+    expected: current.state === "absent" ? { state: "absent", digest: null } : { state: "present", digest: current.digest },
+    action: current.state === "absent" ? "create" : current.digest === contentDigest ? "keep" : "replace",
+  };
+}
 
 export const probeSnapshotSchema = z.strictObject({
   name: text,
@@ -165,11 +201,11 @@ export const installPlanSchema = z
         args: z.array(text),
         envNames: z.array(envName),
         /** 플랫폼 변환 후 Client config에 실제로 기록될 command/args(Preview도 이 값을 보여 준다). */
-        clientSpec: z.strictObject({ command: z.enum(["npx", "uvx", "docker", "cmd"]), args: z.array(text) }),
+        clientSpec: z.strictObject({ command: z.enum(["npx", "uvx", "docker", "cmd", "node"]), args: z.array(text) }),
       })
       .nullable(),
     targets: z.array(targetSchema),
-    steps: z.array(z.discriminatedUnion("kind", [runStepSchema, configPatchStepSchema])),
+    steps: z.array(z.discriminatedUnion("kind", [runStepSchema, toolConfigStepSchema, configPatchStepSchema])),
     requiredEnv: z.array(z.strictObject({ name: envName, required: z.boolean(), status: z.literal("unchecked") })),
     sideEffects: z.array(z.enum(["network", "download", "file-write"])),
     warnings: z.array(z.strictObject({ code: text, message: z.string().min(1).max(400) })),
@@ -179,8 +215,10 @@ export const installPlanSchema = z
     const launch = plan.launch;
     if (launch !== null) {
       // D-016: cmd wrapper는 windows + npx에서 고정 prefix로만 생긴다. 그 밖에는 backend 그대로다.
+      // v0.2.0 tool config Tool({toolConfig} 인자)은 windows에서 node + {npxCli} 직접 실행이다(cmd 없음).
+      const direct = launch.platform === "windows" && launch.executable === "npx" && launch.args.includes(TOOL_CONFIG_PLACEHOLDER);
       const expected =
-        launch.platform === "windows" && launch.executable === "npx" ? ["cmd", "/d", "/c", "npx", ...launch.args] : [launch.executable, ...launch.args];
+        direct ? ["node", NPX_CLI_PLACEHOLDER, ...launch.args] : launch.platform === "windows" && launch.executable === "npx" ? ["cmd", "/d", "/c", "npx", ...launch.args] : [launch.executable, ...launch.args];
       if (JSON.stringify([launch.clientSpec.command, ...launch.clientSpec.args]) !== JSON.stringify(expected)) {
         ctx.addIssue({ code: "custom", path: ["launch", "clientSpec"], message: "clientSpec이 플랫폼별 launch 규칙(D-016)과 다릅니다" });
       }
@@ -281,6 +319,8 @@ export interface PlanAssemblyInput {
   preparation: RunStep[];
   targets: PlanTargetInput[];
   blockers: PlanBlocker[];
+  /** tool config Tool이면 scope별 현재 상태(승인 전 확인). 없으면 그 scope는 TOOL_CONFIG_UNKNOWN으로 막힌다. */
+  toolConfigs?: readonly { scope: ConfigScope; current: ToolConfigStateInput }[];
 }
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -329,6 +369,18 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
       blockers.push({ code: "CONFIG_KEY_EXISTS", message: `${t.file}에 이미 ${t.serverName} 항목이 있습니다` });
     }
   }
+  // v0.2.0 tool config: 쓸 Client 설정의 scope마다 OpenHub 관리 파일 1개. 상태를 모르면 막는다(승인 전 확인 필수).
+  const reviewed = REVIEWED_TOOL_CONFIGS[manifest.name];
+  const usesToolConfig = manifest.toolConfig !== undefined && input.launch !== null && input.launch.args.includes(TOOL_CONFIG_PLACEHOLDER);
+  const toolConfigSteps: ToolConfigStep[] = [];
+  if (usesToolConfig) {
+    const scopes = [...new Set(targets.filter((t) => t.envReference !== "manual").map((t) => t.scope))].sort((a, b) => SCOPE_ORDER[a] - SCOPE_ORDER[b]);
+    for (const scope of scopes) {
+      const found = input.toolConfigs?.find((c) => c.scope === scope);
+      if (found === undefined) blockers.push({ code: "TOOL_CONFIG_UNKNOWN", message: scope + " 범위 tool config 상태를 확인하지 못했습니다" });
+      else toolConfigSteps.push(toolConfigStepFor(toolId, manifest.toolConfig!.content, scope, found.current));
+    }
+  }
 
   const installed = installationStatus === "installed";
   const status: InstallPlanV1["status"] = installed
@@ -342,6 +394,7 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
   const steps: InstallPlanV1["steps"] = [];
   if (!installed && input.launch !== null) {
     steps.push(...input.preparation.map((s) => ({ ...s, args: [...s.args] })));
+    steps.push(...toolConfigSteps);
     for (const t of targets) {
       if (t.envReference === "manual") continue;
       steps.push({
@@ -364,6 +417,7 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
     if (input.backend?.selection === "fallback") approvalRequirements.add("fallback-backend");
     if (input.artifact !== null && !input.artifact.pinned) approvalRequirements.add("floating-artifact");
     if (requiredNames.length > 0 && targets.some((t) => t.client === "claude-code" && t.envReference !== "manual")) approvalRequirements.add("client-env-parse-risk");
+    if (toolConfigSteps.length > 0) approvalRequirements.add("tool-config");
   }
 
   const warnings: InstallPlanV1["warnings"] = blockers.map((b) => ({ code: b.code, message: b.message }));
@@ -373,6 +427,7 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
     if (input.backend?.adapter === "docker") warnings.push({ code: "docker-daemon-unchecked", message: "docker 데몬 연결 여부는 확인하지 않았습니다. 데몬이 꺼져 있으면 준비 단계가 실패합니다" });
     for (const name of requiredNames) warnings.push({ code: "required-env", message: requiredEnvNotice(name) });
     if (manifest.category.includes("database") && requiredNames.length > 0) warnings.push({ code: "database-credential-scope", message: DATABASE_CREDENTIAL_NOTICE });
+    if (toolConfigSteps.length > 0 && reviewed !== undefined) warnings.push({ code: "tool-config", message: reviewed.notice });
     if (approvalRequirements.has("client-env-parse-risk")) warnings.push({ code: "client-env-parse-risk", message: clientEnvParseRiskNotice(requiredNames) });
     for (const t of targets.filter((x) => x.envReference === "manual")) {
       warnings.push({ code: "manual-setup-required", message: `${t.client} ${t.scope} 설정(${t.file})은 OpenHub가 쓰지 않습니다. 직접 설정해야 합니다` });

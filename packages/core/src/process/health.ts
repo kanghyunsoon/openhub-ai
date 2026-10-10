@@ -5,6 +5,7 @@ import path from "node:path";
 import { isVerifiedLifecyclePlan, type HealthStep, type VerifiedLifecyclePlan } from "../lifecycle/plan";
 import type { RecommendPlatform } from "../recommendation/index";
 import { EXEC_EXCERPT_BYTES, OutputTail, redactExcerpt, type ExecSpawner } from "./executor";
+import { TOOL_CONFIG_PLACEHOLDER, substituteToolConfig } from "../tool-config/index";
 
 /**
  * MCP Health Check(TASK-041, D-019). 승인된 LifecyclePlan의 health 단계로만 MCP 서버를 실행해 handshake를 확인한다.
@@ -150,6 +151,11 @@ export interface HealthRunOptions {
   healthCheckType: string | undefined;
   /** Windows npx일 때 필요(probe 단계에서 locateWindowsNpxLauncher로 찾는다). */
   windowsNpx?: WindowsNpxLauncher | null;
+  /**
+   * OpenHub 관리 tool config 파일 경로(v0.2.0). health 인자에 {toolConfig}가 있으면 필요하다. 호출 측이 실행 직전 내용 digest를 확인한 뒤 넘긴다.
+   * 결과·로그에 남기지 않는다.
+   */
+  toolConfigFile?: string;
   spawner?: HealthSpawner;
   killTree?: TreeKiller;
   /**
@@ -185,7 +191,12 @@ export async function runHealthCheck(verified: VerifiedLifecyclePlan, options: H
 
   const environmentUnverified = verified.plan.requiredEnv.some((e) => e.required);
   if (options.healthCheckType !== "mcp-handshake") return { ok: true, result: result("unsupported", "unsupported-health-check", environmentUnverified, { terminated: true }) };
-  const argv = healthArgv(step, verified.plan.platform, options.windowsNpx ?? null);
+  let argv = healthArgv(step, verified.plan.platform, options.windowsNpx ?? null);
+  if (argv !== null && step.args.includes(TOOL_CONFIG_PLACEHOLDER)) {
+    const sub = options.toolConfigFile === undefined ? null : substituteToolConfig(argv, options.toolConfigFile, verified.plan.platform);
+    if (sub === null || !sub.ok) return { ok: true, result: result("launch-failed", "spawn-failed", environmentUnverified, { excerpt: "tool config 파일을 확인하지 못해 실행하지 않았습니다" }) };
+    argv = sub.args;
+  }
   if (argv === null) return { ok: true, result: result("launch-failed", "launcher-not-found", environmentUnverified) };
 
   const base = options.tempBase;

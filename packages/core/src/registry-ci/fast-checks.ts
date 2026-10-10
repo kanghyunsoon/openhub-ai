@@ -5,6 +5,7 @@ import { INSTALL_BACKENDS, type InstallBackend } from "../installer/plan";
 import type { InstallStep, Manifest } from "../manifest/index";
 import { readPinokioTemplate } from "../pinokio/compiler";
 import { loadRegistry, type RegistryEntry, type RegistryIssue } from "../registry/load";
+import { toolConfigIssues } from "../tool-config/index";
 
 /**
  * Registry fast validation(TASK-054, D-025). PR마다 실행하며 network·spawn이 0이다(입력은 이미 읽은 Manifest뿐).
@@ -32,6 +33,7 @@ const optionString = (step: InstallStep, key: "package" | "image") => (typeof st
 /** Manifest 하나의 fast 검사 결과(경로·메시지). */
 export function fastManifestIssues(manifest: Manifest): { path: string; message: string }[] {
   const out: { path: string; message: string }[] = [];
+  out.push(...toolConfigIssues(manifest));
   const preferred = manifest.install.preferredAdapter;
   const source = manifest.update.source;
   if (!(REGISTRY_SUPPORTED_BACKENDS as readonly string[]).includes(preferred)) {

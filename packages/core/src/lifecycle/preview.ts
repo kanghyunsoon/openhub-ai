@@ -14,7 +14,7 @@ import { LIFECYCLE_STATE_LOGICAL_PATH } from "./store";
 
 const SCOPE_LABEL = { project: "프로젝트", user: "사용자" } as const;
 const CLIENT_LABEL = { "claude-code": "Claude Code", codex: "Codex", cursor: "Cursor" } as const;
-const OPERATION_LABEL = { update: "업데이트", rollback: "롤백", health: "Health Check" } as const;
+const OPERATION_LABEL = { update: "업데이트", rollback: "롤백", health: "Health Check", repair: "tool config 복구" } as const;
 
 export const HEALTH_NOT_VERIFIED_LINES = ["Health: Not verified", "Reason: Required environment is unchecked"] as const;
 
@@ -118,6 +118,9 @@ const STATE_LABEL: Readonly<Record<LifecycleToolStatus["state"], string>> = {
   "state-consistent": "일치",
   "config-drift": "config-drift(설정이 Version State와 다름)",
   "missing-config": "missing-config(설정 항목 없음)",
+  "tool-config-missing": "tool-config-missing(OpenHub 관리 tool config 없음 — openhub lifecycle repair)",
+  "tool-config-drift": "tool-config-drift(tool config가 기록과 다름 — openhub lifecycle repair)",
+  "tool-config-relocated": "tool-config-relocated(옮기거나 복사한 프로젝트 — openhub lifecycle repair)",
   "untracked-adoptable": "untracked-adoptable(표준 항목, Version State 없음)",
   "untracked-foreign": "untracked-foreign(OpenHub가 관리하지 않는 설정)",
   "not-inspected": "not-inspected(사용자 범위 미검사)",

@@ -79,6 +79,7 @@ Commands:
   rollback <toolId> [--project <path>] [--client <id>]... [--scope project|user] [--skip-health] [--json]
                                      Version State의 직전 버전으로 되돌린다(별도 승인)
   lifecycle health <toolId> [--project <path>] [--client <id>]... [--scope project|user] [--json]
+  lifecycle repair <toolId> [--project <path>] [--client <id>]... [--scope project|user] [--json]
                                      승인 후 MCP 서버를 격리 실행해 handshake를 확인하고 결과만 기록한다
                                      (--skip-health는 필요한 환경변수가 있는 도구에서만 Health 생략을 요청하며 따로 승인받는다)
   releases <toolId> [--project <path>] [--client <id>]... [--scope project|user] [--prerelease] [--no-token]

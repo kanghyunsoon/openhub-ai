@@ -1,6 +1,6 @@
 # Kubernetes MCP Server: tool restriction config (design, v0.2.0 follow-up)
 
-Part of [v0.2.0](v0.2.0.md). Status: **Decision** for storage location and security policy (2026-10-10); implementation in a separate pull request (`feat/kubernetes-tool-config`). Kubernetes MCP Server stays a Discovery Candidate until that implementation and its E2E pass; PR #7 (read-only Manifest) stays Draft and is not merged.
+Part of [v0.2.0](v0.2.0.md). Status: **Decision** for storage location, security policy and Windows client launch (2026-10-10); implemented on `feat/kubernetes-tool-config` (not merged). Kubernetes MCP Server stays a Discovery Candidate until that pull request and PR #7 (pinned Manifest using it) are approved; PR #7 stays Draft.
 
 Labels: **Fact**, **Decision**, **Proposal**, **Open Question**.
 
@@ -76,7 +76,37 @@ kind = "Secret"
 - Secret reads denied by server config; `configuration_view` absent; create, update, delete, scale and exec tools absent.
 - The plan states: the server uses the kubeconfig's current context with that user's permissions; OpenHub does not read the kubeconfig; Secret reads are denied by server configuration, but pod and node logs can still contain secrets; cluster RBAC is the final boundary, so a read-only RBAC user is recommended.
 
-## Verification plan (implementation pull request)
+### Windows client launch (Decision, 2026-10-10)
+
+- Tools with a tool config do not use the D-016 `cmd /d /c npx` wrapper on Windows. The client starts `node.exe` with npm's `npx-cli.js` directly (the same launch OpenHub's Health and Prepare already use), so home and install paths with spaces, parentheses, `&`, `%`, `!`, `^` or Hangul are passed without re-interpretation. 8.3 short paths are not used. Other npx tools keep the D-016 contract unchanged.
+- Plans and Version State store only `command: "node"`, first argument `{npxCli}`, and `--config {toolConfig}`. The absolute paths are written only into the client config, computed when it is written.
+- The launcher is accepted only if: `node.exe` and `<same dir>/node_modules/npm/bin/npx-cli.js` are regular files, `node_modules/npm/package.json` has `name: "npm"`, and no path component is a symlink or junction. Nothing is executed to check it. If it cannot be verified, nothing is written (`MANUAL_SETUP_REQUIRED`).
+- Paths with quotes, control characters, `..`, UNC prefixes or wildcard characters are refused (`MANUAL_SETUP_REQUIRED`).
+
+## Implementation (Fact, feat/kubernetes-tool-config)
+
+- Policy: `REVIEWED_TOOL_CONFIGS` holds the exact reviewed command (`npx -y kubernetes-mcp-server@0.0.67 --read-only --toolsets core --config {toolConfig}`) and TOML. The parsed TOML must equal the reviewed value (comments and whitespace aside): `read_only = false`, a missing or changed Secret rule, `toolsets` with `config`, unknown keys, substitutions, paths and malformed TOML are all refused. Checked at Registry validation, before writing the file and before Health. Updates and rollbacks to versions not in the reviewed list are blocked (`TOOL_CONFIG_VERSION_UNREVIEWED`).
+- InstallPlan v1 and LifecyclePlan v1 gain a `tool-config` step (logical file ID, scope, content, content digest, expected prior state, create/replace/keep) and the `tool-config` approval requirement. LifecyclePlan gains the `repair` operation. Version State gains optional `toolConfig` (file ID, scope, digest). All additive; schemaVersion stays 1; schema digests recorded in `test/fixtures/m7-final/schema-digests.json`.
+- Order: approval → npx Prepare → tool config write and re-read → client configs → (Version State) → Health with the same file → state commit.
+- Compensation restores only files changed by this run and only if the file still holds the bytes this run wrote; otherwise the result is a failure (`COMPENSATION_INCOMPLETE` / `rollback-failed`), never success. This conflict check also applies to ordinary client config writes now.
+- Version State records the digest of the entry actually written (with absolute paths), so status does not report drift for path-only differences.
+- Status adds `tool-config-missing`, `tool-config-drift` and `tool-config-relocated` (a moved or copied project whose client entry equals another project's record). `openhub lifecycle repair <toolId>` rebuilds them after approval and runs Health; nothing is repaired automatically.
+
+## Verification results (Fact)
+
+- Unit and integration tests (network 0): policy refusals, locations, link checks, atomic writes, stale detection, permission failure, restore conflicts, Windows path handling and launcher checks, install with three clients, PLAN_STALE after approval, replace of an existing file, compensation on a client config failure, drift, missing, health blocking, repair, relocated repair, rollback blocking and unreviewed update blocking.
+- Real E2E (`kubernetes-tool-config.e2e.test.ts`, `OPENHUB_E2E=1`): approved install with real npm Prepare into a home path containing spaces, parentheses, `&` and Hangul (npm itself under `C:\Program Files\nodejs`); the three client configs hold `node.exe` + `npx-cli.js` + `--config <file>`; approved Health `healthy` (13 tools); running each client's exact command against a synthetic Kubernetes API: Secret `resources_get`/`resources_list` refused ("resource not allowed"), no Secret request reaches the API, ConfigMap readable, `configuration_view`, delete, create and exec tools unknown, fake bearer token and Secret value absent; drift detected, Health blocked, approved repair restores the file and Health passes again. Linux: `registry-remote.yml` sandbox job.
+- Real clients (optional `OPENHUB_E2E_REAL_CLIENTS=1`, isolated client config directories): Claude Code 2.1.258 `claude mcp list` started the server from the OpenHub-written entry and reported "Connected". Codex CLI 0.147.0 `codex mcp list` read the same command and arguments (it does not start servers). Cursor was not installed; not verified.
+
+## Merge conditions and follow-ups (2026-10-10)
+
+- **Same-project repair for Codex (fixed)**: when a client entry differs from Version State only in OpenHub-managed paths (`--config` under `~/.openhub/tool-config/…/config.toml`, or `node.exe` + `npx-cli.js`), repair replaces the block that is in the file now, but only if that entry still has the digest checked at approval. Every other field is compared strictly; any other drift stays `CONFIG_DRIFT`. Unrelated TOML and other MCP entries are preserved. Regression tests: path-only change for Codex, Claude Code and Cursor repaired; changed arguments, changed security flags and an unmanaged `--config` path refused; a change after approval is `PLAN_STALE`; an external change during compensation is not overwritten (`rollback-failed` / `CONFIG_RESTORE_FAILED`).
+- **Compatibility**: the v0.1.1 InstallPlan, LifecyclePlan and Version State goldens (`test/fixtures/v0.1.1-compat`) parse under the new schemas and serialize to the same bytes and digests. Existing Registry goldens (launch specs, artifacts, plans, state for the 8 tools) are unchanged.
+- **Client verification levels**: Claude Code — server started from the OpenHub-written entry ("Connected"). Codex — configuration recognized (`codex mcp list`); MCP connection and tool calls not yet verified in Codex. Cursor — not verified. A Kubernetes Manifest must not present unverified clients as verified.
+- **Update/rollback with a version change**: not verified. Only 0.0.67 is reviewed; other versions stay blocked. The allowlist is not widened for testing.
+- **Node.js path change (follow-up design, not implemented)**: Version State stores no absolute paths, and an entry whose `node.exe` was moved keeps the same bytes, so status reports it as consistent and repair reports nothing to repair. Proposal: lifecycle status reads tool-config entries with `command` ending in `node.exe`, checks the launcher with the same rules as install (`verifyClientLauncher`, no execution) and reports `client-launcher-invalid`; repair treats that state as repair-needed and rewrites the entry with the currently verified launcher after approval. No automatic change.
+
+## Verification plan (implementation pull request, original)
 
 - Fake Kubernetes API server with one synthetic Secret and one ConfigMap; synthetic kubeconfig with a fake bearer token. No real cluster or credentials.
 - `tools/list`: all `readOnlyHint=true`, no `configuration_view`, no destructive or exec tool.

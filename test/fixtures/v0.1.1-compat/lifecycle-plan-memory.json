@@ -1,0 +1,130 @@
+{
+  "approvalRequirements": [
+    "base",
+    "health-execution"
+  ],
+  "backend": "npx",
+  "current": {
+    "clientSpec": {
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
+      "command": "npx"
+    },
+    "identity": null,
+    "requested": "@modelcontextprotocol/server-memory"
+  },
+  "displayName": "Memory MCP",
+  "healthPolicy": {
+    "gate": "required",
+    "timeouts": {
+      "handshakeMs": 10000,
+      "startupMs": 20000,
+      "totalMs": 45000
+    }
+  },
+  "operation": "update",
+  "platform": "linux",
+  "requiredEnv": [],
+  "schemaVersion": 1,
+  "sideEffects": [
+    "download",
+    "file-write",
+    "network",
+    "process-launch"
+  ],
+  "source": {
+    "manifestDigest": "sha256:b669e396f7dcbd05e48a75440e334fe73432256cd9d249e2b253cb290ce54a1c",
+    "registryDigest": "sha256:5cd0dc1391c3b15b8c52490b7e8f1cd6c6fb26a71cbfd161cd667fcc383e458c",
+    "stateDigest": "<stateDigest: Version State 파일 byte의 sha256, projectKey에 따라 다름>"
+  },
+  "status": "ready",
+  "steps": [
+    {
+      "client": "claude-code",
+      "expectedEntryDigest": "sha256:6dbcc13b0ece8d3788eb0a72464736a74bf543df7b2ada71fab79baece5164f3",
+      "file": ".mcp.json",
+      "id": "config-claude-code-project",
+      "kind": "config-replace",
+      "path": [
+        "mcpServers",
+        "memory"
+      ],
+      "scope": "project",
+      "value": {
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-memory@1.2.3"
+        ],
+        "command": "npx"
+      }
+    },
+    {
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory@1.2.3"
+      ],
+      "cwd": "isolated",
+      "envNames": [],
+      "executable": "npx",
+      "id": "health",
+      "kind": "health",
+      "timeouts": {
+        "handshakeMs": 10000,
+        "startupMs": 20000,
+        "totalMs": 45000
+      }
+    },
+    {
+      "entries": [
+        "project:<projectKey>:claude-code:memory"
+      ],
+      "id": "state-commit",
+      "kind": "state-commit"
+    }
+  ],
+  "target": {
+    "clientSpec": {
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory@1.2.3"
+      ],
+      "command": "npx"
+    },
+    "identity": {
+      "digest": null,
+      "integrity": null,
+      "kind": "npm-package",
+      "source": "npm-registry",
+      "spec": "@modelcontextprotocol/server-memory@1.2.3",
+      "version": "1.2.3"
+    },
+    "requested": "@modelcontextprotocol/server-memory"
+  },
+  "targets": [
+    {
+      "client": "claude-code",
+      "entryKey": "project:<projectKey>:claude-code:memory",
+      "file": ".mcp.json",
+      "precondition": {
+        "entryDigest": "sha256:6dbcc13b0ece8d3788eb0a72464736a74bf543df7b2ada71fab79baece5164f3",
+        "fileDigest": "sha256:904100005deabc2a6f00d88c8fd76d3150bfdad6bf2ff1322f3841b294496ed8"
+      },
+      "scope": "project",
+      "serverName": "memory",
+      "stateRevision": 1
+    }
+  ],
+  "toolId": "memory-mcp",
+  "warnings": [
+    {
+      "code": "health-execution",
+      "message": "Health Check는 MCP 서버(제3자 코드)를 격리된 임시 디렉터리에서 실행하며 패키지나 이미지를 내려받을 수 있습니다."
+    },
+    {
+      "code": "version-level-lock",
+      "message": "npm·PyPI 패키지는 버전 수준으로 고정합니다. 같은 버전의 tarball 내용까지 고정하지는 않습니다."
+    }
+  ]
+}

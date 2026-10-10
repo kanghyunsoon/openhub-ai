@@ -39,7 +39,7 @@ export function installNextActions(plan: InstallPlanV1): string[] {
 }
 
 /** TASK-034 확인기. Transaction의 env.verify로 넘긴다. */
-export const verifyInstallation: InstallVerifier = async ({ verified, request, steps, env }): Promise<VerifierOutput> => {
+export const verifyInstallation: InstallVerifier = async ({ verified, request, steps, env, expectedEntry }): Promise<VerifierOutput> => {
   const plan = verified.plan;
   const runSteps = plan.steps.filter((s) => s.kind === "run");
   const prepared = runSteps.every((s) => steps.find((o) => o.id === s.id)?.status === "done") ? preparedStateOf(plan.artifact?.preparation) : "failed";
@@ -51,7 +51,7 @@ export const verifyInstallation: InstallVerifier = async ({ verified, request, s
   let configured = configSteps.length > 0;
   for (const step of configSteps) {
     const entry = await readConfiguredEntry(step.client, step.scope, step.path[1]!, roots);
-    if (JSON.stringify(canonicalize(entry)) !== JSON.stringify(canonicalize(step.value))) configured = false;
+    if (JSON.stringify(canonicalize(entry)) !== JSON.stringify(canonicalize(expectedEntry === undefined ? step.value : expectedEntry(step)))) configured = false;
   }
   if (!configured) return { verification: { prepared, configured, detected: "skipped" }, warnings: [], nextActions };
 

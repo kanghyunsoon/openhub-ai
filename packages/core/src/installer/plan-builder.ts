@@ -1,7 +1,7 @@
 import type { RecommendPlatform, RecommendationReport } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
 import { BACKEND_ADAPTERS, type BackendLaunch } from "./backends";
-import { INSTALL_BACKENDS, assembleInstallPlan, registryDigestExcluding, type InstallBackend, type PlanBlocker, type PlanTargetInput, type PlannedInstall, type ProbeSnapshot } from "./plan";
+import { INSTALL_BACKENDS, assembleInstallPlan, registryDigestExcluding, type InstallBackend, type PlanAssemblyInput, type PlanBlocker, type PlanTargetInput, type PlannedInstall, type ProbeSnapshot } from "./plan";
 import { installCandidates } from "./router";
 
 /**
@@ -25,6 +25,8 @@ export interface PlanBuildInput {
   targets: readonly PlanTargetInput[];
   /** Client가 실행될 플랫폼. launch spec이 플랫폼별로 달라진다(D-016). */
   platform: RecommendPlatform;
+  /** tool config Tool이면 scope별 현재 상태(v0.2.0, 승인 전 확인). */
+  toolConfigs?: PlanAssemblyInput["toolConfigs"];
 }
 
 export type PlanBuildResult =
@@ -94,6 +96,7 @@ export function buildInstallPlan(input: PlanBuildInput): PlanBuildResult {
     preparation: chosen?.launchable.preparation ?? [],
     targets: [...input.targets],
     blockers,
+    ...(input.toolConfigs === undefined ? {} : { toolConfigs: input.toolConfigs }),
   });
   return { ok: true, planned };
 }

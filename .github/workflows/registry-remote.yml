@@ -48,7 +48,7 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       - name: Sandbox install + M5 Health (npx·uvx·docker, runner 안에서만)
-        run: pnpm exec vitest run packages/core/test/installer/executor.e2e.test.ts packages/core/test/registry/sandbox.e2e.test.ts packages/core/test/registry/npx-prepare.e2e.test.ts --reporter=default --reporter=json --outputFile.json=sandbox-vitest.json
+        run: pnpm exec vitest run packages/core/test/installer/executor.e2e.test.ts packages/core/test/registry/sandbox.e2e.test.ts packages/core/test/registry/npx-prepare.e2e.test.ts packages/core/test/registry/kubernetes-tool-config.e2e.test.ts --reporter=default --reporter=json --outputFile.json=sandbox-vitest.json
         env:
           OPENHUB_E2E: "1"
       - name: Sandbox report(개수·상태·소요 시간만, REQ-061)

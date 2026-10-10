@@ -1,0 +1,41 @@
+{
+  "entries": {
+    "project:<projectKey>:claude-code:memory": {
+      "appliedPlanDigest": "sha256:f7505e758adf375d45907d13fa02d668978a22cdc30b9b18cdc95875d571f518",
+      "artifact": {
+        "requested": "@modelcontextprotocol/server-memory",
+        "resolved": null
+      },
+      "backend": "npx",
+      "committedAt": "2026-10-07T01:02:03.000Z",
+      "config": {
+        "entryDigest": "sha256:6dbcc13b0ece8d3788eb0a72464736a74bf543df7b2ada71fab79baece5164f3",
+        "tomlBlockDigest": null
+      },
+      "lastHealth": null,
+      "launch": {
+        "clientSpec": {
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-memory"
+          ],
+          "command": "npx"
+        },
+        "platform": "linux"
+      },
+      "previous": null,
+      "revision": 1,
+      "target": {
+        "client": "claude-code",
+        "file": ".mcp.json",
+        "projectKey": "<projectKey>",
+        "projectName": "project",
+        "scope": "project",
+        "serverName": "memory"
+      },
+      "toolId": "memory-mcp"
+    }
+  },
+  "kind": "openhub-lifecycle-state",
+  "schemaVersion": 1
+}

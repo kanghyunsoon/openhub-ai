@@ -105,6 +105,11 @@ export const manifestSchema = z.strictObject({
   verification: z.enum(VERIFICATION_LEVELS).default("draft"),
   /** 추천 메타데이터(D-008). 없어도 v1 Manifest로 유효하다. */
   recommendation: recommendationMetadataSchema.optional(),
+  /**
+   * OpenHub 관리 tool config(v0.2.0, 선택). 허용 목록의 Tool만 쓸 수 있고 내용은 검토된 고정 TOML이다
+   * (tool-config/index.ts, docs/specs/kubernetes-tool-restriction.md). 없어도 v1 Manifest로 유효하다.
+   */
+  toolConfig: z.strictObject({ format: z.literal("toml"), content: z.string().min(1) }).optional(),
 });
 
 export type Manifest = z.output<typeof manifestSchema>;

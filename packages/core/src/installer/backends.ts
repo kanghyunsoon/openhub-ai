@@ -4,6 +4,7 @@ import type { HealthResult, InstallContext, InstallPlan, InstallResult, InstallT
 import { isPinnedArtifact, isValidDockerImage, npxArtifact, tokenizeManifestCommand, uvxArtifact } from "./command";
 import type { InstallBackend, InstallPlanV1, RunStep } from "./plan";
 import { NPX_PREPARE_STEP_ID, NPX_PREPARE_TIMEOUT_MS, npxPrepareArgs } from "../process/npx-prepare";
+import { NPX_CLI_PLACEHOLDER, TOOL_CONFIG_PLACEHOLDER, toolConfigIssues } from "../tool-config/index";
 
 /**
  * npx·uvx·docker Adapter(TASK-031, D-012·D-015). Adapter는 Plan 단계만 만들고 프로세스를 실행하지 않는다.
@@ -25,7 +26,14 @@ export const DOCKER_PULL_TIMEOUT_MS = 600_000;
  */
 export const WINDOWS_NPX_CLIENT_PREFIX = Object.freeze(["/d", "/c", "npx"] as const);
 
-export function clientLaunchSpec(platform: RecommendPlatform, backend: InstallBackend, args: readonly string[]): { command: "npx" | "uvx" | "docker" | "cmd"; args: string[] } {
+/**
+ * v0.2.0 tool config Tool(인자에 {toolConfig}): Windows에서는 cmd 래퍼 대신 Client가 node.exe + npm npx-cli.js를 직접 실행한다
+ * (공백·괄호·&·한글이 있는 home 경로를 재해석 없이 넘기기 위해). Plan·State에는 command "node", 첫 인자 {npxCli}만 남기고
+ * 실제 절대 경로는 Client 설정을 쓰는 순간 검증한 값으로 바꾼다(tool-config/index.ts materializeClientArgs).
+ * 그 밖의 npx Tool의 Windows 계약(D-016 cmd 래퍼)은 그대로다.
+ */
+export function clientLaunchSpec(platform: RecommendPlatform, backend: InstallBackend, args: readonly string[]): { command: "npx" | "uvx" | "docker" | "cmd" | "node"; args: string[] } {
+  if (platform === "windows" && backend === "npx" && args.includes(TOOL_CONFIG_PLACEHOLDER)) return { command: "node", args: [NPX_CLI_PLACEHOLDER, ...args] };
   if (platform === "windows" && backend === "npx") return { command: "cmd", args: [...WINDOWS_NPX_CLIENT_PREFIX, ...args] };
   return { command: backend, args: [...args] };
 }
@@ -75,13 +83,20 @@ function planDocker(manifest: Manifest, step: InstallStep, platform: RecommendPl
 }
 
 function planLaunchOnDemand(manifest: Manifest, step: InstallStep, backend: "npx" | "uvx", platform: RecommendPlatform): BackendPlanResult {
-  const tokenizeOptions = { windowsCmdWrapper: platform === "windows" && backend === "npx" };
-  const command = stringOption(step, "command");
+  const rawCommand = stringOption(step, "command");
+  // tool config placeholder는 검토된 정책을 통과한 허용 목록 Tool에서만, 정확히 한 token으로만 받는다.
+  const usesToolConfig = rawCommand !== undefined && rawCommand.includes(TOOL_CONFIG_PLACEHOLDER);
+  if (usesToolConfig) {
+    const issues = toolConfigIssues(manifest);
+    if (backend !== "npx" || issues.length > 0) return { ok: false, kind: "rejected", reason: issues[0]?.message ?? "tool config는 npx backend에서만 씁니다" };
+  }
+  const tokenizeOptions = { windowsCmdWrapper: platform === "windows" && backend === "npx" && !usesToolConfig };
+  const command = usesToolConfig ? rawCommand.split(/\s+/u).map((t) => (t === TOOL_CONFIG_PLACEHOLDER ? TOOL_CONFIG_SENTINEL : t)).join(" ") : rawCommand;
   let args: string[];
   if (command !== undefined) {
     const tokens = tokenizeManifestCommand(command, backend, tokenizeOptions);
     if (!tokens.ok) return { ok: false, kind: "rejected", reason: tokens.reason };
-    args = tokens.tokens.slice(1);
+    args = tokens.tokens.slice(1).map((t) => (t === TOOL_CONFIG_SENTINEL ? TOOL_CONFIG_PLACEHOLDER : t));
   } else {
     const pkg = stringOption(step, "package");
     if (pkg === undefined) return { ok: false, kind: "missing", reason: "실행 명령이나 패키지가 없습니다" };
@@ -107,6 +122,8 @@ function planLaunchOnDemand(manifest: Manifest, step: InstallStep, backend: "npx
 }
 
 /** 정확한 버전으로 고정된 npx 패키지의 Prepare 단계. 고정되지 않았거나 npx가 아니면 null(launch-on-demand 유지). */
+const TOOL_CONFIG_SENTINEL = "openhub-tool-config-placeholder";
+
 export function npxPrepareStepFor(backend: InstallBackend, spec: string, pinned: boolean): RunStep | null {
   if (backend !== "npx" || !pinned) return null;
   return { id: NPX_PREPARE_STEP_ID, kind: "run", executable: "npx", args: npxPrepareArgs(spec), cwd: "isolated", network: true, timeoutMs: NPX_PREPARE_TIMEOUT_MS };
