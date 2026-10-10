@@ -3,10 +3,12 @@ import type { RecommendPlatform } from "../recommendation/index";
 import type { HealthResult, InstallContext, InstallPlan, InstallResult, InstallTarget, InstallerAdapter, Operation, UpdateResult, ValidationResult } from "./adapter";
 import { isPinnedArtifact, isValidDockerImage, npxArtifact, tokenizeManifestCommand, uvxArtifact } from "./command";
 import type { InstallBackend, InstallPlanV1, RunStep } from "./plan";
+import { NPX_PREPARE_STEP_ID, NPX_PREPARE_TIMEOUT_MS, npxPrepareArgs } from "../process/npx-prepare";
 
 /**
  * npx·uvx·docker Adapter(TASK-031, D-012·D-015). Adapter는 Plan 단계만 만들고 프로세스를 실행하지 않는다.
- * - npx·uvx: launch-on-demand. 준비 단계 0개, Client launch spec만 기록한다(npm cache add·persistent install 없음).
+ * - npx·uvx: launch-on-demand. 준비 단계 0개, Client launch spec만 기록한다(persistent install 없음).
+ *   단, 정확한 버전으로 고정된 npx 패키지는 npx Prepare 단계 1개(npm-cache)를 둔다(v0.2.0, docs/specs/npx-prepare.md).
  * - docker: 준비 단계 docker pull <image> 1개, launch는 docker run -i --rm [-e NAME…] <image>(-e에는 이름만).
  * - 실제 실행은 VerifiedPlan을 받는 공통 Executor(src/process/executor.ts)만 한다.
  * - M1 InstallerAdapter 계약을 따르되 M1 승인·run-command 경로(plan·install)와 update·uninstall·healthCheck는 M4에서 실행하지 않는다.
@@ -91,15 +93,23 @@ function planLaunchOnDemand(manifest: Manifest, step: InstallStep, backend: "npx
   }
   const ref = backend === "npx" ? npxArtifact(args) : uvxArtifact(args);
   if (ref === null) return { ok: false, kind: "missing", reason: "패키지 token을 찾지 못했습니다" };
+  const pinned = isPinnedArtifact(backend, ref);
+  const prepare = npxPrepareStepFor(backend, ref.spec, pinned);
   return {
     ok: true,
     value: {
       backend,
-      artifact: { kind: backend === "npx" ? "npm-package" : "python-package", spec: ref.spec, pinned: isPinnedArtifact(backend, ref), preparation: "launch-on-demand" },
+      artifact: { kind: backend === "npx" ? "npm-package" : "python-package", spec: ref.spec, pinned, preparation: prepare === null ? "launch-on-demand" : "npm-cache" },
       launch: { platform, executable: backend, args, envNames: requiredEnvNames(manifest), clientSpec: clientLaunchSpec(platform, backend, args) },
-      preparation: [],
+      preparation: prepare === null ? [] : [prepare],
     },
   };
+}
+
+/** 정확한 버전으로 고정된 npx 패키지의 Prepare 단계. 고정되지 않았거나 npx가 아니면 null(launch-on-demand 유지). */
+export function npxPrepareStepFor(backend: InstallBackend, spec: string, pinned: boolean): RunStep | null {
+  if (backend !== "npx" || !pinned) return null;
+  return { id: NPX_PREPARE_STEP_ID, kind: "run", executable: "npx", args: npxPrepareArgs(spec), cwd: "isolated", network: true, timeoutMs: NPX_PREPARE_TIMEOUT_MS };
 }
 
 export interface BackendAdapterV1 extends InstallerAdapter {

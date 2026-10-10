@@ -25,6 +25,7 @@ import {
 import { approveAll, createHarness, plannedOf, type Harness } from "../installer/harness";
 import { seedEntries } from "../recommendation/helpers";
 import { newScratch } from "./helpers";
+import { fakeNpmSpawner, isNpxPrepareCall } from "../process/fake-npm";
 
 /** TASK-043 Update transaction. 임시 project·home, 가짜 registry·준비 spawner·Health 실행기, 실패 주입 fs. */
 const seed = await seedEntries();
@@ -45,15 +46,9 @@ function registry() {
     return new Response("missing", { status: 404 });
   });
 }
-function fakeExec(code = 0) {
-  const calls: string[][] = [];
-  const spawner: ExecSpawner = (exe, args) => {
-    calls.push([exe, ...args]);
-    const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
-    queueMicrotask(() => child.emit("close", code, null));
-    return child as never;
-  };
-  return { calls, spawner };
+function fakeExec(code = 0, prepare: "ok" | "fail" | "hang" = "ok") {
+  // npx Prepare(npm config get cache, npx --package=…)는 가짜 npm cache에 흉내 낸다. 그 밖(docker pull)은 code로 닫는다.
+  return fakeNpmSpawner({ cacheRoot: path.join(scratch, "npm-cache-" + Math.random().toString(36).slice(2, 8)), exitCode: code, prepare });
 }
 function fakeHealth(log: string[], status: HealthCheckStatus = "healthy", reason: HealthFailureReason | null = null) {
   const calls: VerifiedLifecyclePlan[] = [];
@@ -103,7 +98,7 @@ async function planOf(request: LifecycleRequest, env: LifecycleEnvironment) {
 async function setup(
   toolId: string,
   targets: InstallRequest["targets"] = [{ client: "claude-code", scope: "project" }],
-  opts: { exitCode?: number; health?: [HealthCheckStatus, HealthFailureReason | null]; skipHealth?: boolean; fs?: (base: ConfigFs) => ConfigFs } = {},
+  opts: { exitCode?: number; prepare?: "ok" | "fail" | "hang"; health?: [HealthCheckStatus, HealthFailureReason | null]; skipHealth?: boolean; fs?: (base: ConfigFs) => ConfigFs } = {},
 ): Promise<Case> {
   const h = await createHarness(scratch, { entries: seed });
   const install = h.request(toolId, targets);
@@ -112,7 +107,7 @@ async function setup(
   expect(installed.status).toBe("succeeded");
   expect(await recordInstallInState(planned0, installed, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: INSTALLED_AT })).toMatchObject({ ok: true });
   const log = h.writes;
-  const exec = fakeExec(opts.exitCode ?? 0);
+  const exec = fakeExec(opts.exitCode ?? 0, opts.prepare ?? "ok");
   const health = fakeHealth(log, ...(opts.health ?? ["healthy", null]));
   const fs = opts.fs === undefined ? h.env.configFs! : opts.fs(h.env.configFs!);
   const env: LifecycleEnvironment = {
@@ -204,6 +199,7 @@ describe("REQ-040 REQ-043 REQ-050 Update transaction", () => {
     const result = await run(c);
     expect(result).toMatchObject({ status: "config-failed", code: "CONFIG_WRITE_FAILED", compensated: true, stateCommitted: false });
     expect(result.steps.map((s) => [s.id, s.status])).toEqual([
+      ["npx-prepare", "done"],
       ["config-claude-code-project", "compensated"],
       ["config-cursor-project", "failed"],
       ["health", "skipped"],
@@ -278,7 +274,15 @@ describe("REQ-040 REQ-043 REQ-050 Update transaction", () => {
       expect((await run(c)).status).toBe("updated");
       const updated = JSON.parse((await c.file(".mcp.json")).toString("utf8"));
       expect(updated.mcpServers[server]).toEqual({ ...original.mcpServers[server], args: after });
-      expect(c.exec.calls).toEqual([]);
+      // v0.2.0 npx Prepare: npx는 정확한 target 버전을 npx cache에 받는 명령 두 개(cache 위치 확인, 내려받기)만 실행한다.
+      // MCP 서버(패키지 bin)는 실행하지 않고(-- node --version), uvx는 여전히 0건이다.
+      if (toolId === "memory-mcp") {
+        expect(c.exec.calls).toEqual([
+          ["npm", "config", "get", "cache"],
+          ["npx", "--yes", "--package=@modelcontextprotocol/server-memory@1.2.3", "--", "node", "--version"],
+        ]);
+      } else expect(c.exec.calls).toEqual([]);
+      expect(c.exec.calls.every(isNpxPrepareCall)).toBe(true);
       const healthArgs = c.health.calls[0]!.plan.steps.find((s) => s.kind === "health");
       expect(JSON.stringify(healthArgs)).not.toMatch(/"install"|"pip"|"add"/u);
     }
@@ -295,6 +299,27 @@ describe("REQ-040 REQ-043 REQ-050 Update transaction", () => {
     expect(result.requiredEnv).toEqual([{ name: "DATABASE_URI", status: "unchecked" }]);
     expect(lifecycleResultSchema.safeParse({ ...result, nextActions: ["see " + c.h.projectRoot] }).success).toBe(false);
     expect(lifecycleResultSchema.safeParse({ ...result, nextActions: ["https://user:pw@example.com"] }).success).toBe(false);
+  });
+
+  it("v0.2.0 npx Prepare: npx update는 설정 교체 전에 target 버전을 준비하고, 준비가 실패하면 설정·Version State를 바꾸지 않고 Health도 실행하지 않는다", async () => {
+    const ok = await setup("memory-mcp");
+    expect(ok.planned.plan.steps.map((s) => s.id)).toEqual(["npx-prepare", "config-claude-code-project", "health", "state-commit"]);
+    const done = await run(ok);
+    expect(done.status).toBe("updated");
+    expect(done.steps[0]).toMatchObject({ id: "npx-prepare", status: "done" });
+
+    // timeout 경로(process tree 종료·불완전 항목 정리)는 prepareNpxPackage 단위 테스트와 E2E가 다룬다.
+    for (const prepare of ["fail"] as const) {
+      const c = await setup("memory-mcp", undefined, { prepare });
+      const config = await c.file(".mcp.json");
+      const state = await c.state();
+      const result = await run(c);
+      expect(result, prepare).toMatchObject({ status: "preparation-failed", stateCommitted: false, retryable: true });
+      expect(result.steps.map((s) => [s.id, s.status])).toEqual([["npx-prepare", "failed"], ["config-claude-code-project", "skipped"], ["health", "skipped"], ["state-commit", "skipped"]]);
+      expect(c.health.calls).toHaveLength(0);
+      expect((await c.file(".mcp.json")).equals(config)).toBe(true);
+      expect((await c.state()).equals(state)).toBe(true);
+    }
   });
 
   it("AC-043-10 Approval은 1회만 쓰이고 승인 없이는 spawn·write 0회이며 up-to-date는 효과가 0이다", async () => {

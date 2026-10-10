@@ -3,9 +3,12 @@ import {
   APPROVAL_REQUIREMENT_MESSAGES as APPROVAL_TEXT,
   INSTALL_CLIENTS,
   analyzeProject,
+  defaultHostEnvironment,
   formatInstallPlanPreview,
   installationStatusLabel,
   loadRegistry,
+  locateWindowsNpxLauncher,
+  npmChildEnv,
   planInstall,
   probeBackends,
   recordInstallInState,
@@ -124,7 +127,7 @@ export function buildInstallPlanView(planned: PlannedInstall): InstallPlanView {
   };
 }
 
-const PREPARED_LABEL: Readonly<Record<string, string>> = { "launch-on-demand": "launch-on-demand(Client 첫 실행 때 받음)", pulled: "pulled", failed: "failed" };
+const PREPARED_LABEL: Readonly<Record<string, string>> = { "launch-on-demand": "launch-on-demand(Client 첫 실행 때 받음)", pulled: "pulled", cached: "cached(npx cache에 미리 받음)", failed: "failed" };
 
 export function buildInstallResultView(result: InstallResultV1): InstallResultView {
   const v = result.verification;
@@ -207,6 +210,13 @@ function environment(deps: InstallDeps, entries: Awaited<ReturnType<typeof loadR
     },
     probe: deps.probe ?? (() => probeBackends()),
     verify: verifyInstallation,
+    // npx Prepare(정확한 버전 npx 패키지)는 Windows에서 cmd 없이 node.exe + npx-cli.js로 실행한다.
+    // npx Prepare의 npm 자식 process에는 허용 목록 환경만 넘긴다(API key·token·클라우드 자격증명 제외).
+    npmChildEnv: () => npmChildEnv(process.env),
+    windowsNpx: async () => {
+      const host = defaultHostEnvironment();
+      return locateWindowsNpxLauncher({ pathEnv: host.pathEnv, fs: host.fs });
+    },
     ...(deps.spawner === undefined ? {} : { spawner: deps.spawner }),
     ...(deps.configFs === undefined ? {} : { configFs: deps.configFs }),
     ...(deps.isolatedDir === undefined ? {} : { isolatedDir: deps.isolatedDir }),

@@ -26,6 +26,7 @@ import {
 import { approveAll, createHarness, plannedOf, type Harness } from "../installer/harness";
 import { seedEntries } from "../recommendation/helpers";
 import { newScratch } from "./helpers";
+import { fakeNpmSpawner } from "../process/fake-npm";
 
 /** TASK-044 Rollback. install → update → rollback을 실제 config·Version State로 실행한다(registry·준비·Health는 가짜). */
 const seed = await seedEntries();
@@ -48,13 +49,8 @@ function envFor(h: Harness, o: EnvOptions = {}) {
     if (url.includes("/manifests/")) return new Response(null, { status: 200, headers: { "docker-content-digest": o.digest ?? D1 } });
     return new Response("missing", { status: 404 });
   });
-  const pulls: string[][] = [];
-  const spawner: ExecSpawner = (exe, args) => {
-    pulls.push([exe, ...args]);
-    const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
-    queueMicrotask(() => child.emit("close", o.exitCode ?? 0, null));
-    return child as never;
-  };
+  // npx Prepare는 가짜 npm cache에 흉내 낸다(v0.2.0). docker pull은 exitCode로 닫는다.
+  const { spawner, calls: pulls } = fakeNpmSpawner({ cacheRoot: path.join(scratch, "npm-cache-" + Math.random().toString(36).slice(2, 8)), exitCode: o.exitCode ?? 0 });
   const [status, reason] = o.health ?? ["healthy", null];
   const env: LifecycleEnvironment = {
     loadEntries: async () => o.entries ?? seed,

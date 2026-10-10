@@ -101,8 +101,10 @@ describe("REQ-040 LifecyclePlan v1·Approval·PLAN_STALE", () => {
       identity: { kind: "npm-package", spec: "@modelcontextprotocol/server-memory@1.2.3", version: "1.2.3", digest: null, integrity: null, source: "npm-registry" },
       clientSpec: { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory@1.2.3"] },
     });
-    expect(p.plan.steps.map((s) => s.kind)).toEqual(["config-replace", "health", "state-commit"]);
-    expect(p.plan.steps[0]).toMatchObject({ path: ["mcpServers", "memory"], value: { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory@1.2.3"] } });
+    // v0.2.0 npx Prepare: 정확한 target 버전을 설정 교체 전에 npx cache에 받는다(run).
+    expect(p.plan.steps.map((s) => s.kind)).toEqual(["run", "config-replace", "health", "state-commit"]);
+    expect(p.plan.steps[0]).toMatchObject({ id: "npx-prepare", executable: "npx", args: ["--yes", "--package=@modelcontextprotocol/server-memory@1.2.3", "--", "node", "--version"] });
+    expect(p.plan.steps[1]).toMatchObject({ path: ["mcpServers", "memory"], value: { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory@1.2.3"] } });
     expect(lifecyclePlanSchema.safeParse({ ...p.plan, extra: true }).success).toBe(false);
     expect(lifecyclePlanSchema.safeParse({ ...p.plan, target: { ...p.plan.target, note: "x" } }).success).toBe(false);
     expect(lifecyclePlanSchema.safeParse({ ...p.plan, targets: [{ ...p.plan.targets[0]!, file: "/home/someone/.mcp.json" }] }).success).toBe(false);

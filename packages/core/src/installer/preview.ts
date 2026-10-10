@@ -41,7 +41,10 @@ export function formatInstallPlanPreview(planned: PlannedInstall): string[] {
       "준비 단계    " +
         (runSteps.length === 0
           ? "없음 — OpenHub는 아무것도 실행하지 않고, Client가 처음 실행할 때 패키지를 받습니다(launch-on-demand)"
-          : runSteps.map((s) => s.executable + " " + s.args.join(" ")).join(", ") + " — OpenHub가 실행합니다(네트워크·다운로드)"),
+          : runSteps.map((s) => s.executable + " " + s.args.join(" ")).join(", ") +
+            (plan.artifact.preparation === "npm-cache"
+              ? " — OpenHub가 설정을 쓰기 전에 이 버전을 npx cache에 받습니다(MCP 서버는 실행하지 않음, 네트워크·다운로드·의존성 설치 스크립트)"
+              : " — OpenHub가 실행합니다(네트워크·다운로드)")),
     );
   }
   if (plan.launch !== null) {

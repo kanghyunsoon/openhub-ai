@@ -171,7 +171,9 @@ describe("REQ-063 Adopt 실행", () => {
     const update = await planLifecycle({ ...base, operation: "update" });
     if (!update.ok) throw new Error(update.code);
     expect(update.planned.plan.status).toBe("ready");
-    expect(update.planned.plan.steps[0]).toMatchObject({ kind: "config-replace", path: ["mcpServers", "my-memory"] });
+    // v0.2.0 npx Prepare가 먼저 오고(정확한 target 버전), 그다음 config 교체다.
+    expect(update.planned.plan.steps[0]).toMatchObject({ kind: "run", executable: "npx" });
+    expect(update.planned.plan.steps[1]).toMatchObject({ kind: "config-replace", path: ["mcpServers", "my-memory"] });
     expect(await planLifecycle({ ...base, operation: "rollback" })).toMatchObject({ ok: false, code: "NO_ROLLBACK_TARGET" });
   });
 

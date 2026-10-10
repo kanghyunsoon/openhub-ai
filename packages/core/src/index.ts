@@ -33,6 +33,7 @@ export * from "./lifecycle/preview";
 export * from "./process/probe";
 export * from "./process/executor";
 export * from "./process/health";
+export * from "./process/npx-prepare";
 export * from "./process/pterm";
 export * from "./release/index";
 export * from "./impact/index";

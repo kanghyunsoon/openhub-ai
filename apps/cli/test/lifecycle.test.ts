@@ -8,6 +8,7 @@ import { containsAbsolutePath, nodeConfigFs, readLifecycleState, type BackendPro
 import { runCli } from "../src/cli";
 import type { LifecycleCommandIO } from "../src/lifecycle";
 import { memoryIO } from "./helpers";
+import { fakeNpmSpawner, isNpxPrepareCall } from "../../../packages/core/test/process/fake-npm";
 
 /** TASK-045 CLI lifecycle. openhub install로 만든 실제 설정·Version State 위에서 update·rollback·status·health를 실행한다. */
 const REPO = path.resolve(import.meta.dirname, "../../..");
@@ -67,6 +68,8 @@ async function session(): Promise<Session> {
       const toolId = args[op + 1] ?? "";
       const spawner: ExecSpawner = (exe, a) => {
         s.spawns.push([exe, ...a]);
+        // npx Prepare(v0.2.0)는 임시 npm cache에 흉내 낸다.
+        if (isNpxPrepareCall(a)) return fakeNpmSpawner({ cacheRoot: path.join(base, "npm-cache") }).spawner(exe, a, { shell: false, cwd: base, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
         const events = new EventEmitter();
         queueMicrotask(() => events.emit("close", 0, null));
         return { stdout: null, stderr: null, on: (e: string, l: (...x: unknown[]) => void) => events.on(e, l), kill: () => true } as ExecChild;

@@ -5,7 +5,7 @@ Backend      npx
 현재 버전    @modelcontextprotocol/server-memory (고정되지 않음)
 목표 버전    @modelcontextprotocol/server-memory@1.2.3
 요청 spec    @modelcontextprotocol/server-memory
-준비 단계    없음 — 패키지 매니저 명령을 실행하지 않고 Client 설정의 패키지 인자만 바꿉니다
+준비 단계    npx --yes --package=@modelcontextprotocol/server-memory@1.2.3 -- node --version — OpenHub가 설정을 바꾸기 전에 이 버전을 npx cache에 받습니다(MCP 서버는 실행하지 않음, 네트워크·다운로드·의존성 설치 스크립트)
 Client 실행 명령
   현재  cmd /d /c npx -y @modelcontextprotocol/server-memory
   변경  cmd /d /c npx -y @modelcontextprotocol/server-memory@1.2.3
@@ -25,6 +25,7 @@ Health Check
 Warnings
   - [client-wrapper-not-verified] Health Check는 artifact를 검증합니다. Client 설정의 cmd /d /c npx wrapper 자체는 검증하지 않습니다.
   - [health-execution] Health Check는 MCP 서버(제3자 코드)를 격리된 임시 디렉터리에서 실행하며 패키지나 이미지를 내려받을 수 있습니다.
+  - [npx-prepare] 설정을 쓰기 전에 이 버전의 npm 패키지를 npx cache에 내려받습니다. MCP 서버는 실행하지 않지만, npm은 설치 중 의존성의 설치 스크립트를 실행할 수 있습니다(Client가 처음 실행할 때와 같습니다). 같은 패키지·버전의 불완전한 cache 항목이 있으면 그 항목만 지우고 다시 받습니다.
   - [version-level-lock] npm·PyPI 패키지는 버전 수준으로 고정합니다. 같은 버전의 tarball 내용까지 고정하지는 않습니다.
 
 승인 항목

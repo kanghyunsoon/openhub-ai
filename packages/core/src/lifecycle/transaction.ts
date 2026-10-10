@@ -2,7 +2,7 @@ import type { FetchLike } from "../discovery/github";
 import { restoreConfig, type ConfigFs, type ConfigWriteReceipt } from "../installer/config-writer";
 import type { ConfigScope, InstallClient } from "../installer/plan";
 import { executeLifecyclePreparation, type ExecSpawner, type IsolatedDir } from "../process/executor";
-import { runHealthCheck, type HealthCheckResult, type HealthRunOptions, type HealthRunReport, type HealthSpawner, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
+import { createTreeKiller, runHealthCheck, type HealthCheckResult, type HealthRunOptions, type HealthRunReport, type HealthSpawner, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
 import type { BackendProbeReport } from "../process/probe";
 import type { RecommendPlatform } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
@@ -26,13 +26,14 @@ import { LIFECYCLE_STATE_LOGICAL_PATH, commitLifecycleState, readLifecycleState 
 
 /**
  * Update transaction(TASK-043, D-019·D-020). 순서:
- *   승인 확인 → 실행 직전 재생성(state·config·resolver 재조회)·digest 비교 → probe → 준비(docker pull image@sha256)
+ *   승인 확인 → 실행 직전 재생성(state·config·resolver 재조회)·digest 비교 → probe → 준비(docker pull image@sha256, 정확한 버전 npx는 npx Prepare)
  *   → config 교체(targeted, 영수증) → Health(기본 REQUIRED) → Version State commit(revision+1, previous snapshot).
  * - 같은 승인 안의 실패(준비·config·Health·state commit)는 config 원본 byte 복구 + state 유지로 자동 보상한다.
  *   받은 image·npx cache는 지우지 않는다. 복구까지 실패하면 rollback-failed와 논리 경로 안내다.
  * - Health 실행 후 실패는 모두 update 실패다. skip 전환·강행 API는 없고 재시도는 새 Plan·승인이다.
  * - Health 성공(또는 승인된 skip) 전에는 Version State를 쓰지 않는다. skip이면 lastHealth는 skipped(checkedAt null)다.
- * - npx·uvx update는 config args의 패키지 token 교체와 state 갱신뿐이다(패키지 매니저 명령 없음).
+ * - uvx update는 config args의 패키지 token 교체와 state 갱신뿐이다. npx는 그 전에 npx Prepare로 정확한 버전을 npx cache에 받는다
+ *   (Health 20 s 한도 안에 시작하도록. 끊긴 설치의 불완전 항목은 Prepare가 정리한다).
  */
 
 export type LifecyclePhase = "approval-check" | "regenerate" | "digest-compare" | "probe" | "prepare" | "config-replace" | "health" | "state-commit";
@@ -65,6 +66,8 @@ export interface LifecycleEnvironment {
   killTree?: TreeKiller;
   /** Windows npx Health 실행 경로(probe 단계에서 찾는다). */
   windowsNpx?: () => Promise<WindowsNpxLauncher | null>;
+  /** npx Prepare의 npm 자식 process 환경(보통 npmChildEnv(process.env), CLI·Desktop이 넘긴다). 없으면 OS 기본 상속. */
+  npmChildEnv?: () => Record<string, string>;
   /** Health 실행기(테스트 주입용). 기본 runHealthCheck. */
   runHealth?: (verified: VerifiedLifecyclePlan, options: HealthRunOptions) => Promise<HealthRunReport>;
   /** operation별 Plan 생성기 교체(테스트 주입용). 기본은 planLifecycle(update·rollback·health). */
@@ -205,7 +208,15 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
   };
 
   trace("prepare");
-  const prep = await executeLifecyclePreparation(verified, { projectRoot: request.projectRoot, ...(env.spawner === undefined ? {} : { spawner: env.spawner }), ...(env.isolatedDir === undefined ? {} : { isolatedDir: env.isolatedDir }) });
+  const hasNpxPrepare = plan.steps.some((s) => s.kind === "run" && s.executable === "npx");
+  const prep = await executeLifecyclePreparation(verified, {
+    projectRoot: request.projectRoot,
+    ...(env.spawner === undefined ? {} : { spawner: env.spawner }),
+    ...(env.isolatedDir === undefined ? {} : { isolatedDir: env.isolatedDir }),
+    ...(hasNpxPrepare
+      ? { npx: { platform: plan.platform, windowsNpx, killTree: env.killTree ?? createTreeKiller({ cwd: env.tempBase }), ...(env.npmChildEnv === undefined ? {} : { childEnv: env.npmChildEnv() }) } }
+      : {}),
+  });
   if (!prep.ok) return finalize({ planned: verified, status: "approval-required", code: prep.code, retryable: true });
   steps.push(...prep.steps);
   if (!prep.prepared) {

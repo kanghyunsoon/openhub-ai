@@ -48,7 +48,9 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     const { plan } = planned(build("github-mcp-server", {}, replace(seed, synthetic)));
     expect(plan.backend).toMatchObject({ adapter: "npx", selection: "preferred" });
     expect(plan.launch).toEqual({ ...launchSpec("npx", ["-y", "synthetic-mcp@1.0.0"]), envNames: ["GITHUB_PERSONAL_ACCESS_TOKEN"] });
-    expect(plan.steps.map((s) => s.kind)).toEqual(["config-patch"]);
+    // synthetic-mcp@1.0.0은 정확한 버전이라 v0.2.0 npx Prepare 단계(run)가 config-patch 앞에 온다.
+    expect(plan.steps.map((s) => s.kind)).toEqual(["run", "config-patch"]);
+    expect(plan.artifact).toMatchObject({ spec: "synthetic-mcp@1.0.0", pinned: true, preparation: "npm-cache" });
     // Router·Builder 소스에 Tool 이름·alias 분기가 없다.
     for (const file of ["plan-builder.ts", "command.ts", "plan.ts"]) {
       const src = await readFile(path.resolve(import.meta.dirname, "../../src/installer", file), "utf8");
