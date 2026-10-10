@@ -1,3 +1,5 @@
+import "./locale-ko";
+import { ko } from "../src/i18n/ko";
 import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -115,7 +117,8 @@ describe("REQ-060·REQ-063 TASK-070 Desktop", () => {
     expect(verified).toBeGreaterThan(html.indexOf('<section class="registry" id="discover">'));
     expect(html.indexOf('id="tools"')).toBeGreaterThan(verified);
     expect(html.indexOf('id="tools"')).toBeLessThan(html.indexOf('id="discover-candidates"'));
-    expect(html).toContain("Star 순 · 추천 순서 아님");
+    expect(html).toContain('data-i18n="discover.verifiedHint"');
+    expect(ko["discover.verifiedHint"]).toBe("Star 순 · 추천 순서 아님");
     expect(await read("renderer/renderer.js")).toContain("li.dataset.toolId = tool.name;");
     expect(await read("src/main.ts")).toContain('executeJavaScript("window.__openhubDiscover()")');
   });
@@ -133,7 +136,7 @@ describe("REQ-060·REQ-063 TASK-070 Desktop", () => {
     const js = await read("renderer/discover.js");
     expect([...new Set([...js.matchAll(/window\.openhubDiscover\.(\w+)/gu)].map((m) => m[1]))].sort()).toEqual(["discoverView", "prepareCandidate"]);
     expect(js).not.toMatch(/window\.openhub\.|planInstall|runInstall|runAdopt|runLifecycle/u);
-    const labels = [...js.matchAll(/button\("[\w-]+", "([^"]+)"/gu)].map((m) => m[1]);
+    const labels = [...js.matchAll(/button\("[\w-]+", t\("([^"]+)"\)/gu)].map((m) => ko[m[1] as keyof typeof ko]);
     expect(labels.sort()).toEqual(["Prepare contribution package", "상세"]);
   });
 
@@ -147,7 +150,8 @@ describe("REQ-060·REQ-063 TASK-070 Desktop", () => {
     expect(scored.length).toBeGreaterThan(0);
     for (const t of scored) expect(t.line).toMatch(/popularity \d+ · release \d+ · activity \d+; stars \d+/u);
     expect(JSON.stringify([r.trendMeaning, r.sections.trending])).not.toMatch(/security|quality|보안|품질/iu);
-    expect(await read("renderer/discover.js")).toContain('"Trend 점수: " + r.trendMeaning');
+    expect(await read("renderer/discover.js")).toContain('t("discover.trendMeaning", { meaning: r.trendMeaning })');
+    expect(ko["discover.trendMeaning"]).toBe("Trend 점수: {meaning}");
   });
 
   it("AC-070-04 Tool 상세는 OpenScore(의미)·Project Fit·카테고리·이유·backend·요구사항·OS를 보여 주고 Install은 actionable 도구에만 있다", async () => {
@@ -238,9 +242,11 @@ describe("REQ-060·REQ-063 TASK-070 Desktop", () => {
     expect(await deny.call(BENCHMARK_RUN_CHANNEL, "project:claude-code:memory")).toMatchObject({ status: "blocked" });
     expect(deny.spawns).toEqual([]);
     const js = await read("renderer/adopt.js");
-    expect(js).toContain("승인이 필요한 실행(MCP 서버 6번 실행, tool 호출 없음)");
-    expect(js).toContain("b.disabled = !t.ready;");
-    expect(js).toContain('"Benchmark 불가: " + reason');
+    expect(js).toContain('button("benchmark-run", t("benchmark.run")');
+    expect(ko["benchmark.run"]).toContain("승인이 필요한 실행(MCP 서버 6번 실행, tool 호출 없음)");
+    expect(js).toContain("b.disabled = !target.ready;");
+    expect(js).toContain('t("benchmark.blocked", { reason })');
+    expect(ko["benchmark.blocked"]).toBe("Benchmark 불가: {reason}");
   }, 30_000);
 
   it("AC-070-07 프로젝트를 고르기 전 7단계 onboarding 카드가 보이고 저장하지 않는다", async () => {
@@ -248,9 +254,12 @@ describe("REQ-060·REQ-063 TASK-070 Desktop", () => {
     expect(html.indexOf('id="onboarding"')).toBeLessThan(html.indexOf("<h2>PROJECT</h2>"));
     expect(html.indexOf('<script src="onboarding.js"></script>')).toBeLessThan(html.indexOf('<script src="project.js"></script>'));
     const js = await read("renderer/onboarding.js");
-    const steps = [...js.matchAll(/^\s{4}\["([^"]+)",/gmu)].map((m) => m[1]);
+    expect(js).toContain('t("onboarding.step" + n + ".title")');
+    const steps = [1, 2, 3, 4, 5, 6, 7].map((n) => ko[("onboarding.step" + n + ".title") as keyof typeof ko]);
     expect(steps).toEqual(["Project 선택", "Analyze", "Existing tools", "Recommend", "Install / Adopt 구분", "Discover", "Installed Lifecycle"]);
-    expect(js).not.toMatch(/localStorage|sessionStorage|indexedDB|document\.cookie|window\.openhub/u);
+    // 저장소 API·IPC 브리지를 쓰지 않는다. 예외는 순수 번역 함수 window.openhubI18n.t뿐이다(v0.2.0 PR B, 저장·IPC 없음).
+    expect(js).not.toMatch(/localStorage|sessionStorage|indexedDB|document\.cookie|window\.openhub(?!I18n\.t\b)/u);
+    expect(js).toContain("const t = window.openhubI18n.t;");
     expect(js).toContain("card.hidden = true");
   });
 

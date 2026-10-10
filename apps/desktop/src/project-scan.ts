@@ -1,5 +1,6 @@
 import path from "node:path";
 import { analyzeProject, type ProjectProfile } from "@openhub/core";
+import { tr } from "./i18n/index";
 
 /**
  * Desktop 프로젝트 분석 연동(TASK-015).
@@ -27,7 +28,7 @@ interface DialogLike {
 
 export function electronDirectoryPicker(dialog: DialogLike): DirectoryPicker {
   return async () => {
-    const r = await dialog.showOpenDialog({ title: "분석할 프로젝트 폴더 선택", properties: ["openDirectory"] });
+    const r = await dialog.showOpenDialog({ title: tr("project.dialogTitle"), properties: ["openDirectory"] });
     return r.canceled ? undefined : r.filePaths[0];
   };
 }

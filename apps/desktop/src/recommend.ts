@@ -1,5 +1,6 @@
 import { loadMetadataSnapshot, loadRegistry, recommend, toRecommendPlatform, type ProjectProfile } from "@openhub/core";
 import { buildForYouView, type ForYouView } from "./for-you-view";
+import { tr } from "./i18n/index";
 
 /**
  * Desktop FOR YOU 추천 연동(TASK-026, D-005: 메인 프로세스에서 Core를 직접 호출).
@@ -58,7 +59,7 @@ export async function recommendCurrentProject(session: RecommendSession, deps: R
     const report = recommend(profile, entries, snapshot, platform === undefined ? {} : { platform });
     return { status: "ok", view: buildForYouView(report) };
   } catch {
-    return { status: "error", code: "recommend-failed", message: "추천을 계산하지 못했습니다" };
+    return { status: "error", code: "recommend-failed", message: tr("recommend.failed") };
   }
 }
 

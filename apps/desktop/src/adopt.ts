@@ -29,6 +29,7 @@ import {
   type TreeKiller,
 } from "@openhub/core";
 import type { NativeDialogLike } from "./install";
+import { tr } from "./i18n/index";
 
 /**
  * Desktop INSTALLED의 Adopt·Benchmark(TASK-070, D-029·D-032).
@@ -92,7 +93,7 @@ function dialogPrompter<R extends string>(dialog: NativeDialogLike, title: strin
     channel: "desktop-native-dialog",
     async confirm(request) {
       const detail = [...lines, "", ...request.requirements.map((r) => "• [" + r.id + "] " + r.message)].join("\n");
-      const { response } = await dialog.showMessageBox({ type: "warning", title, message, detail, buttons: ["취소", "승인"], defaultId: 0, cancelId: 0, noLink: true });
+      const { response } = await dialog.showMessageBox({ type: "warning", title, message, detail, buttons: [tr("dialog.cancel"), tr("dialog.approve")], defaultId: 0, cancelId: 0, noLink: true });
       return response === 1 ? request.requirements.map((r) => r.id) : "rejected";
     },
   };
@@ -116,7 +117,7 @@ export async function adoptCandidatesForRenderer(deps: AdoptDeps): Promise<Adopt
       if ((m.grade !== "exact" && m.grade !== "strong") || m.toolId === null) continue;
       const planned = await planAdopt(await adoptOptions(deps, dir, s.client, s.serverName, m.toolId));
       if (!planned.ok || planned.planned.plan.status !== "ready") continue;
-      items.push({ id: "project:" + s.client + ":" + s.serverName, toolId: m.toolId, grade: m.grade, title: s.serverName + " → " + m.toolId + (m.grade === "strong" ? " (strong: 이름은 다르고 package·image가 일치)" : " (exact)"), lines: formatAdoptPlanPreview(planned.planned) });
+      items.push({ id: "project:" + s.client + ":" + s.serverName, toolId: m.toolId, grade: m.grade, title: tr(m.grade === "strong" ? "adopt.titleStrong" : "adopt.titleExact", { server: s.serverName, toolId: m.toolId }), lines: formatAdoptPlanPreview(planned.planned) });
     }
     const benchmark: BenchmarkTargetView[] = [];
     const state = await readLifecycleState({ homeDir: deps.homeDir, ...(deps.configFs === undefined ? {} : { fs: deps.configFs }) });
@@ -134,7 +135,7 @@ export async function adoptCandidatesForRenderer(deps: AdoptDeps): Promise<Adopt
     }
     return { status: "ok", items, benchmark };
   } catch {
-    return { status: "error", code: "adopt-candidates-failed", message: "Adopt 후보를 확인하지 못했습니다" };
+    return { status: "error", code: "adopt-candidates-failed", message: tr("adopt.candidatesFailed") };
   }
 }
 
@@ -142,17 +143,17 @@ export async function adoptRunForRenderer(deps: AdoptDeps, id: unknown): Promise
   const dir = deps.projectDir();
   if (dir === undefined) return { status: "no-project" };
   const parsed = parseId(id);
-  if (parsed === null) return { status: "error", code: "invalid-id", message: "Adopt 대상을 고르세요" };
+  if (parsed === null) return { status: "error", code: "invalid-id", message: tr("adopt.chooseTarget") };
   const { entries } = await loadRegistry(deps.registryDir);
   const server = (await readConfiguredServers({ projectRoot: dir, homeDir: deps.homeDir, includeUser: false, ...(deps.configFs === undefined ? {} : { fs: deps.configFs }) })).find((s) => s.client === parsed.client && s.serverName === parsed.serverName);
   const match = server === undefined ? undefined : gradeServer(server, buildFingerprintIndex(entries));
-  if (match === undefined || match.toolId === null) return { status: "error", code: "ADOPT_TARGET_NOT_FOUND", message: "식별된 미관리 항목이 아닙니다" };
+  if (match === undefined || match.toolId === null) return { status: "error", code: "ADOPT_TARGET_NOT_FOUND", message: tr("adopt.notFound") };
   const options = await adoptOptions(deps, dir, parsed.client, parsed.serverName, match.toolId);
   const first = await planAdopt(options);
   if (!first.ok) return { status: "error", code: first.code, message: first.message };
   const preview = formatAdoptPlanPreview(first.planned);
   if (first.planned.plan.status !== "ready") return { status: "blocked", lines: preview };
-  const outcome = await requestAdoptApproval(first.planned, dialogPrompter(deps.dialog, "OpenHub Adopt 승인", match.toolId + "을(를) 관리 대상으로 등록합니까? 설정 파일은 바뀌지 않습니다.", preview) as AdoptApprovalPrompter);
+  const outcome = await requestAdoptApproval(first.planned, dialogPrompter(deps.dialog, tr("adopt.dialog.title"), tr("adopt.dialog.message", { toolId: match.toolId }), preview) as AdoptApprovalPrompter);
   if (outcome.status !== "approved") return { status: "rejected" };
   const result = await executeAdopt(outcome.approval, { toolId: options.toolId, homeDir: deps.homeDir, now: deps.now ?? (() => new Date()), regenerate: () => planAdopt(options), ...(deps.configFs === undefined ? {} : { fs: deps.configFs }) });
   return { status: "done", lines: formatAdoptResult(result), adopted: result.status === "adopted" };
@@ -162,18 +163,18 @@ export async function benchmarkRunForRenderer(deps: AdoptDeps, id: unknown): Pro
   const dir = deps.projectDir();
   if (dir === undefined) return { status: "no-project" };
   const parsed = parseId(id);
-  if (parsed === null) return { status: "error", code: "invalid-id", message: "INSTALLED 항목을 고르세요" };
+  if (parsed === null) return { status: "error", code: "invalid-id", message: tr("benchmark.chooseEntry") };
   const { entries } = await loadRegistry(deps.registryDir);
   const state = await readLifecycleState({ homeDir: deps.homeDir, ...(deps.configFs === undefined ? {} : { fs: deps.configFs }) });
   const key = await projectKeyFor(dir).catch(() => null);
   const entry = state.ok ? Object.values(state.state.entries).find((e) => e.target.scope === "project" && e.target.projectKey === key && e.target.client === parsed.client && e.target.serverName === parsed.serverName) : undefined;
-  if (entry === undefined) return { status: "blocked", lines: ["Version State로 관리되는 항목이 아닙니다(BENCHMARK_NOT_MANAGED)"] };
+  if (entry === undefined) return { status: "blocked", lines: [tr("benchmark.notManaged")] };
   const options: BenchmarkPlanOptions = { toolId: entry.toolId, projectRoot: dir, homeDir: deps.homeDir, entries, platform: toRecommendPlatform(deps.platform) ?? "linux", includeUser: false, client: parsed.client, scope: "project", ...(deps.configFs === undefined ? {} : { fs: deps.configFs }) };
   const first = await planBenchmark(options);
   if (!first.ok) return { status: "error", code: first.code, message: first.message };
   const preview = formatBenchmarkPlanPreview(first.planned);
   if (first.planned.plan.status !== "ready") return { status: "blocked", lines: preview };
-  const outcome = await requestBenchmarkApproval(first.planned, dialogPrompter(deps.dialog, "OpenHub Benchmark 승인", entry.toolId + " MCP 서버를 6번 실행해 응답 시간을 잽니까? MCP tool은 호출하지 않습니다.", preview) as BenchmarkApprovalPrompter);
+  const outcome = await requestBenchmarkApproval(first.planned, dialogPrompter(deps.dialog, tr("benchmark.dialog.title"), tr("benchmark.dialog.message", { toolId: entry.toolId }), preview) as BenchmarkApprovalPrompter);
   if (outcome.status !== "approved") return { status: "rejected" };
   const host = defaultHostEnvironment();
   const windowsNpx = first.planned.plan.platform === "windows" && first.planned.plan.launch?.executable === "npx" ? await locateWindowsNpxLauncher({ pathEnv: host.pathEnv, fs: host.fs }) : null;

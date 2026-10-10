@@ -2,6 +2,7 @@
 // 데이터는 preload의 window.openhub.recommendProject()로만 받고, 이 함수는 인자를 받지 않는다.
 // 설치 버튼은 없다(M4). Project Fit과 OpenScore는 따로 표시한다. 모든 문자열은 textContent로만 넣는다.
 (() => {
+  const t = window.openhubI18n.t;
   function el(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -21,12 +22,12 @@
     const scores = el("div", "rec-scores");
     scores.append(el("span", "fit", `Project Fit ${view.projectFit}`));
     const open = el("span", "open", `OpenScore ${view.openScore}`);
-    open.title = "저장소 유지관리·활동성·커뮤니티 신호 · 보안·코드 품질 평가 아님";
-    scores.append(open, el("span", "open-hint", "저장소 신호 · 보안·품질 평가 아님"));
+    open.title = t("forYou.openTitle");
+    scores.append(open, el("span", "open-hint", t("forYou.openHint")));
     li.append(scores, el("p", "rec-capability", view.capability));
     const reasons = el("ul", "rec-reasons");
     for (const r of view.reasons) reasons.append(el("li", "", r));
-    if (view.moreReasons > 0) reasons.append(el("li", "more", `이유 ${view.moreReasons}개 더`));
+    if (view.moreReasons > 0) reasons.append(el("li", "more", t("forYou.moreReasons", { count: view.moreReasons })));
     li.append(reasons);
     return li;
   }
@@ -35,7 +36,7 @@
     const list = document.getElementById("for-you-list");
     list.replaceChildren(...view.items.map(item));
     const gaps = document.getElementById("for-you-gaps");
-    gaps.replaceChildren(...view.noCandidate.map((g) => el("p", "no-candidate", `${g.label}: ${g.message}`)));
+    gaps.replaceChildren(...view.noCandidate.map((g) => el("p", "no-candidate", t("forYou.noCandidateLine", { label: g.label, message: g.message }))));
     const extra = document.getElementById("for-you-open-unavailable");
     extra.textContent = view.openScoreUnavailable ?? "";
     extra.hidden = view.openScoreUnavailable === null;
@@ -46,19 +47,19 @@
   async function load() {
     const mine = ++sequence;
     const status = document.getElementById("for-you-status");
-    status.textContent = "추천 계산 중…";
+    status.textContent = t("forYou.loading");
     const result = await window.openhub.recommendProject();
     if (mine !== sequence) return document.getElementById("for-you-list").childElementCount;
     if (result.status === "no-project") {
-      status.textContent = "프로젝트를 선택하면 맞춤 추천을 보여줍니다.";
+      status.textContent = t("forYou.prompt");
       return 0;
     }
     if (result.status === "error") {
-      status.textContent = `추천할 수 없습니다: ${result.message}`;
+      status.textContent = t("forYou.error", { message: result.message });
       return 0;
     }
     const count = render(result.view);
-    status.textContent = count === 0 ? "추천할 도구가 없습니다." : `${result.view.scope} · 추천 ${count}개`;
+    status.textContent = count === 0 ? t("forYou.none") : t("forYou.count", { scope: result.view.scope, count });
     return count;
   }
 

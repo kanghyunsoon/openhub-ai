@@ -1,4 +1,27 @@
 import { contextBridge, ipcRenderer } from "electron";
+import { formatDateTime, formatNumber, isLocale, translate, type Params } from "./i18n/index";
+
+/**
+ * 다국어 브리지(v0.2.0 P0-3 PR B). 카탈로그는 이 번들에 들어 있고 현재 언어만 main에서 동기로 받는다.
+ * t()는 텍스트만 돌려준다(renderer는 textContent로만 넣는다). params는 문자열·숫자만 받는다. setLanguage는 en·ko만 저장한다.
+ */
+const locale = (() => {
+  const value: unknown = ipcRenderer.sendSync("i18n:locale");
+  return isLocale(value) ? value : "en";
+})();
+const textParams = (value: unknown): Params | undefined => {
+  if (value === null || typeof value !== "object") return undefined;
+  const out: Record<string, string | number> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) if (typeof v === "string" || typeof v === "number") out[k] = v;
+  return out;
+};
+contextBridge.exposeInMainWorld("openhubI18n", {
+  locale,
+  t: (key: unknown, params?: unknown) => translate(locale, String(key), textParams(params)),
+  formatDateTime: (iso: unknown) => formatDateTime(String(iso), locale),
+  formatNumber: (n: unknown) => formatNumber(Number(n), locale),
+  setLanguage: (value: unknown) => ipcRenderer.invoke("i18n:set", String(value)),
+});
 
 /** 프로젝트 분석 브리지. 인자를 받지 않는다. 분석 경로는 메인 프로세스의 폴더 선택 결과만 쓴다(TASK-015). */
 const projectBridge = {

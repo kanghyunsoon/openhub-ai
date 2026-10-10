@@ -1,8 +1,13 @@
+import "./locale-ko";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { analyzeProject, loadMetadataSnapshot, loadRegistry, recommend, type MetadataSnapshot, type RecommendationReport } from "@openhub/core";
-import { OPEN_SCORE_NOTICE, buildForYouView } from "../src/for-you-view";
+import { buildForYouView, openScoreNotice } from "../src/for-you-view";
+import { ko } from "../src/i18n/ko";
+
+/** v0.2.0 PR B: OpenScore 의미 문구는 카탈로그 key forYou.openNotice다(한국어 값은 이전 문구와 같다). */
+const OPEN_SCORE_NOTICE = "OpenScore는 저장소 유지관리·활동성·커뮤니티 신호이며 보안·코드 품질 평가가 아닙니다";
 import { PROJECT_SCAN_CHANNEL, fixedDirectory, registerProjectScan } from "../src/project-scan";
 import { PROJECT_RECOMMEND_CHANNEL, RecommendSession, recommendCurrentProject, registerProjectRecommend, type RecommendResponse } from "../src/recommend";
 
@@ -92,7 +97,8 @@ describe("REQ-022 Desktop FOR YOU", () => {
     expect([...new Set([...js.matchAll(/window\.openhub\.(\w+)/gu)].map((m) => m[1]))]).toEqual(["recommendProject"]);
     const install = await read("renderer/install.js");
     expect([...new Set([...install.matchAll(/window\.openhub\.(\w+)/gu)].map((m) => m[1]))].sort()).toEqual(["planInstall", "runInstall"]);
-    expect(install).toContain('"설치 계획 보기"');
+    expect(install).toContain('t("install.open")');
+    expect(ko["install.open"]).toBe("설치 계획 보기");
   });
 
   it("AC-026-05 후보가 없는 Gap은 '등록된 도구 없음'으로 표시된다", async () => {
@@ -126,11 +132,15 @@ describe("REQ-022 Desktop FOR YOU", () => {
 
   it("AC-026-08 OpenScore 라벨 옆에 의미 안내가 있고 cache가 없으면 한 줄 안내를 보여준다", async () => {
     const html = await read("renderer/index.html");
-    expect(html).toContain(OPEN_SCORE_NOTICE);
+    // 정적 문구는 data-i18n key로 들어가고 한국어 카탈로그 값이 이전 문구와 같다.
+    expect(html).toContain('data-i18n="forYou.openNotice"');
+    expect(ko["forYou.openNotice"]).toBe(OPEN_SCORE_NOTICE);
     const js = await read("renderer/for-you.js");
-    expect(js).toContain("저장소 신호 · 보안·품질 평가 아님");
+    expect(js).toContain('el("span", "open-hint", t("forYou.openHint"))');
+    expect(ko["forYou.openHint"]).toBe("저장소 신호 · 보안·품질 평가 아님");
     const noCache = buildForYouView(await reportFor("python-fastapi", undefined));
     expect(noCache.notice).toBe(OPEN_SCORE_NOTICE);
+    expect(openScoreNotice()).toBe(OPEN_SCORE_NOTICE);
     expect(noCache.openScoreUnavailable).toContain("metadata cache가 없어");
     expect(noCache.items.every((i) => i.openScore === "—")).toBe(true);
   });

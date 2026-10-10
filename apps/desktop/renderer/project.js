@@ -1,6 +1,7 @@
 // PROJECT 카드: Core analyzeProject 결과(ProjectProfile)를 그대로 보여준다. 탐지 로직·Mock 데이터는 없다.
 // 데이터는 preload의 window.openhub.scanProject()로만 받고, 이 함수는 경로 인자를 받지 않는다.
 (() => {
+  const t = window.openhubI18n.t;
   const SECTIONS = [
     ["languages", "Languages"],
     ["frameworks", "Frameworks"],
@@ -22,7 +23,8 @@
     const label = item.kind ? `${item.name} · ${item.kind}` : item.name;
     const node = el("span", item.confidence < 1 ? "tech weak" : "tech", label);
     const first = item.evidence[0];
-    node.title = `confidence ${item.confidence} · ${first.file} (${first.type}: ${first.value})${item.evidence.length > 1 ? ` 외 ${item.evidence.length - 1}건` : ""}`;
+    const more = item.evidence.length > 1 ? t("project.evidenceMore", { count: item.evidence.length - 1 }) : "";
+    node.title = t("project.evidenceTitle", { confidence: item.confidence, file: first.file, type: first.type, value: first.value, more });
     return node;
   }
 
@@ -41,26 +43,26 @@
       blocks.push(block);
       count += items.length;
     }
-    if (count === 0) blocks.push(el("p", "todo", "탐지된 항목이 없습니다."));
-    if (profile.warnings.length > 0) blocks.push(el("p", "project-warn", `경고 ${profile.warnings.length}건 (일부 설정을 해석하지 못함)`));
+    if (count === 0) blocks.push(el("p", "todo", t("project.none")));
+    if (profile.warnings.length > 0) blocks.push(el("p", "project-warn", t("project.warnings", { count: profile.warnings.length })));
     body.replaceChildren(...blocks);
     return count;
   }
 
   async function scan() {
     const status = document.getElementById("project-status");
-    status.textContent = "분석 중…";
+    status.textContent = t("project.analyzing");
     const result = await window.openhub.scanProject();
     if (result.status === "canceled") {
-      status.textContent = "선택을 취소했습니다.";
+      status.textContent = t("project.canceled");
       return 0;
     }
     if (result.status === "error") {
-      status.textContent = `분석할 수 없습니다: ${result.message}`;
+      status.textContent = t("project.error", { message: result.message });
       return 0;
     }
     const count = render(result.profile);
-    status.textContent = `탐지 ${count}개 · confidence 1.0 미만은 흐리게 표시`;
+    status.textContent = t("project.done", { count });
     return count;
   }
 

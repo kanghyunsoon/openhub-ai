@@ -1,3 +1,5 @@
+import "./locale-ko";
+import { ko } from "../src/i18n/ko";
 import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -147,7 +149,8 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 Desktop Lifecycle", () => {
     expect(w.fetches).toEqual(["https://pypi.org/pypi/postgres-mcp/json"]);
     expect(w.spawns).toEqual([]);
     const js = await read("renderer/lifecycle.js");
-    expect(js).toContain('button("lifecycle-check", "업데이트 확인", () => void check(item.id, li))');
+    expect(js).toContain('button("lifecycle-check", t("lifecycle.check"), () => void check(item.id, li))');
+    expect(ko["lifecycle.check"]).toBe("업데이트 확인");
     expect([...js.matchAll(/window\.openhub\.checkLifecycle\(/gu)]).toHaveLength(1);
   });
 
@@ -201,7 +204,8 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 Desktop Lifecycle", () => {
     expect(done.result.health).toEqual(["Health: Healthy (2026-10-07T10:00:00.000Z)", "Note: Required environment is unchecked"]);
     expect(w.healthRuns).toEqual(["update"]);
     const js = await read("renderer/lifecycle.js");
-    expect(js).toContain("진행: 승인 확인 → 계획 재확인 → 준비 → 설정 교체 → Health → Version State 기록");
+    expect(js).toContain('status.textContent = t("lifecycle.progress");');
+    expect(ko["lifecycle.progress"]).toBe("진행: 승인 확인 → 계획 재확인 → 준비 → 설정 교체 → Health → Version State 기록");
     const doc = JSON.parse(await readFile(stateFile(w), "utf8"));
     for (const e of Object.values(doc.entries) as Record<string, unknown>[]) e["lastHealth"] = { status: "skipped", environmentUnverified: true, checkedAt: null };
     await writeFile(stateFile(w), JSON.stringify(doc, null, 2) + "\n");
@@ -224,7 +228,8 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 Desktop Lifecycle", () => {
     w.dialogs.length = 0;
     expect(await w.run(ID)).toMatchObject({ status: "done", result: { status: "rolled-back" } });
     expect(w.dialogs.map((d) => d.title)).toEqual(["OpenHub 롤백 승인"]);
-    expect(await read("renderer/lifecycle.js")).toContain('if (item.canRollback) actions.append(button("lifecycle-rollback", "이전 버전으로 롤백"');
+    expect(await read("renderer/lifecycle.js")).toContain('if (item.canRollback) actions.append(button("lifecycle-rollback", t("lifecycle.rollback")');
+    expect(ko["lifecycle.rollback"]).toBe("이전 버전으로 롤백");
   });
 
   it("AC-046-07 config-drift·untracked-foreign·state 손상은 경고만 표시하고 update·rollback 실행 버튼이 0개다", async () => {

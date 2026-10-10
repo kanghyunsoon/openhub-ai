@@ -2,9 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   CANDIDATES_DIR,
-  TREND_SCORE_MEANING,
   buildDiscoverView,
-  formatTrendItem,
   installCandidates,
   loadCatalog,
   loadMetadataSnapshot,
@@ -21,6 +19,8 @@ import {
   discoveryCandidateSchema,
 } from "@openhub/core";
 import type { RecommendSession } from "./recommend";
+import { capabilityText, reasonText, trendLine, trendMeaningText } from "./i18n/core-text";
+import { tr } from "./i18n/index";
 
 /**
  * Desktop DISCOVER·Tool 상세·Candidate 기여 패키지(TASK-070, D-035·D-031).
@@ -118,12 +118,12 @@ export async function discoverViewForRenderer(deps: DiscoverDeps): Promise<Disco
     return {
       status: "ok",
       asOf: v.asOf,
-      trendMeaning: TREND_SCORE_MEANING,
+      trendMeaning: trendMeaningText(),
       metadataCollectedAt: v.metadataCollectedAt,
       sections: {
-        newForProject: v.sections.newForProject.map((t) => ({ kind: "registry-tool", toolId: t.toolId, title: titleOf(t.toolId), line: "추천 " + String(t.rank) + "위 · " + t.primaryCapability + " · Registry 등록 " + t.addedAt })),
-        trending: v.sections.trending.map((t, i) => ({ kind: "registry-tool", toolId: t.toolId, title: titleOf(t.toolId), line: clean(formatTrendItem(t, i + 1)) })),
-        verified: v.sections.verified.map((t) => ({ kind: "registry-tool", toolId: t.toolId, title: t.displayName, line: t.verification + " · " + (t.addedAt ?? "등록일 미상") + " · " + clean(t.summary ?? "") })),
+        newForProject: v.sections.newForProject.map((t) => ({ kind: "registry-tool", toolId: t.toolId, title: titleOf(t.toolId), line: tr("discover.rankLine", { rank: t.rank, capability: capabilityText(t.primaryCapability, t.primaryCapability), addedAt: t.addedAt }) })),
+        trending: v.sections.trending.map((t, i) => ({ kind: "registry-tool", toolId: t.toolId, title: titleOf(t.toolId), line: clean(trendLine(t, i + 1)) })),
+        verified: v.sections.verified.map((t) => ({ kind: "registry-tool", toolId: t.toolId, title: t.displayName, line: t.verification + " · " + (t.addedAt ?? tr("discover.addedUnknown")) + " · " + clean(t.summary ?? "") })),
         candidates: v.sections.candidates.map((c) => ({
           kind: "candidate",
           id: c.id,
@@ -136,7 +136,7 @@ export async function discoverViewForRenderer(deps: DiscoverDeps): Promise<Disco
       },
     };
   } catch {
-    return { status: "error", code: "discover-failed", message: "DISCOVER 화면을 만들지 못했습니다" };
+    return { status: "error", code: "discover-failed", message: tr("discover.failed") };
   }
 }
 
@@ -148,7 +148,8 @@ export type ToolDetailResponse =
   | { status: "not-found" }
   | { status: "error"; code: string; message: string };
 
-export const OPEN_SCORE_MEANING = "OpenScore는 저장소 유지관리·활동성·커뮤니티 신호이며 보안·코드 품질 평가가 아닙니다";
+/** OpenScore 의미 문구(현재 Desktop 언어). FOR YOU 고지와 같은 문장이다. */
+export const openScoreMeaning = (): string => tr("forYou.openNotice");
 
 export async function toolDetailForRenderer(deps: DiscoverDeps, toolId: unknown): Promise<ToolDetailResponse> {
   try {
@@ -167,28 +168,28 @@ export async function toolDetailForRenderer(deps: DiscoverDeps, toolId: unknown)
         summary: m.summary ?? null,
         categories: [...m.category],
         openScore: rec === undefined ? "—" : fmt(rec.openScore.score),
-        openScoreMeaning: OPEN_SCORE_MEANING,
-        projectFit: rec === undefined ? (report === undefined ? "프로젝트를 고르면 계산합니다" : "이 프로젝트의 추천 대상이 아닙니다") : fmt(rec.projectFit.score),
-        reasons: rec === undefined ? [] : rec.reasons.map((r) => clean(r.message, 600)),
+        openScoreMeaning: openScoreMeaning(),
+        projectFit: rec === undefined ? tr(report === undefined ? "detail.fitNoProject" : "detail.fitNotRecommended") : fmt(rec.projectFit.score),
+        reasons: rec === undefined ? [] : rec.reasons.map((r) => clean(reasonText(r), 600)),
         backends: installCandidates(m).map((c) => c.step.adapter),
-        requirements: [req.node === undefined ? null : "Node " + req.node, req.python === undefined ? null : "Python " + req.python, req.docker === true ? "Docker" : null, ...m.env.filter((e) => e.required).map((e) => "환경변수 " + e.name)].filter((x): x is string => x !== null),
+        requirements: [req.node === undefined ? null : "Node " + req.node, req.python === undefined ? null : "Python " + req.python, req.docker === true ? "Docker" : null, ...m.env.filter((e) => e.required).map((e) => tr("detail.envRequirement", { name: e.name }))].filter((x): x is string => x !== null),
         platforms: (["windows", "macos", "linux"] as const).filter((p) => m.platform[p]),
         canInstall: rec !== undefined,
-        installNote: rec !== undefined ? "FOR YOU 설치 흐름(계획 → 네이티브 승인)으로 설치합니다" : "설치 버튼은 이 프로젝트의 FOR YOU 추천에 있는 Registry 도구에만 있습니다",
+        installNote: tr(rec !== undefined ? "detail.installNote.yes" : "detail.installNote.no"),
       },
     };
   } catch {
-    return { status: "error", code: "detail-failed", message: "도구 정보를 만들지 못했습니다" };
+    return { status: "error", code: "detail-failed", message: tr("detail.failed") };
   }
 }
 
 export type CandidatePrepareResponse = { status: "ok"; folder: string; files: string[]; note: string } | { status: "cancelled" } | { status: "error"; code: string; message: string };
 
 export async function candidatePrepareForRenderer(deps: DiscoverDeps, candidateId: unknown): Promise<CandidatePrepareResponse> {
-  if (typeof candidateId !== "string") return { status: "error", code: "CONTRIBUTION_INVALID_ID", message: "Candidate를 고르세요" };
+  if (typeof candidateId !== "string") return { status: "error", code: "CONTRIBUTION_INVALID_ID", message: tr("candidate.chooseOne") };
   const pool = await (deps.candidates ?? (() => readCandidates(deps.candidatesDir)))();
   const found = pool.find((c) => c.id === candidateId) ?? (deps.candidates === undefined ? ((r) => (r.ok ? r.candidate : undefined))(await readCandidateFile(deps.candidatesDir, candidateId)) : undefined);
-  if (found === undefined) return { status: "error", code: "CANDIDATE_NOT_FOUND", message: CANDIDATES_DIR + "에 그 Candidate가 없습니다" };
+  if (found === undefined) return { status: "error", code: "CANDIDATE_NOT_FOUND", message: tr("candidate.notFound", { dir: CANDIDATES_DIR }) };
   const folder = await deps.chooseFolder();
   if (folder === null) return { status: "cancelled" };
   const catalogText = await readFile(path.join(deps.registryDir, "catalog.yaml"), "utf8").catch(() => null);
@@ -196,7 +197,7 @@ export async function candidatePrepareForRenderer(deps: DiscoverDeps, candidateI
   if (!prepared.ok) return { status: "error", code: prepared.code, message: prepared.message };
   const written = await writeContributionPackage(folder, prepared);
   if (!written.ok) return { status: "error", code: written.code, message: written.message };
-  return { status: "ok", folder: written.dir, files: written.files, note: "OpenHub는 GitHub에 쓰지 않았습니다. 검토한 뒤 COMMANDS.md의 명령을 직접 실행하세요." };
+  return { status: "ok", folder: written.dir, files: written.files, note: tr("candidate.note") };
 }
 
 export function registerDiscover(ipc: IpcMainLike, deps: DiscoverDeps): void {

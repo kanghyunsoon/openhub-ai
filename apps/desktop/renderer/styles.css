@@ -82,6 +82,9 @@ button:hover { filter: brightness(1.1); }
 .lifecycle .entry-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .lifecycle .entry-check { margin: 4px 0 0; }
 .install-change { font-size: 11px; color: var(--muted); margin: 2px 0; }
+.header-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.language { font-size: 11px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.language select { font-size: 11px; }
 .lifecycle-outcome { font-size: 12px; font-weight: 600; margin: 4px 0; }
 .lifecycle-outcome.outcome-failed, .lifecycle-outcome.outcome-partial { color: var(--warn); }
 .lifecycle-outcome.outcome-not-run { color: var(--muted); }

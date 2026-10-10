@@ -1,3 +1,5 @@
+import "./locale-ko";
+import { ko } from "../src/i18n/ko";
 import { cp, mkdir, readFile, realpath, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -351,7 +353,8 @@ describe("v0.2.0 P0-3 Desktop Repair(lifecycle:plan-repair → 네이티브 승�
   it("renderer는 canRepair일 때만 [복구 계획 확인]을 만들고, preload는 entry id 하나만 보낸다. 결과 요약을 textContent로 보여 준다", async () => {
     const read = (rel: string) => readFile(path.resolve(import.meta.dirname, "..", rel), "utf8");
     const js = await read("renderer/lifecycle.js");
-    expect(js).toContain('if (item.canRepair) actions.append(button("lifecycle-repair", "복구 계획 확인", () => void open("repair", item.id)));');
+    expect(js).toContain('if (item.canRepair) actions.append(button("lifecycle-repair", t("lifecycle.repair"), () => void open("repair", item.id)));');
+    expect(ko["lifecycle.repair"]).toBe("복구 계획 확인");
     expect(js).toContain("repair: (id) => window.openhub.planLifecycleRepair(id),");
     expect(js).toContain('if (result.summary) nodes.push(el("p", "lifecycle-outcome outcome-" + result.outcome, result.summary));');
     expect(js).not.toMatch(/\.(inner|outer)HTML\s*=|insertAdjacentHTML/u);

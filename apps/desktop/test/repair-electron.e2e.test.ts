@@ -48,7 +48,8 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || electronBin === null)("v0.
 
     await promisify(execFile)(process.execPath, ["build.mjs"], { cwd: DESKTOP });
     const out = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
-      const childEnv: Record<string, string> = { ...(process.env as Record<string, string>), OPENHUB_SMOKE_PROJECT: h.projectRoot, OPENHUB_SMOKE_REPAIR: "kubernetes-mcp-server", OPENHUB_SMOKE_HOME: h.homeDir };
+      // v0.2.0 PR B: 화면 언어를 한국어로 고정하고(대화상자 제목 비교) userData를 임시 폴더로 둔다(사용자 언어 선택에 영향받지 않게).
+      const childEnv: Record<string, string> = { ...(process.env as Record<string, string>), OPENHUB_SMOKE_PROJECT: h.projectRoot, OPENHUB_SMOKE_REPAIR: "kubernetes-mcp-server", OPENHUB_SMOKE_HOME: h.homeDir, OPENHUB_SMOKE_SYSTEM_LOCALE: "ko-KR", OPENHUB_SMOKE_USER_DATA: path.join(scratch, "user-data") };
       delete childEnv["ELECTRON_RUN_AS_NODE"];
       const child = spawn(electronBin!, [".", "--smoke"], { cwd: DESKTOP, env: childEnv, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
       let stdout = "";

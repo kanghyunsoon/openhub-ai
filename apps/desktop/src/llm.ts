@@ -1,4 +1,5 @@
 import { createOpenAiSummaryProvider, openAiProviderFromCli, runLlmSummary, type FetchLike, type ReleaseSnapshotV1, type ReleaseSummaryV1 } from "@openhub/core";
+import { tr } from "./i18n/index";
 
 /**
  * Desktop AI Summary(TASK-063, D-030). M6 SummaryProvider(OpenAI Responses API, api.openai.com 고정)를 재사용한다.
@@ -57,18 +58,16 @@ export type AiSummaryResponse =
   | { status: "invalid-model" | "no-key" | "no-release" | "cancelled"; message: string }
   | { status: "failed"; reason: string; message: string };
 
-const FAILED = "AI 요약을 받지 못했습니다. 결정론 요약은 그대로입니다.";
-
 /** 보낼 내용 안내 줄(key·경로 없음). */
 export function aiSummaryConsentLines(r: { toolId: string; snapshot: ReleaseSnapshotV1 }): string[] {
-  const versions = [r.snapshot.current.version ?? "현재 버전 미확인", r.snapshot.target?.version ?? "최신 버전 없음"].join(" → ");
+  const versions = [r.snapshot.current.version ?? tr("ai.currentUnknown"), r.snapshot.target?.version ?? tr("ai.latestNone")].join(" → ");
   return [
-    "AI Summary는 아래 내용을 " + AI_SUMMARY_DESTINATION + "(OpenAI Responses API)로 보냅니다.",
-    "도구: " + r.toolId + " (" + versions + ")",
-    "보내는 것: 결정론 요약과 잘린 release notes 원문",
-    "보내지 않는 것: 설정 파일, 경로, 환경변수 값, Version State",
-    "API key는 OPENAI_API_KEY 환경변수에서 지금 한 번 읽고 저장하지 않습니다.",
-    "결과는 표시용이며 Impact·업데이트 판단에 쓰지 않습니다.",
+    tr("ai.consent.destination", { destination: AI_SUMMARY_DESTINATION }),
+    tr("ai.consent.tool", { toolId: r.toolId, versions }),
+    tr("ai.consent.sent"),
+    tr("ai.consent.notSent"),
+    tr("ai.consent.key"),
+    tr("ai.consent.display"),
   ];
 }
 
@@ -76,20 +75,20 @@ export function aiSummaryConsentLines(r: { toolId: string; snapshot: ReleaseSnap
 export async function aiSummaryForRenderer(session: AiSummarySession, deps: AiSummaryDeps, id: unknown, model: unknown): Promise<AiSummaryResponse> {
   const modelId = typeof model === "string" ? model.trim() : "";
   if (openAiProviderFromCli({ llmSummary: true, llmModel: modelId === "" ? null : modelId }, {}).unavailable === "invalid-model") {
-    return { status: "invalid-model", message: "model ID를 입력하세요(영문·숫자·.·_·:·-, 100자 이하)" };
+    return { status: "invalid-model", message: tr("ai.invalidModel") };
   }
   const remembered = typeof id === "string" ? session.get(id) : undefined;
-  if (remembered === undefined) return { status: "no-release", message: "먼저 [릴리스 확인]을 누르세요" };
+  if (remembered === undefined) return { status: "no-release", message: tr("ai.noRelease") };
   const apiKey = deps.readKey();
-  if (apiKey === null) return { status: "no-key", message: "OPENAI_API_KEY가 설정되지 않았습니다. 결정론 요약은 그대로 볼 수 있습니다." };
+  if (apiKey === null) return { status: "no-key", message: tr("ai.noKey") };
   if (!session.hasConsent) {
-    if (!(await deps.confirm(aiSummaryConsentLines(remembered)))) return { status: "cancelled", message: "AI Summary를 보내지 않았습니다" };
+    if (!(await deps.confirm(aiSummaryConsentLines(remembered)))) return { status: "cancelled", message: tr("ai.cancelled") };
     session.consent();
   }
   const provider = createOpenAiSummaryProvider({ apiKey, model: modelId, ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }), ...(deps.timeoutMs === undefined ? {} : { timeoutMs: deps.timeoutMs }) });
   const result = await runLlmSummary(remembered.summary, remembered.snapshot, provider);
   if (result.status === "ok") return { status: "ok", model: result.model, text: result.text };
-  return { status: "failed", reason: result.status === "failed" ? result.reason : result.reason, message: FAILED };
+  return { status: "failed", reason: result.status === "failed" ? result.reason : result.reason, message: tr("ai.failed") };
 }
 
 export function registerAiSummary(ipc: IpcMainLike, session: AiSummarySession, deps: AiSummaryDeps): void {

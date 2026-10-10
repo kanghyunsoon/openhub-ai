@@ -1,3 +1,5 @@
+import "./locale-ko";
+import { ko } from "../src/i18n/ko";
 import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -105,7 +107,8 @@ describe("REQ-034 Desktop 설치 흐름", () => {
     const preload = await read("src/preload.ts");
     expect(preload).toContain('planInstall: (toolId: unknown) => ipcRenderer.invoke("install:plan", String(toolId))');
     expect(preload).toContain('runInstall: (toolId: unknown) => ipcRenderer.invoke("install:run", String(toolId))');
-    expect(await read("renderer/install.js")).toContain('"설치 계획 보기"');
+    expect(await read("renderer/install.js")).toContain('t("install.open")');
+    expect(ko["install.open"]).toBe("설치 계획 보기");
   });
 
   it("AC-036-02 Plan Preview는 CLI와 같은 Core preview 문장이고 textContent로만 렌더링한다", async () => {
