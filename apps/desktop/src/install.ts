@@ -29,9 +29,10 @@ import {
   type InstallTargetChange,
   type IsolatedDir,
   type PlannedInstall,
+  type RegistryEntry,
 } from "@openhub/core";
 import type { DirectoryPicker } from "./project-scan";
-import { recommendCurrentProject, type RecommendSession } from "./recommend";
+import { currentRecommendation, type RecommendSession } from "./recommend";
 import { installApprovalText, installNextActionTexts, installPreviewLines, installWarningTexts, installationStatusText } from "./i18n/core-text";
 import { tr } from "./i18n/index";
 import { smokeNpmSpawner } from "./lifecycle";
@@ -119,6 +120,11 @@ export interface InstallOptionsView {
   platforms: ("windows" | "macos" | "linux")[];
   /** 설치 범위. 기본은 project이고 user는 사용자가 고를 때만(v0.2.0 P0-3 C2). */
   defaultScope: "project";
+  /**
+   * 설치 진입 경로(v0.2.0 범위별 설치). recommended: 일반 추천에서. installed-elsewhere: 이 프로젝트에서 이미 쓰고 있어 Core가 추천에서
+   * 제외한(installed) 후보를 다른 Client·범위에 추가. 추가할 수 있는지는 고른 Client·범위로 만든 Core InstallPlan이 판단한다.
+   */
+  entry: InstallEntry;
   clients: {
     client: InstallClient;
     label: string;
@@ -292,7 +298,7 @@ export class InstallSession {
   }
 }
 
-function environment(deps: InstallDeps, entries: Awaited<ReturnType<typeof loadRegistry>>["entries"]): InstallEnvironment {
+function environment(deps: InstallDeps, entries: readonly RegistryEntry[]): InstallEnvironment {
   return {
     loadEntries: async () => entries,
     analyze: async (root) => {
@@ -319,19 +325,31 @@ const CLIENT_LABEL: Readonly<Record<InstallClient, string>> = { "claude-code": "
 const PLATFORM_KEYS = ["windows", "macos", "linux"] as const;
 
 /** 추천 목록에 있는 toolId인지 확인하고 Manifest·탐지된 Client를 돌려준다(install:options·install:plan 공통). */
+export type InstallEntry = "recommended" | "installed-elsewhere";
+
+/**
+ * 설치할 수 있는 toolId인지 main이 지금 다시 만든 추천 보고서로 확인한다(renderer가 보낸 값을 믿지 않는다).
+ * - recommended: 추천 목록에 있다.
+ * - installed-elsewhere: 추천 목록에는 없지만 Core가 이 프로젝트의 need 후보 중 "installed"(이미 사용 중)로 제외했다.
+ * 그 밖의 Registry 도구(스택·Client·OS 등으로 제외됐거나 후보가 아닌 도구)는 not-recommended다.
+ */
 async function recommendedTool(session: InstallSession, deps: InstallDeps, toolId: unknown) {
   const profile = deps.recommend.profile;
   const dir = session.projectDir;
   if (profile === undefined || dir === undefined) return { status: "no-project" as const };
   if (typeof toolId !== "string") return { status: "not-recommended" as const };
-  const recommended = await recommendCurrentProject(deps.recommend, { registryDir: deps.registryDir, metadataFile: deps.metadataFile, platform: deps.platform });
-  if (recommended.status !== "ok" || !recommended.view.items.some((i) => i.toolId === toolId)) return { status: "not-recommended" as const };
-  const { entries } = await loadRegistry(deps.registryDir);
+  const current = await currentRecommendation(deps.recommend, { registryDir: deps.registryDir, metadataFile: deps.metadataFile, platform: deps.platform });
+  if (current.status !== "ok") return { status: "not-recommended" as const };
+  const inList = current.report.recommendations.some((r) => r.toolId === toolId);
+  const installedCandidate = current.report.needs.some((n) => n.candidates.some((c) => c.toolId === toolId && c.status === "installed"));
+  if (!inList && !installedCandidate) return { status: "not-recommended" as const };
+  const entry: InstallEntry = inList ? "recommended" : "installed-elsewhere";
+  const entries = current.entries;
   const manifest = entries.find((e) => e.manifest.name === toolId)?.manifest;
   if (manifest === undefined) return { status: "not-recommended" as const };
   const supported = (c: InstallClient) => (manifest.targets as readonly string[]).includes(c);
   const detected = (c: InstallClient) => profile.aiClients.some((a) => a.id === c && a.scope === "project");
-  return { status: "ok" as const, toolId, dir, entries, manifest, supported, detected };
+  return { status: "ok" as const, toolId, dir, entries, manifest, supported, detected, entry };
 }
 
 /**
@@ -380,14 +398,15 @@ export async function optionsForRenderer(session: InstallSession, deps: InstallD
         label: CLIENT_LABEL[client],
         supported,
         detected,
-        selected: supported && detected,
+        // 추가 설치는 기본 선택이 없다(이미 쓰고 있는 대상일 수 있다). 사용자가 Client·범위를 고른다.
+        selected: found.entry === "recommended" && supported && detected,
         verification,
         note: clientNote(supported, detected, verification, platform),
         files: { project: configTargetFor(client, "project").logical, user: user.writable ? user.logical : null },
         userNote: user.writable ? null : tr("install.client.userNotWritten", { file: user.logical }),
       };
     });
-    return { status: "ok", view: { toolId: found.toolId, displayName: found.manifest.displayName ?? found.toolId, platform, platformSupported: platforms.includes(platform), platforms, defaultScope: "project", clients } };
+    return { status: "ok", view: { toolId: found.toolId, displayName: found.manifest.displayName ?? found.toolId, platform, platformSupported: platforms.includes(platform), platforms, defaultScope: "project", entry: found.entry, clients } };
   } catch {
     return { status: "error", code: "options-failed", message: tr("install.planFailedMain") };
   }
