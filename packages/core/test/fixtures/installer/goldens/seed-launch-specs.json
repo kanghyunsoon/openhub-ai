@@ -84,6 +84,37 @@
         "platform": "linux"
       }
     },
+    "mongodb-mcp-server": {
+      "backend": "npx",
+      "launch": {
+        "args": [
+          "-y",
+          "mongodb-mcp-server@3.0.5",
+          "--readOnly",
+          "--telemetry",
+          "disabled",
+          "--disabledTools",
+          "export,connect,search-knowledge,list-knowledge-sources,atlas-local-connect-deployment,atlas-local-list-deployments,mongodb-logs"
+        ],
+        "clientSpec": {
+          "args": [
+            "-y",
+            "mongodb-mcp-server@3.0.5",
+            "--readOnly",
+            "--telemetry",
+            "disabled",
+            "--disabledTools",
+            "export,connect,search-knowledge,list-knowledge-sources,atlas-local-connect-deployment,atlas-local-list-deployments,mongodb-logs"
+          ],
+          "command": "npx"
+        },
+        "envNames": [
+          "MDB_MCP_CONNECTION_STRING"
+        ],
+        "executable": "npx",
+        "platform": "linux"
+      }
+    },
     "playwright-mcp": {
       "backend": "npx",
       "launch": {
@@ -236,6 +267,40 @@
           "command": "cmd"
         },
         "envNames": [],
+        "executable": "npx",
+        "platform": "windows"
+      }
+    },
+    "mongodb-mcp-server": {
+      "backend": "npx",
+      "launch": {
+        "args": [
+          "-y",
+          "mongodb-mcp-server@3.0.5",
+          "--readOnly",
+          "--telemetry",
+          "disabled",
+          "--disabledTools",
+          "export,connect,search-knowledge,list-knowledge-sources,atlas-local-connect-deployment,atlas-local-list-deployments,mongodb-logs"
+        ],
+        "clientSpec": {
+          "args": [
+            "/d",
+            "/c",
+            "npx",
+            "-y",
+            "mongodb-mcp-server@3.0.5",
+            "--readOnly",
+            "--telemetry",
+            "disabled",
+            "--disabledTools",
+            "export,connect,search-knowledge,list-knowledge-sources,atlas-local-connect-deployment,atlas-local-list-deployments,mongodb-logs"
+          ],
+          "command": "cmd"
+        },
+        "envNames": [
+          "MDB_MCP_CONNECTION_STRING"
+        ],
         "executable": "npx",
         "platform": "windows"
       }

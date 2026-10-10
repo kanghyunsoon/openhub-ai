@@ -1,0 +1,40 @@
+schemaVersion: 1
+name: mongodb-mcp-server
+displayName: MongoDB MCP Server
+summary: MongoDB 컬렉션·스키마·인덱스를 조회하고 읽기 쿼리·집계·explain을 실행하는 MongoDB 공식 MCP 서버(OpenHub는 --readOnly로 설치)
+repository:
+  github: mongodb-js/mongodb-mcp-server
+category: [database, mcp]
+capabilities: [db-schema-access, query-tuning]
+targets: [claude-code, codex, cursor]
+platform: { windows: true, macos: true, linux: true }
+requirements:
+  # upstream engines: ^20.19.0 || ^22.13.0 || >=24.0.0. OpenHub 범위 형식은 ||를 표현하지 못하므로
+  # upstream이 지원하지 않는 21.x·22.0-22.12를 허용하지 않도록 >=24로 좁힌다(20.19+·22.13+는 보수적으로 제외).
+  node: ">=24"
+env:
+  - name: MDB_MCP_CONNECTION_STRING
+    required: true
+    description: "mongodb:// 또는 mongodb+srv:// 접속 문자열. 읽기 권한(read 역할)만 가진 DB 사용자를 쓰세요. --readOnly는 MCP 서버의 도구 제한이며 DB 권한을 줄이지 않습니다"
+install:
+  preferredAdapter: npx
+  options:
+    # 정확한 버전 고정: 설치 승인 뒤 npx Prepare가 이 버전을 npx cache에 미리 받는다(docs/specs/npx-prepare.md).
+    # --readOnly: 읽기 도구만 노출한다(insert·update·delete·drop·create·rename 제외). --telemetry disabled: 사용 통계 전송 끔.
+    # --disabledTools: 임의 DB 연결(connect), 외부 지식 서비스(search-knowledge·list-knowledge-sources), 로컬 파일 내보내기(export),
+    #   local Atlas(atlas-local-*), 서버 로그(mongodb-logs)를 뺀다. 반드시 쉼표 하나의 인자로 쓴다: v3.0.5는 공백 구분 목록에서
+    #   첫 값만 적용하고 나머지를 조용히 무시한다(실측). connect를 빼면 disconnect도 등록되지 않는다.
+    # 검증 기록: docs/specs/registry-mongodb-mcp-server.md
+    command: "npx -y mongodb-mcp-server@3.0.5 --readOnly --telemetry disabled --disabledTools export,connect,search-knowledge,list-knowledge-sources,atlas-local-connect-deployment,atlas-local-list-deployments,mongodb-logs"
+healthCheck:
+  type: mcp-handshake
+update:
+  source: npm
+rollback:
+  supported: true
+verification: community
+# 추천 메타데이터(D-008): canonical MCP alias는 normalized lowercase, Registry 전체에서 유일
+recommendation:
+  appliesTo: { stacks: [mongodb] }
+  identity: { mcpServerNames: [mongodb] }
+  source: { type: dedicated }

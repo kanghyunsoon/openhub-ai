@@ -23,6 +23,12 @@
     "preparation": "launch-on-demand",
     "spec": "@modelcontextprotocol/server-memory"
   },
+  "mongodb-mcp-server": {
+    "kind": "npm-package",
+    "pinned": true,
+    "preparation": "npm-cache",
+    "spec": "mongodb-mcp-server@3.0.5"
+  },
   "playwright-mcp": {
     "kind": "npm-package",
     "pinned": false,

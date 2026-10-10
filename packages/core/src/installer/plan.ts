@@ -51,6 +51,12 @@ export function requiredEnvNotice(name: string): string {
 export function clientEnvParseRiskNotice(names: readonly string[]): string {
   return `Claude Code가 실행되는 환경에 ${names.join(", ")} 환경변수를 준비해야 합니다. OpenHub는 값이나 존재 여부를 확인하지 않으며, 준비되지 않으면 .mcp.json 해석에 영향을 줄 수 있습니다.`;
 }
+/**
+ * DB 자격증명 권한 고지(v0.2.0, 고정 문구). database 카테고리 + 필수 환경변수일 때만 붙는다.
+ * Manifest 설명은 Plan에 넣지 않는다(AC-027-06: 설명에 비밀값이 섞일 수 있다).
+ */
+export const DATABASE_CREDENTIAL_NOTICE =
+  "이 도구는 환경변수의 DB 접속 정보가 가진 권한으로 동작합니다. MCP 서버의 읽기 전용 설정은 DB 권한을 줄이지 않으므로 읽기 권한만 가진 DB 계정을 쓰세요.";
 
 const text = z.string().min(1).max(300);
 const envName = z.string().regex(/^[A-Z][A-Z0-9_]*$/u);
@@ -366,6 +372,7 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
     if (input.artifact?.preparation === "npm-cache") warnings.push({ code: "npx-prepare", message: NPX_PREPARE_NOTICE });
     if (input.backend?.adapter === "docker") warnings.push({ code: "docker-daemon-unchecked", message: "docker 데몬 연결 여부는 확인하지 않았습니다. 데몬이 꺼져 있으면 준비 단계가 실패합니다" });
     for (const name of requiredNames) warnings.push({ code: "required-env", message: requiredEnvNotice(name) });
+    if (manifest.category.includes("database") && requiredNames.length > 0) warnings.push({ code: "database-credential-scope", message: DATABASE_CREDENTIAL_NOTICE });
     if (approvalRequirements.has("client-env-parse-risk")) warnings.push({ code: "client-env-parse-risk", message: clientEnvParseRiskNotice(requiredNames) });
     for (const t of targets.filter((x) => x.envReference === "manual")) {
       warnings.push({ code: "manual-setup-required", message: `${t.client} ${t.scope} 설정(${t.file})은 OpenHub가 쓰지 않습니다. 직접 설정해야 합니다` });

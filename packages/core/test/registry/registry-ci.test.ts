@@ -12,7 +12,7 @@ import {
   type Manifest,
   type RegistryEntry,
 } from "../../src/index";
-import { REPO_ROOT, seedEntries } from "../recommendation/helpers";
+import { REPO_ROOT, registryManifestCount, seedEntries } from "../recommendation/helpers";
 import { pinokioManifest } from "../pinokio/helpers";
 
 /** TASK-054 Registry CI: fast validation(network 0)·remote validation(§4 상한)·workflow 계약. 실제 네트워크 없이 가짜 fetch만 쓴다. */
@@ -52,7 +52,7 @@ describe("REQ-051 Registry CI", () => {
   it("AC-054-01 fast validation(registry validate) 실행 중 network 호출이 0회다", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const { entries, issues } = await validateRegistry(path.join(REPO_ROOT, "registry"));
-    expect([entries.length, issues]).toEqual([7, []]);
+    expect([entries.length, issues]).toEqual([registryManifestCount(), []]);
     for (const e of entries) fastManifestIssues(e.manifest);
     expect(fetchSpy).not.toHaveBeenCalled();
     // 잘못된 spec이 있는 Registry는 validate가 실패한다(역시 network 0).

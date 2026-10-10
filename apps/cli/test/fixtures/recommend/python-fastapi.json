@@ -3,7 +3,7 @@
   "generatedFrom": {
     "profileSchemaVersion": 1,
     "taxonomyVersion": 2,
-    "registryDigest": "sha256:038852e3e4e0a85b86fb6df6271037d2307b34844f289c86cf2302d10466f679",
+    "registryDigest": "sha256:d2c28933fa3ea6513d407bcec2384c0eca0e73da7a28edb344fc416c3375fedd",
     "metadataCollectedAt": "2026-01-01T00:00:00Z"
   },
   "project": {
@@ -94,6 +94,13 @@
       "satisfiedBy": [],
       "candidates": [
         {
+          "toolId": "mongodb-mcp-server",
+          "status": "incompatible",
+          "excludedBy": [
+            "stack-mismatch"
+          ]
+        },
+        {
           "toolId": "postgres-mcp",
           "status": "recommended"
         }
@@ -145,6 +152,13 @@
       ],
       "satisfiedBy": [],
       "candidates": [
+        {
+          "toolId": "mongodb-mcp-server",
+          "status": "incompatible",
+          "excludedBy": [
+            "stack-mismatch"
+          ]
+        },
         {
           "toolId": "postgres-mcp",
           "status": "recommended"
