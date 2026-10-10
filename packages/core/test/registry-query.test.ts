@@ -21,7 +21,9 @@ describe("REQ-002 Registry 조회", () => {
 
   it("AC-004-01 Capability와 Target 조건을 함께 적용한다", () => {
     expect(names(registry.list({ capability: "browser-automation", target: "gemini-cli" }))).toEqual(["chrome-devtools-mcp"]);
-    expect(names(registry.list({ capability: "db-schema-access" }))).toEqual(["postgres-mcp"]);
+    expect(names(registry.list({ capability: "db-schema-access" }))).toEqual(["mongodb-mcp-server", "postgres-mcp"]);
+    // MongoDB MCP Server는 SQL을 쓰지 않는다(sql-query 없음).
+    expect(names(registry.list({ capability: "sql-query" }))).toEqual(["postgres-mcp"]);
     expect(registry.list({ capability: "browser-automation", target: "vscode" })).toEqual([]);
   });
 

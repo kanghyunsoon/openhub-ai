@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { readdirSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -9,6 +10,10 @@ import { memoryIO } from "./helpers";
 
 /** TASK-069 M7 CLI(adopt·discover --view·trending·candidate prepare·benchmark·doctor). 임시 project·home, 가짜 prompter·spawner만 쓴다. */
 const REPO = path.resolve(import.meta.dirname, "../../..");
+/** registry/<category>/<name>.yaml Manifest 수(v0.2.0 P0-2부터 묶음마다 늘어나므로 숫자를 박지 않는다). */
+const REGISTRY_MANIFEST_COUNT = readdirSync(path.join(REPO, "registry"), { withFileTypes: true })
+  .filter((d) => d.isDirectory())
+  .flatMap((d) => readdirSync(path.join(REPO, "registry", d.name)).filter((f) => f.endsWith(".yaml"))).length;
 const scratch = await mkdtemp(path.join(tmpdir(), "openhub-cli-m7-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 const MEMORY = "@modelcontextprotocol/server-memory";
@@ -169,12 +174,12 @@ describe("REQ-060 REQ-061 REQ-063 REQ-064 M7 CLI", () => {
     Object.assign(io, { healthSpawner });
     expect(await runCli(["doctor"], io)).toBe(0);
     const text = io.stdout.join("\n");
-    for (const s of ["Node ", "npx", "uvx", "docker", "pterm", "Registry 7개", "metadata", "Version State ~/.openhub/state/lifecycle.json", "지원 범위", "pterm 0.0.25"]) expect(text, s).toContain(s);
+    for (const s of ["Node ", "npx", "uvx", "docker", "pterm", "Registry " + String(REGISTRY_MANIFEST_COUNT) + "개", "metadata", "Version State ~/.openhub/state/lifecycle.json", "지원 범위", "pterm 0.0.25"]) expect(text, s).toContain(s);
     expect(await readdir(io.home, { recursive: true })).toEqual(before);
     expect(healthSpawner).not.toHaveBeenCalled();
     const json = await env();
     expect(await runCli(["doctor", "--json"], json)).toBe(0);
-    expect(JSON.parse(json.stdout.join("\n"))).toMatchObject({ registry: { manifests: 7 }, versionState: { status: "ok" }, pinokio: { supported: "pterm 0.0.25" } });
+    expect(JSON.parse(json.stdout.join("\n"))).toMatchObject({ registry: { manifests: REGISTRY_MANIFEST_COUNT }, versionState: { status: "ok" }, pinokio: { supported: "pterm 0.0.25" } });
     outputs.push(all(io), all(json));
   });
 

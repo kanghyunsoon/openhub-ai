@@ -13,7 +13,7 @@ import {
   type ProjectProfile,
   type RecommendationReport,
 } from "../src/index";
-import { REPO_ROOT, seedEntries } from "./recommendation/helpers";
+import { REPO_ROOT, registryManifestCount, seedEntries } from "./recommendation/helpers";
 
 /**
  * v0.2.0 P0-1 Stack Coverage. 네 층을 따로 본다.
@@ -228,7 +228,7 @@ describe("Taxonomy v2 계약", () => {
   it("기존 Registry Manifest가 taxonomy v2 검증을 통과한다", async () => {
     const { entries, issues } = await loadRegistry(path.join(REPO_ROOT, "registry"));
     expect(issues).toEqual([]);
-    expect(entries.length).toBe(7);
+    expect(entries.length).toBe(registryManifestCount());
   });
 
   it("taxonomyVersion 1로 만든 보고서는 조용히 해석하지 않고 schema 검증에서 거부한다(다시 생성해야 한다)", async () => {

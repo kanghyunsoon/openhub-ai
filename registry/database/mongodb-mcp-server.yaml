@@ -1,0 +1,36 @@
+schemaVersion: 1
+name: mongodb-mcp-server
+displayName: MongoDB MCP Server
+summary: MongoDB 컬렉션·스키마·인덱스를 조회하고 읽기 쿼리·집계·explain을 실행하는 MongoDB 공식 MCP 서버(OpenHub는 --readOnly로 설치)
+repository:
+  github: mongodb-js/mongodb-mcp-server
+category: [database, mcp]
+capabilities: [db-schema-access, query-tuning]
+targets: [claude-code, codex, cursor]
+platform: { windows: true, macos: true, linux: true }
+requirements:
+  # upstream engines: ^20.19.0 || ^22.13.0 || >=24.0.0 (OpenHub 범위 형식은 ||를 표현하지 않는다)
+  node: ">=20.19"
+env:
+  - name: MDB_MCP_CONNECTION_STRING
+    required: true
+    description: mongodb:// 또는 mongodb+srv:// 접속 문자열. 읽기 권한만 가진 DB 사용자를 권장한다. OpenHub는 값을 읽거나 저장하지 않는다
+install:
+  preferredAdapter: npx
+  options:
+    # 정확한 버전 고정: 설치 승인 뒤 npx Prepare가 이 버전을 npx cache에 미리 받는다(docs/specs/npx-prepare.md).
+    # --readOnly: 읽기 도구만 노출한다(insert·update·delete·drop·create·rename 제외). --telemetry disabled: 사용 통계 전송 끔.
+    # 검증 기록: docs/specs/registry-mongodb-mcp-server.md
+    command: "npx -y mongodb-mcp-server@3.0.5 --readOnly --telemetry disabled"
+healthCheck:
+  type: mcp-handshake
+update:
+  source: npm
+rollback:
+  supported: true
+verification: community
+# 추천 메타데이터(D-008): canonical MCP alias는 normalized lowercase, Registry 전체에서 유일
+recommendation:
+  appliesTo: { stacks: [mongodb] }
+  identity: { mcpServerNames: [mongodb] }
+  source: { type: dedicated }

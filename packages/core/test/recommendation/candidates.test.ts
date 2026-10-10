@@ -42,10 +42,16 @@ describe("REQ-021 Candidate Matcher와 Compatibility", () => {
   it("AC-020-02 stacks가 맞지 않으면 stack-mismatch로 제외되고 Spring Boot + MySQL의 DB Gap 추천 후보는 0개다(시나리오 3, 10)", async () => {
     for (const p of [springMysql, await fixtureProfile("react-spring-monorepo")]) {
       const m = match(p, seed);
-      for (const cap of ["db-schema-access", "sql-query", "query-tuning"]) {
-        expect(m.candidates.get(cap)).toEqual([{ toolId: "postgres-mcp", status: "incompatible", excludedBy: ["stack-mismatch"] }]);
+      // v0.2.0 P0-2: mongodb-mcp-server(appliesTo mongodb)도 MySQL 프로젝트에서는 stack-mismatch다. sql-query는 제공하지 않는다.
+      for (const cap of ["db-schema-access", "query-tuning"]) {
+        expect(m.candidates.get(cap)).toEqual([
+          { toolId: "mongodb-mcp-server", status: "incompatible", excludedBy: ["stack-mismatch"] },
+          { toolId: "postgres-mcp", status: "incompatible", excludedBy: ["stack-mismatch"] },
+        ]);
       }
+      expect(m.candidates.get("sql-query")).toEqual([{ toolId: "postgres-mcp", status: "incompatible", excludedBy: ["stack-mismatch"] }]);
       expect(m.tools.map((t) => t.entry.manifest.name)).not.toContain("postgres-mcp");
+      expect(m.tools.map((t) => t.entry.manifest.name)).not.toContain("mongodb-mcp-server");
     }
   });
 

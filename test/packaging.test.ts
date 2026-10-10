@@ -1,5 +1,5 @@
 import { execFileSync, execSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,6 +12,10 @@ import { bundledPackages, sbomComponentNames } from "../scripts/bundle-inventory
  * 쓰기는 OS 임시 디렉터리뿐이다. metadata snapshot은 synthetic fixture를 쓴다(live GitHub 0).
  */
 const ROOT = path.resolve(import.meta.dirname, "..");
+/** registry/<category>/<name>.yaml Manifest 수(v0.2.0 P0-2부터 묶음마다 늘어나므로 숫자를 박지 않는다). */
+const REGISTRY_MANIFEST_COUNT = readdirSync(path.join(ROOT, "registry"), { withFileTypes: true })
+  .filter((d) => d.isDirectory())
+  .flatMap((d) => readdirSync(path.join(ROOT, "registry", d.name)).filter((f) => f.endsWith(".yaml"))).length;
 const SEED = path.join(ROOT, "packages/core/test/fixtures/recommendation/metadata.seed-synthetic.json");
 const scratch = mkdtempSync(path.join(tmpdir(), "openhub-packaging-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -27,7 +31,7 @@ describe("REQ-065 TASK-071 배포 산출물", () => {
     const list = execFileSync("tar", ["-tzf", tgz], { encoding: "utf8" }).split(/\r?\n/u).filter(Boolean).sort();
     for (const f of ["package/dist/openhub.cjs", "package/dist/registry/catalog.yaml", "package/dist/registry/metadata.snapshot.json", "package/dist/registry/database/postgres-mcp.yaml", "package/LICENSE", "package/THIRD_PARTY_NOTICES.md", "package/package.json"]) expect(list).toContain(f);
     expect(list.filter((f) => f.endsWith(".js") || f.endsWith(".cjs") || f.endsWith(".mjs"))).toEqual(["package/dist/openhub.cjs"]);
-    expect(list.filter((f) => f.endsWith(".yaml") && f.split("/").length === 5)).toHaveLength(7);
+    expect(list.filter((f) => f.endsWith(".yaml") && f.split("/").length === 5)).toHaveLength(REGISTRY_MANIFEST_COUNT);
     const extract = path.join(scratch, "extract");
     mkdirSync(extract);
     execFileSync("tar", ["-xzf", tgz, "-C", extract]);
@@ -48,7 +52,7 @@ describe("REQ-065 TASK-071 배포 산출물", () => {
     const env = { ...process.env, OPENHUB_REGISTRY: "", OPENHUB_METADATA: "" };
     const run = (args: string) => execSync(JSON.stringify(bin) + " " + args, { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     expect(run("--version").trim()).toBe("0.1.1");
-    expect((JSON.parse(run("registry list --json")) as unknown[]).length).toBe(7);
+    expect((JSON.parse(run("registry list --json")) as unknown[]).length).toBe(REGISTRY_MANIFEST_COUNT);
     expect(JSON.parse(run("project scan " + JSON.stringify(path.join(ROOT, "packages/core/test/fixtures/projects/react-spring-monorepo")) + " --json"))).toMatchObject({ schemaVersion: expect.any(Number) });
     expect((JSON.parse(run("doctor --json")) as { registry: { source: string } }).registry.source).toBe("설치 패키지의 registry");
   });

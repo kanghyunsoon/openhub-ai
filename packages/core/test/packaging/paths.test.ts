@@ -12,6 +12,7 @@ import {
   resolveMetadataFileSync,
   resolveRegistryDir,
 } from "../../src/index";
+import { registryManifestCount } from "../recommendation/helpers";
 
 /** TASK-071 배포 경로 규칙(D-036 §12). 임시 디렉터리만 쓴다(실제 home·network 0). */
 const REPO = path.resolve(import.meta.dirname, "../../../..");
@@ -84,6 +85,6 @@ describe("REQ-065 TASK-071 배포 경로", () => {
     await cp(SEED, path.join(reg, BUNDLED_METADATA_SNAPSHOT));
     const loaded = await loadRegistry(reg);
     expect(loaded.issues).toEqual([]);
-    expect(loaded.entries.length).toBe(7);
+    expect(loaded.entries.length).toBe(registryManifestCount());
   });
 });

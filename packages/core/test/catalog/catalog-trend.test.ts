@@ -23,7 +23,8 @@ import { newScratch } from "../lifecycle/helpers";
 const seed = await seedEntries();
 const scratch = await newScratch("catalog-trend-test");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
-const ASOF = new Date("2026-10-07T00:00:00.000Z");
+// 기준일은 Registry catalog의 가장 최근 addedAt 이후여야 한다(v0.2.0 P0-2: mongodb-mcp-server가 2026-10-10에 등록).
+const ASOF = new Date("2026-10-10T00:00:00.000Z");
 let n = 0;
 async function registryCopy(edit: (root: string) => Promise<void> = async () => {}): Promise<string> {
   const root = path.join(scratch, "registry-" + String(n++));
@@ -32,7 +33,8 @@ async function registryCopy(edit: (root: string) => Promise<void> = async () => 
   return root;
 }
 const setCatalog = async (root: string, tools: string) => writeFile(path.join(root, "catalog.yaml"), "schemaVersion: 1\nkind: openhub-registry-catalog\ntools:\n" + tools);
-const SEVEN = ["chrome-devtools-mcp", "context7", "github-mcp-server", "memory-mcp", "playwright-mcp", "postgres-mcp", "serena"];
+/** 실제 Registry의 Tool ID 전체(이름순). Registry 확장마다 늘어나므로 목록을 박지 않는다. */
+const TOOLS = seed.map((e) => e.manifest.name).sort();
 const nullLines = (ids: readonly string[]) => ids.map((id) => "  " + id + ": { addedAt: null }\n").join("");
 const catalogIssues = async (root: string) => (await validateRegistry(root, { catalog: { asOf: ASOF } })).issues.filter((i) => i.file === "catalog.yaml");
 
@@ -80,9 +82,9 @@ verification: community
 describe("REQ-060 Catalog Metadata v1과 Trend Score", () => {
   it("AC-061-01 catalog는 Manifest와 1:1이며 누락 entry와 orphan entry는 각각 fast validation 오류다", async () => {
     expect(await catalogIssues(await registryCopy())).toEqual([]);
-    const missing = await registryCopy((r) => setCatalog(r, nullLines(SEVEN.filter((t) => t !== "serena"))));
+    const missing = await registryCopy((r) => setCatalog(r, nullLines(TOOLS.filter((t) => t !== "serena"))));
     expect((await catalogIssues(missing)).map((i) => i.path)).toEqual(["tools.serena"]);
-    const orphan = await registryCopy((r) => setCatalog(r, nullLines([...SEVEN, "ghost-mcp"])));
+    const orphan = await registryCopy((r) => setCatalog(r, nullLines([...TOOLS, "ghost-mcp"])));
     const o = await catalogIssues(orphan);
     expect(o.map((i) => i.path)).toEqual(["tools.ghost-mcp"]);
     expect(o[0]!.message).toContain("orphan");
@@ -97,15 +99,15 @@ describe("REQ-060 Catalog Metadata v1과 Trend Score", () => {
   });
 
   it("AC-061-02 날짜 형식 오류와 asOf보다 미래인 날짜는 거부하고 null은 어떤 entry에도 허용한다", async () => {
-    const lines = (date: string) => nullLines(SEVEN.filter((t) => t !== "context7")) + "  context7: { addedAt: " + date + " }\n";
+    const lines = (date: string) => nullLines(TOOLS.filter((t) => t !== "context7")) + "  context7: { addedAt: " + date + " }\n";
     for (const bad of ['"2026-13-01"', '"2026-02-30"', '"07-10-2026"', '"2026-10-07T00:00:00Z"', '"yesterday"']) {
       const root = await registryCopy((r) => setCatalog(r, lines(bad)));
       expect((await catalogIssues(root)).map((i) => i.path), bad).toEqual(["tools.context7.addedAt"]);
     }
-    const future = await registryCopy((r) => setCatalog(r, lines('"2026-10-08"')));
+    const future = await registryCopy((r) => setCatalog(r, lines('"2026-10-11"')));
     expect((await catalogIssues(future))[0]!.message).toContain("미래");
-    expect(await catalogIssues(await registryCopy((r) => setCatalog(r, lines('"2026-10-07"'))))).toEqual([]);
-    expect(await catalogIssues(await registryCopy((r) => setCatalog(r, nullLines(SEVEN))))).toEqual([]);
+    expect(await catalogIssues(await registryCopy((r) => setCatalog(r, lines('"2026-10-10"'))))).toEqual([]);
+    expect(await catalogIssues(await registryCopy((r) => setCatalog(r, nullLines(TOOLS))))).toEqual([]);
   });
 
   it("AC-061-03 catalog·trend 모듈은 Git·자식 프로세스를 쓰지 않고 .git 없는 디렉터리에서도 같은 결과다", async () => {
@@ -182,7 +184,7 @@ describe("REQ-060 Catalog Metadata v1과 Trend Score", () => {
   it("AC-061-11 같은 toolId가 catalog에 두 번 있으면 fast validation 오류다", async () => {
     const dup = parseCatalogText("schemaVersion: 1\nkind: openhub-registry-catalog\ntools:\n  serena: { addedAt: null }\n  serena: { addedAt: \"2026-01-01\" }\n");
     expect(dup.ok).toBe(false);
-    const root = await registryCopy((r) => setCatalog(r, nullLines(SEVEN) + "  serena: { addedAt: null }\n"));
+    const root = await registryCopy((r) => setCatalog(r, nullLines(TOOLS) + "  serena: { addedAt: null }\n"));
     const issues = await catalogIssues(root);
     expect(issues.length).toBe(1);
     expect(issues[0]!.message).toContain("두 번");
@@ -195,7 +197,7 @@ describe("REQ-060 Catalog Metadata v1과 Trend Score", () => {
       for (const f of readdirSync(path.join(REPO_ROOT, d), { recursive: true }) as string[]) {
         if (!/\.(ts|js|mjs)$/u.test(f)) continue;
         const src = readFileSync(path.join(REPO_ROOT, d, f), "utf8");
-        if (SEVEN.some((id) => src.includes('"' + id + '"') || src.includes("'" + id + "'"))) offenders.push(d + "/" + f);
+        if (TOOLS.some((id) => src.includes('"' + id + '"') || src.includes("'" + id + "'"))) offenders.push(d + "/" + f);
       }
     }
     expect(offenders).toEqual([]);

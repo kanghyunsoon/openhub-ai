@@ -8,6 +8,7 @@ tools:
   context7: { addedAt: null }
   github-mcp-server: { addedAt: null }
   memory-mcp: { addedAt: null }
+  mongodb-mcp-server: { addedAt: "2026-10-10" }
   playwright-mcp: { addedAt: null }
   postgres-mcp: { addedAt: null }
   serena: { addedAt: null }

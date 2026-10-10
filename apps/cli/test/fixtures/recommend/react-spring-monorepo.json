@@ -3,7 +3,7 @@
   "generatedFrom": {
     "profileSchemaVersion": 1,
     "taxonomyVersion": 2,
-    "registryDigest": "sha256:038852e3e4e0a85b86fb6df6271037d2307b34844f289c86cf2302d10466f679",
+    "registryDigest": "sha256:41d5cd978fbaa599ce6ca04e1319d73e0f2f13d63d8bbf2665e953faf6bea3fa",
     "metadataCollectedAt": "2026-01-01T00:00:00Z"
   },
   "project": {
@@ -145,6 +145,13 @@
       "satisfiedBy": [],
       "candidates": [
         {
+          "toolId": "mongodb-mcp-server",
+          "status": "incompatible",
+          "excludedBy": [
+            "stack-mismatch"
+          ]
+        },
+        {
           "toolId": "postgres-mcp",
           "status": "incompatible",
           "excludedBy": [
@@ -155,9 +162,10 @@
       "reasons": [
         {
           "code": "no-candidate",
-          "message": "등록된 도구 없음: DB 스키마 조회을(를) 제공하는 호환 도구가 Registry에 없음 (제외된 후보 postgres-mcp: 스택 불일치)",
+          "message": "등록된 도구 없음: DB 스키마 조회을(를) 제공하는 호환 도구가 Registry에 없음 (제외된 후보 mongodb-mcp-server: 스택 불일치, postgres-mcp: 스택 불일치)",
           "refs": [
             "need:db-schema-access",
+            "manifest:mongodb-mcp-server#capabilities",
             "manifest:postgres-mcp#capabilities"
           ]
         }
@@ -400,6 +408,13 @@
       "satisfiedBy": [],
       "candidates": [
         {
+          "toolId": "mongodb-mcp-server",
+          "status": "incompatible",
+          "excludedBy": [
+            "stack-mismatch"
+          ]
+        },
+        {
           "toolId": "postgres-mcp",
           "status": "incompatible",
           "excludedBy": [
@@ -410,9 +425,10 @@
       "reasons": [
         {
           "code": "no-candidate",
-          "message": "등록된 도구 없음: 쿼리 튜닝을(를) 제공하는 호환 도구가 Registry에 없음 (제외된 후보 postgres-mcp: 스택 불일치)",
+          "message": "등록된 도구 없음: 쿼리 튜닝을(를) 제공하는 호환 도구가 Registry에 없음 (제외된 후보 mongodb-mcp-server: 스택 불일치, postgres-mcp: 스택 불일치)",
           "refs": [
             "need:query-tuning",
+            "manifest:mongodb-mcp-server#capabilities",
             "manifest:postgres-mcp#capabilities"
           ]
         }
