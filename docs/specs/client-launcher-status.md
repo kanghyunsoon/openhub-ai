@@ -1,0 +1,46 @@
+# Client launcher status and repair (v0.2.0)
+
+Part of [v0.2.0](v0.2.0.md). Follows the design note in [kubernetes-tool-restriction.md](kubernetes-tool-restriction.md) ("Node.js path change"). Applies to tools with a reviewed tool config on native Windows, where the client entry launches the server directly as `node.exe <npm>\bin\npx-cli.js …` (no `cmd`). Today that is `kubernetes-mcp-server`.
+
+Labels: **Fact**, **Decision**, **Proposal**, **Open Question**.
+
+## Problem (Fact)
+
+The client entry stores the absolute paths of `node.exe` and npm's `npx-cli.js`. After Node.js is reinstalled elsewhere, moved, or npm is relocated, those paths stop working, but the entry's bytes are unchanged. Before this change, status reported `state-consistent` and repair reported `NOTHING_TO_REPAIR`.
+
+## Status (Decision)
+
+- New entry state `client-launcher-invalid`. lifecycle status reads the client entry it already reads and checks the recorded launcher with the same rules used at install time (`verifyClientLauncher`): `node.exe` is a regular file, `npx-cli.js` is `node_modules\npm\bin\npx-cli.js` next to that `node.exe`, `node_modules\npm\package.json` has `name: "npm"`, no path segment below the drive root is a symlink or junction, and the paths are safe direct-exec arguments (spaces, parentheses, `&` and non-ASCII allowed; quotes, control characters, relative and UNC paths refused). Nothing is executed or written.
+- Checked only when the status platform is Windows and the Version State entry's client spec is the direct launch (`command: "node"`). Other npx tools (`cmd /d /c npx`), uvx, docker and non-Windows platforms are not checked and keep their previous results.
+- Priority when several problems exist: `missing-config` > `config-drift` > `tool-config-missing` > `tool-config-drift` > `client-launcher-invalid`. A launcher problem never hides a changed client entry or a changed security policy file.
+- Additive status fields (existing responses unchanged): `diagnostics` lists every detected problem in that order, present only when there are two or more; `launcher: { status: "invalid", reason }` is present only when the launcher is invalid. The reason is a fixed sentence without paths.
+- Status never changes client configs.
+
+## Plan and repair (Decision)
+
+- LifecyclePlan targets gain an optional `launcher: { recorded: "valid" | "invalid", replacementDigest: sha256 | null }` on Windows direct-launch targets only. The plan never contains the paths; `replacementDigest` is the sha256 of the Node.js installation this run will write, found on PATH without executing it (`windowsNpx`) and verified with the same rules. schemaVersion stays 1; existing plans and goldens are unchanged.
+- `repair` treats `recorded: "invalid"` as repair-needed. Order: status → repair plan (preview shows "recorded Node.js path is invalid → rewrite only the launcher with the verified installation") → approval → launcher verified again and compared with the approved digest → client entries replaced (only `command` and the first argument change; other servers and user TOML are preserved) → Health → Version State.
+- `health` is blocked with `CLIENT_LAUNCHER_INVALID` while a recorded launcher is invalid, so a healthy result cannot hide a client that cannot start the server.
+- update, rollback and repair are blocked with `CLIENT_LAUNCHER_UNAVAILABLE` when no valid Node.js installation is found now.
+- Approval boundary (PR #13 review): for Windows direct-launch targets, update, rollback and repair always need a verified launcher and a non-null `replacementDigest`. If the caller provides no launcher lookup, or the lookup fails verification, the plan is blocked (`CLIENT_LAUNCHER_UNAVAILABLE`) and the resolver is not called. The transaction checks again: an approved plan whose `replacementDigest` is null writes nothing (`config-failed`, `CLIENT_LAUNCHER_UNAVAILABLE`), and a digest that differs from the installation found right before writing writes nothing (`PLAN_STALE`). Health writes no client config and is not restricted by this rule. Linux, macOS and other npx, uvx and docker tools are unchanged.
+- Scope of the digest: `replacementDigest` is the sha256 of the two **paths** (`node.exe`, `npx-cli.js`), not of the file contents. Replacing `node.exe` or npm in place at the same paths (for example an in-place Node.js upgrade) is not detected by the digest; the files are still checked to exist with the expected layout and no symlink or junction.
+- After approval, any change of the recorded launcher state or of the found installation changes the regenerated plan (`PLAN_STALE`). If the installation found right before writing differs from the approved digest, nothing is written (`PLAN_STALE`).
+- Health failure restores only this run's changes; files changed by another process meanwhile are not overwritten (`rollback-failed`, `CONFIG_RESTORE_FAILED`). No automatic repair anywhere.
+
+## Verification (Fact, 2026-10-10)
+
+Unit and flow tests (`packages/core/test/tool-config/client-launcher.test.ts`, 21 tests, in-memory Windows file system so they run on Linux CI too): valid paths including spaces, Korean, parentheses and `&`; deleted `node.exe`; deleted `npx-cli.js`; reinstall in the same place (valid) and elsewhere (invalid); npm moved to another prefix; `node.exe` and npm from different installs; symlink/junction in the path; access denied; non-direct entry; status with real temporary client configs; priority and `diagnostics`; no absolute path in status or plan; other npx tools and Linux not checked; Health blocked; repair success with other MCP entries and user TOML preserved; approval refused (nothing written); change after approval (`PLAN_STALE`, both a new installation and the old path coming back); found installation differs from the approved digest right before writing (`PLAN_STALE`); no valid Node.js (`CLIENT_LAUNCHER_UNAVAILABLE`); Health failure (bytes restored, Version State unchanged); external change during compensation (`CONFIG_RESTORE_FAILED`, external content kept); valid launcher (`NOTHING_TO_REPAIR`); no launcher lookup (repair and update blocked, resolver not called); lookup fails verification (blocked); approved plan with a null digest (nothing written); Health and other npx tools unchanged without a lookup.
+
+Windows real E2E (`kubernetes-tool-config.e2e.test.ts`, `OPENHUB_E2E=1`): the real `node.exe` and npm are copied to a temporary folder whose path has spaces, parentheses, `&` and Korean; kubernetes-mcp-server@0.0.67 is installed with that copy for Claude Code, Codex and Cursor; the copy is deleted. Status: `client-launcher-invalid` for all three, client files unchanged, no absolute path in the report; Health plan blocked. Approved repair with the system Node.js: 1.5 s, Health `healthy` with 13 tools, only `command` and the first argument changed, status `state-consistent`. The repaired entry was then started as written: Secret get/list refused, ConfigMap read, no fake token in output, no Secret API request.
+
+## Codex and Cursor verification (Fact)
+
+- Codex CLI 0.147.0 (`OPENHUB_E2E_CODEX_EXEC=1`): `codex exec` started kubernetes-mcp-server from exactly the command and arguments OpenHub wrote to the project `.codex/config.toml`, passed as command-line overrides, and the model's `resources_get` calls returned the ConfigMap (`LOG_LEVEL`) and a refusal for the Secret; no token or Secret data in Codex output; no Secret API request. Isolation: `--ignore-user-config` (the user's `~/.codex/config.toml` is not loaded; only the login is read), `--ephemeral`, read-only sandbox, HOME/USERPROFILE pointing to a temporary folder with a fake `~/.kube/config`; no user file written or copied. Limitation: with `--ignore-user-config` and a command-line project trust override, Codex did not load the project's `.codex/config.toml` servers (no tools, no MCP error; cause not determined). Project file recognition is covered separately by `codex mcp list`. Level recorded as `spec-launch-verified`; the install plan still warns.
+- Cursor: not installed on the test machine. Not verified; level stays `not-verified` and the install plan keeps its warning. Procedure to verify before the v0.2.0 release: on a machine with Cursor installed, use an isolated test project and a fake kubeconfig (no real cluster), install with OpenHub, open the project in Cursor, enable the `kubernetes` server in Cursor's MCP settings, then in an agent chat call `resources_get` for the ConfigMap `app-config` and the Secret `demo` against the same local fake API server; record the Cursor version, tool list, ConfigMap success, Secret refusal and absence of the fake token. Update `clientVerification` only with that evidence.
+
+## Not covered
+
+- Detecting a launcher that exists but is a different Node.js version than the one used at install time (it is accepted if the files are valid).
+- macOS and Linux client entries (they use `npx` from PATH and are not affected).
+- Automatic repair (intentionally absent).
+

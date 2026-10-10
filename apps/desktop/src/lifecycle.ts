@@ -132,6 +132,7 @@ const WARNINGS: Partial<Record<LifecycleToolStatus["state"], string>> = {
   "tool-config-missing": "OpenHub 관리 tool config가 없어 업데이트·롤백·Health를 막았습니다. CLI의 openhub lifecycle repair(승인 필요)로 다시 만드세요.",
   "tool-config-drift": "tool config가 OpenHub가 기록한 내용과 달라 업데이트·롤백·Health를 막았습니다. CLI의 openhub lifecycle repair(승인 필요)로 다시 만드세요.",
   "tool-config-relocated": "옮기거나 복사한 프로젝트입니다. CLI의 openhub lifecycle repair(승인 필요)로 이 프로젝트용 tool config를 만드세요.",
+  "client-launcher-invalid": "Client 설정에 기록된 Node.js 실행 경로(node.exe·npx-cli.js)가 지금은 유효하지 않습니다(재설치·이동 등). Health를 막았습니다. CLI의 openhub lifecycle repair(승인 필요)로 현재 Node.js 경로로 고치세요. 자동으로 고치지 않습니다.",
   "untracked-foreign": "OpenHub가 관리하지 않는 설정입니다. 자동으로 편입하지 않습니다.",
   "untracked-adoptable": "OpenHub 표준 항목과 같지만 Version State에 없습니다. 업데이트·롤백 대상이 아닙니다.",
 };
