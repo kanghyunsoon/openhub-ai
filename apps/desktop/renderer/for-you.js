@@ -48,6 +48,8 @@
         for (const x of d.excluded) {
           const li = el("li", "", x.text);
           li.dataset.toolId = x.toolId;
+          // "이미 사용 중"으로만 제외된 후보: 표시만 한다. 버튼은 설치 화면 스크립트가 붙인다(FOR YOU 코드와 분리).
+          if (x.addable) li.dataset.addElsewhere = "1";
           list.append(li);
         }
         nodes.push(list);
@@ -99,10 +101,13 @@
   // 스모크 E2E(v0.2.0 C3): 화면에 그려진 진단 문장을 그대로 읽는다(쓰기 없음).
   window.__openhubForYouDiagnosis = () => {
     const box = document.getElementById("for-you-diagnosis");
+    // 항목 문장만 읽는다(설치 화면 스크립트가 붙인 버튼 글자는 따로 센다).
+    const textOf = (n) => [...n.childNodes].filter((c) => c.nodeType === Node.TEXT_NODE).map((c) => c.textContent).join("");
     return {
       status: document.getElementById("for-you-status").textContent,
       emptyReason: box.dataset.emptyReason || "",
-      lines: [...box.querySelectorAll("p, li")].map((n) => n.textContent),
+      lines: [...box.querySelectorAll("p, li")].map(textOf),
+      addButtons: [...box.querySelectorAll("li[data-add-elsewhere] button")].map((b) => b.closest("li").dataset.toolId),
       verification: [...document.querySelectorAll("#for-you-list .rec-verification")].map((n) => n.textContent),
     };
   };

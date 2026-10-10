@@ -47,7 +47,11 @@ export interface ForYouDiagnosis {
   /** 인식했지만 연결된 Capability 규칙이 없는 기술 ID. */
   unmappedTechs: string[];
   /** 후보였지만 제외된 도구(이미 설치됨·스택·Client·OS·런타임·설치 방식). 추천 목록에 있는 도구는 넣지 않는다. */
-  excluded: { toolId: string; name: string; capabilities: string[]; codes: ExclusionCode[]; text: string }[];
+  /**
+   * addable: 제외 이유가 "이 프로젝트에서 이미 사용 중"뿐이라 다른 Client·범위에 추가를 시도할 수 있다(가능 여부는 고른 대상의
+   * Core InstallPlan이 판단한다). 다른 제외 이유가 있으면 false.
+   */
+  excluded: { toolId: string; name: string; capabilities: string[]; codes: ExclusionCode[]; text: string; addable: boolean }[];
 }
 
 export interface ForYouView {
@@ -126,7 +130,14 @@ function diagnosisOf(report: RecommendationReport, profile: ProjectProfile, entr
     .map(([toolId, slot]) => {
       const name = entries?.find((e) => e.manifest.name === toolId)?.manifest.displayName ?? toolId;
       const codes = [...slot.codes].sort((a, b) => Object.keys(EXCLUSION_KEY).indexOf(a) - Object.keys(EXCLUSION_KEY).indexOf(b));
-      return { toolId, name, capabilities: slot.capabilities, codes, text: tr("forYou.diag.excludedLine", { name, capabilities: slot.capabilities.join(", "), reasons: codes.map((c) => tr(EXCLUSION_KEY[c])).join(" · ") }) };
+      return {
+        toolId,
+        name,
+        capabilities: slot.capabilities,
+        codes,
+        text: tr("forYou.diag.excludedLine", { name, capabilities: slot.capabilities.join(", "), reasons: codes.map((c) => tr(EXCLUSION_KEY[c])).join(" · ") }),
+        addable: codes.length === 1 && codes[0] === "installed",
+      };
     });
   return {
     empty: d.emptyReason === null ? null : { code: d.emptyReason, text: tr(EMPTY_KEY[d.emptyReason]) },

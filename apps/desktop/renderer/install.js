@@ -141,6 +141,7 @@
     box.dataset.toolId = view.toolId;
     box.append(el("h3", "", t("install.clients.title", { name: view.displayName })));
     box.append(el("p", "todo", t("install.clients.platform", { platforms: view.platforms.join(", ") || "-", os: view.platform })));
+    if (view.entry === "installed-elsewhere") box.append(el("p", "install-note add-elsewhere", t("install.clients.addElsewhere")));
     if (!view.platformSupported) box.append(el("p", "install-warning", t("install.clients.platformUnsupported", { os: view.platform })));
     let scope = view.defaultScope;
     const scopeBox = el("div", "install-scope");
@@ -265,7 +266,8 @@
     return response.view;
   }
 
-  // FOR YOU 카드가 다시 그려지면 각 카드에 [설치 계획 보기]를 붙인다(FOR YOU 코드와 분리).
+  // FOR YOU 카드가 다시 그려지면 각 카드에 [설치 계획 보기]를, "이미 사용 중"으로 제외된 후보에는 [다른 Client·범위에 추가]를 붙인다.
+  // 둘 다 같은 Client·범위 선택 화면을 연다. 허용 여부는 main이 최신 추천 보고서로 다시 확인한다.
   function decorate() {
     for (const li of document.querySelectorAll("#for-you-list li.rec")) {
       if (li.querySelector(".install-open")) continue;
@@ -274,8 +276,16 @@
       button.addEventListener("click", () => void open(li.dataset.toolId));
       li.append(button);
     }
+    for (const li of document.querySelectorAll("#for-you-diagnosis li[data-add-elsewhere]")) {
+      if (li.querySelector(".install-add")) continue;
+      const button = el("button", "install-add", t("forYou.addElsewhere"));
+      button.type = "button";
+      button.addEventListener("click", () => void open(li.dataset.toolId));
+      li.append(button);
+    }
   }
   new MutationObserver(decorate).observe(document.getElementById("for-you-list"), { childList: true });
+  new MutationObserver(decorate).observe(document.getElementById("for-you-diagnosis"), { childList: true });
   // 프로젝트를 다시 고르면 진행 중인 요청의 응답을 버리고 설치 화면을 비운다(main도 Pending Plan을 버린다).
   new MutationObserver(() => {
     seq += 1;
@@ -290,10 +300,26 @@
   // scope가 "user"면 범위 선택에서 User를 누른다(OPENHUB_SMOKE_INSTALL_SCOPE).
   window.__openhubInstall = async (toolId, clients, race, scope) => {
     decorate();
+    // 추천 카드, 또는 "이미 사용 중"으로 제외된 후보의 [다른 Client·범위에 추가](사람이 누르는 버튼을 그대로 누른다).
     const card = [...document.querySelectorAll("#for-you-list li.rec")].find((li) => li.dataset.toolId === toolId);
-    if (!card) return { status: "not-recommended", stages: [] };
-    const options = await open(toolId);
+    const addRow = card ? undefined : [...document.querySelectorAll("#for-you-diagnosis li[data-add-elsewhere]")].find((li) => li.dataset.toolId === toolId);
+    if (!card && !addRow) return { status: "not-recommended", stages: [] };
+    let options;
+    if (addRow) {
+      const opened = new Promise((resolve) => {
+        const observer = new MutationObserver(() => {
+          if (panel.querySelector(".install-clients") || panel.querySelector(".install-warning")) {
+            observer.disconnect();
+            resolve(panel.querySelector(".install-clients") ? true : null);
+          }
+        });
+        observer.observe(panel, { childList: true, subtree: true });
+      });
+      addRow.querySelector(".install-add").click();
+      options = await opened;
+    } else options = await open(toolId);
     if (options === null) return { status: "no-plan", stages: [] };
+    const entryNote = Boolean(panel.querySelector(".install-clients .add-elsewhere"));
     if (scope === "user") panel.querySelector('.install-scope input[data-scope="user"]').click();
     const choices = [...panel.querySelectorAll(".install-clients input[type=checkbox]")].map((i) => ({ client: i.dataset.client, enabled: !i.disabled, checked: i.checked, verification: i.dataset.verification }));
     if (Array.isArray(clients)) {
@@ -329,18 +355,21 @@
     });
     reviewButton.click();
     const state = await settled;
-    if (state.startsWith("failed:")) return { status: state.slice("failed:".length), stages: [], choices };
+    if (state.startsWith("failed:")) return { status: state.slice("failed:".length), stages: [], choices, entryNote };
     const previewLines = panel.querySelector(".install-preview").textContent.split("\n").length;
     const targets = [...panel.querySelectorAll(".install-targets li")].map((li) => li.textContent);
-    if (state === "already-installed") return { status: "no-op", stages: [], choices, targets };
+    const requirements = [...panel.querySelectorAll('.install-requirements input[type="checkbox"]')].map((b) => b.dataset.requirement);
+    const preview = panel.querySelector(".install-preview").textContent;
+    if (state === "already-installed") return { status: "no-op", stages: [], choices, targets, entryNote, message: ([...panel.children].filter((n) => n.tagName === "P").at(-1) || { textContent: "" }).textContent };
+    if (state === "not-executable") return { status: "not-executable", stages: [], choices, targets, entryNote, preview };
     for (const box of panel.querySelectorAll('.install-requirements input[type="checkbox"]')) {
       box.checked = true;
       box.dispatchEvent(new Event("change"));
     }
     const confirm = panel.querySelector(".install-confirm");
-    if (!confirm || confirm.disabled) return { status: "not-executable", stages: [], choices, targets };
+    if (!confirm || confirm.disabled) return { status: "not-executable", stages: [], choices, targets, entryNote };
     confirm.disabled = true;
     const result = await run(toolId);
-    return { status: result.status, stages: (result.stages || []).map((s) => s.name + ":" + s.value), preview: previewLines, choices, targets, configChanges: result.configChanges || [] };
+    return { status: result.status, stages: (result.stages || []).map((s) => s.name + ":" + s.value), preview: previewLines, choices, targets, requirements, entryNote, configChanges: result.configChanges || [] };
   };
 })();

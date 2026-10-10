@@ -1,6 +1,6 @@
 import path from "node:path";
 import { cpSync, mkdtempSync } from "node:fs";
-import { stat, unlink, writeFile } from "node:fs/promises";
+import { readFile, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import {
@@ -59,6 +59,8 @@ const smokeInstall = smoke ? process.env["OPENHUB_SMOKE_INSTALL"] || undefined :
 const smokeInstallClients = smokeInstall === undefined || !process.env["OPENHUB_SMOKE_INSTALL_CLIENTS"] ? undefined : process.env["OPENHUB_SMOKE_INSTALL_CLIENTS"].split(",").map((s) => s.trim()).filter((s) => s !== "");
 /** 스모크 경쟁 조건(v0.2.0 P0-3 PR C 보완): 먼저 이 Client로 계획을 요청하고 응답 전에 OPENHUB_SMOKE_INSTALL_CLIENTS로 바꾼다. */
 const smokeInstallRaceFirst = smokeInstallClients === undefined || !process.env["OPENHUB_SMOKE_INSTALL_RACE"] ? undefined : process.env["OPENHUB_SMOKE_INSTALL_RACE"].split(",").map((s) => s.trim()).filter((s) => s !== "");
+/** 스모크 설치 범위(v0.2.0 범위별 설치): "user"면 Client 선택 화면에서 User를 누른다. 사용자 설정은 임시 복사본 옆 임시 home에 쓴다. */
+const smokeInstallScope = smokeInstall === undefined ? undefined : process.env["OPENHUB_SMOKE_INSTALL_SCOPE"] === "user" ? "user" : undefined;
 /** 스모크에서 [프로젝트 선택] 대신 분석할 폴더(TASK-015). 스모크 설치면 임시 복사본을 쓴다. */
 const smokeProjectSource = process.env["OPENHUB_SMOKE_PROJECT"] || undefined;
 const smokeProject =
@@ -263,9 +265,27 @@ async function createWindow(): Promise<void> {
                 JSON.stringify(smokeInstall) +
                 ", " +
                 JSON.stringify(smokeInstallClients ?? null) +
-                (smokeInstallRaceFirst === undefined ? "" : ", " + JSON.stringify({ first: smokeInstallRaceFirst })) +
+                ", " +
+                (smokeInstallRaceFirst === undefined ? "null" : JSON.stringify({ first: smokeInstallRaceFirst })) +
+                ", " +
+                JSON.stringify(smokeInstallScope ?? null) +
                 ")",
             )) as { status: string; stages: string[]; choices?: unknown[]; targets?: string[]; configChanges?: string[] });
+      // 스모크 설치 뒤 임시 복사본(프로젝트·임시 home)의 Client 설정 파일 내용(다른 Client 설정 보존 확인용, 테스트 출력 전용).
+      const configFiles =
+        install === undefined || smokeProject === undefined
+          ? undefined
+          : Object.fromEntries(
+              await Promise.all(
+                [
+                  ["project/.mcp.json", path.join(smokeProject, ".mcp.json")],
+                  ["project/.cursor/mcp.json", path.join(smokeProject, ".cursor", "mcp.json")],
+                  ["project/.codex/config.toml", path.join(smokeProject, ".codex", "config.toml")],
+                  ["user/.cursor/mcp.json", path.join(path.dirname(smokeProject), ".cursor", "mcp.json")],
+                  ["user/.codex/config.toml", path.join(path.dirname(smokeProject), ".codex", "config.toml")],
+                ].map(async ([name, file]) => [name, await readFile(file!, "utf8").catch(() => null)] as const),
+              ),
+            );
       const update =
         smokeUpdate === undefined || install === undefined
           ? undefined
@@ -366,7 +386,7 @@ async function createWindow(): Promise<void> {
           runtime,
           onboarding,
           ...(project === undefined ? {} : { project, recommendations, forYou }),
-          ...(install === undefined ? {} : { install: { ...install, spawned: smokeDeps?.spawned.length ?? 0, dialogs: smokeDeps?.dialogs ?? 0 } }),
+          ...(install === undefined ? {} : { install: { ...install, spawned: smokeDeps?.spawned.length ?? 0, dialogs: smokeDeps?.dialogs ?? 0, configFiles } }),
           ...(update === undefined ? {} : { update: { ...update, fetched: smokeLifecycle?.fetched.length ?? 0, healthRuns: smokeLifecycle?.healthRuns ?? 0, spawned: smokeLifecycle?.spawned.length ?? 0, dialogs: smokeLifecycle?.dialogs ?? 0 } }),
           ...(rollbackChain === undefined ? {} : { rollbackChain: { ...rollbackChain, healthRuns: smokeLifecycle?.healthRuns ?? 0, npmCalls: (smokeLifecycle?.spawned ?? []).map((c) => c.slice(1).join(" ")), installNpmCalls: (smokeDeps?.spawned ?? []).map((c) => c.slice(1).join(" ")) } }),
           ...(repair === undefined ? {} : { repair: { ...repair, npmCalls: smokeRepair?.npmCalls.length ?? 0, healthRuns: smokeRepair?.healthRuns ?? 0, dialogs: smokeRepair?.dialogs ?? [] } }),

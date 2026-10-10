@@ -1,4 +1,4 @@
-import { loadMetadataSnapshot, loadRegistry, recommend, toRecommendPlatform, type ProjectProfile } from "@openhub/core";
+import { loadMetadataSnapshot, loadRegistry, recommend, toRecommendPlatform, type ProjectProfile, type RecommendPlatform, type RecommendationReport, type RegistryEntry } from "@openhub/core";
 import { buildForYouView, type ForYouView } from "./for-you-view";
 import { tr } from "./i18n/index";
 
@@ -50,13 +50,25 @@ export class RecommendSession {
   }
 }
 
-export async function recommendCurrentProject(session: RecommendSession, deps: RecommendDeps): Promise<RecommendResponse> {
+/** 현재 프로젝트(대화상자로 분석한 Profile)의 추천 보고서를 지금 Registry·metadata로 다시 만든다. 설치 진입 검증도 이 결과를 쓴다. */
+export async function currentRecommendation(
+  session: RecommendSession,
+  deps: RecommendDeps,
+): Promise<{ status: "no-project" } | { status: "ok"; profile: ProjectProfile; report: RecommendationReport; entries: readonly RegistryEntry[]; platform: RecommendPlatform | undefined }> {
   const profile = session.profile;
   if (profile === undefined) return { status: "no-project" };
+  const [{ entries }, snapshot] = await Promise.all([loadRegistry(deps.registryDir), loadMetadataSnapshot(deps.metadataFile)]);
+  const platform = toRecommendPlatform(deps.platform);
+  const report = recommend(profile, entries, snapshot, platform === undefined ? {} : { platform });
+  return { status: "ok", profile, report, entries, platform };
+}
+
+export async function recommendCurrentProject(session: RecommendSession, deps: RecommendDeps): Promise<RecommendResponse> {
+  if (session.profile === undefined) return { status: "no-project" };
   try {
-    const [{ entries }, snapshot] = await Promise.all([loadRegistry(deps.registryDir), loadMetadataSnapshot(deps.metadataFile)]);
-    const platform = toRecommendPlatform(deps.platform);
-    const report = recommend(profile, entries, snapshot, platform === undefined ? {} : { platform });
+    const current = await currentRecommendation(session, deps);
+    if (current.status !== "ok") return { status: "no-project" };
+    const { profile, report, entries, platform } = current;
     // 진단(v0.2.0 C3)은 같은 Profile·Registry·OS로 만든다. 새 점수·후보를 만들지 않는다.
     return { status: "ok", view: buildForYouView(report, { profile, entries, ...(platform === undefined ? {} : { platform }) }) };
   } catch {

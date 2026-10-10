@@ -12,6 +12,7 @@ import {
   clientLauncherDigest,
   containsAbsolutePath,
   createTreeKiller,
+  installTargetChange,
   lifecycleStatus,
   locateWindowsNpxLauncher,
   nodeExecSpawner,
@@ -575,6 +576,90 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 Kubernetes 사용자
       else process.env["KUBECONFIG"] = saved.kube;
       api.close();
       await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
+      await rm(npmCache, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }, 900_000);
+});
+
+
+describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 범위별 추가 설치 실제 E2E(Cursor 프로젝트 → Codex 프로젝트·Cursor 사용자 추가 → 실제 Health)", () => {
+  it("이미 Cursor 프로젝트에 있는 Kubernetes MCP를 Codex 프로젝트·Cursor 사용자 범위에 추가하고, 추가한 대상 그대로 실제 Health·MCP 호출이 통과한다", async () => {
+    const api = await startFakeApi();
+    const scratch = await mkdtemp(path.join(os.tmpdir(), "openhub e2e (add) & 한글-"));
+    const npmCache = await mkdtemp(path.join(os.tmpdir(), "openhub-e2e-npmcache-"));
+    const saved = { cache: process.env["npm_config_cache"], kube: process.env["KUBECONFIG"] };
+    try {
+      const kubeconfig = path.join(scratch, "kubeconfig.yaml");
+      await writeFile(kubeconfig, kubeconfigText(api.port));
+      process.env["npm_config_cache"] = npmCache;
+      process.env["KUBECONFIG"] = kubeconfig;
+      const entries: RegistryEntry[] = await seedEntries();
+      const h = await createHarness(scratch, { entries });
+      const windowsNpx = platform === "windows" ? await locateWindowsNpxLauncher({ pathEnv: process.env["PATH"] ?? "", fs: { stat } }) : null;
+      const { spawner: _fake, ...rest } = h.env;
+      const env: InstallEnvironment = { ...rest, spawner: nodeExecSpawner, windowsNpx: async () => windowsNpx, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env) };
+      const install = async (targets: { client: "codex" | "cursor"; scope: "project" | "user" }[]) => {
+        const request = { ...h.request("kubernetes-mcp-server", targets), platform } as const;
+        const planned = await plannedOf({ ...h, env }, request);
+        return { planned, request, run: async () => runInstallTransaction(planned, await approveAll(planned), request, env) };
+      };
+      const first = await install([{ client: "cursor", scope: "project" }]);
+      const r1 = await first.run();
+      expect(r1.status, JSON.stringify(r1.steps)).toBe("succeeded");
+      expect(await recordInstallInState(first.planned, r1, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() })).toMatchObject({ ok: true, recorded: 1 });
+      const cursorBytes = await readFile(path.join(h.projectRoot, ".cursor", "mcp.json"), "utf8");
+
+      // 추가: Cursor 프로젝트(변경 없음) + Codex 프로젝트(추가) + Cursor 사용자(추가). 새 대상만 쓴다.
+      const second = await install([{ client: "codex", scope: "project" }, { client: "cursor", scope: "project" }, { client: "cursor", scope: "user" }]);
+      expect(second.planned.plan.status).toBe("installable");
+      expect(second.planned.plan.targets.map((t) => [t.client, t.scope, installTargetChange(second.planned.plan, t)])).toEqual([
+        ["codex", "project", "add"],
+        ["cursor", "project", "unchanged"],
+        ["cursor", "user", "add"],
+      ]);
+      expect(second.planned.plan.approvalRequirements).toContain("user-scope-config");
+      const r2 = await second.run();
+      console.log("k8s add-elsewhere install " + JSON.stringify({ status: r2.status, changes: r2.configChanges.map((c) => c.client + ":" + c.scope + ":" + c.applied) }));
+      expect(r2.status).toBe("succeeded");
+      expect(r2.configChanges.map((c) => c.client + ":" + c.scope)).toEqual(["codex:project", "cursor:user"]);
+      expect(await readFile(path.join(h.projectRoot, ".cursor", "mcp.json"), "utf8")).toBe(cursorBytes);
+      expect(await recordInstallInState(second.planned, r2, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() })).toMatchObject({ ok: true, recorded: 2 });
+
+      // 추가한 Codex 프로젝트 항목·Cursor 사용자 항목 그대로 실제 MCP 서버를 띄운다(shell 없이).
+      const codexToml = await readFile(path.join(h.projectRoot, ".codex", "config.toml"), "utf8");
+      const codexEntry = (parseToml(codexToml) as { mcp_servers: Record<string, { command: string; args: string[] }> }).mcp_servers["kubernetes"]!;
+      const userEntry = (JSON.parse(await readFile(path.join(h.homeDir, ".cursor", "mcp.json"), "utf8")) as { mcpServers: Record<string, { command: string; args: string[] }> }).mcpServers["kubernetes"]!;
+      for (const [label, entry] of [["codex project", codexEntry], ["cursor user", userEntry]] as const) {
+        const before = api.requests.filter((r) => r.includes("/secrets")).length;
+        const s = await session(entry.command, entry.args, os.tmpdir(), CALLS);
+        expect(s.tools.length, label).toBe(13);
+        for (const r of s.replies.slice(0, 2)) expect(JSON.stringify(r), label).toMatch(/resource not allowed/u);
+        expect(JSON.stringify(s.replies[2]), label).toContain("LOG_LEVEL");
+        for (const banned of BANNED) expect(s.tools.map((t) => t.name), label).not.toContain(banned);
+        expect(s.transcript).not.toContain(TOKEN);
+        expect(s.transcript).not.toContain(SECRET_PLAIN);
+        expect(api.requests.filter((r) => r.includes("/secrets")).length, label).toBe(before);
+      }
+
+      // lifecycle Health(실제 MCP Health): 추가한 Codex 프로젝트 대상만.
+      const lifecycleEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), spawner: nodeExecSpawner, windowsNpx: async () => windowsNpx, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env) };
+      const req: LifecycleRequest = { operation: "health", toolId: "kubernetes-mcp-server", projectRoot: h.projectRoot, homeDir: h.homeDir, platform, includeUser: false, targets: [{ client: "codex", scope: "project" }] };
+      const built = await planLifecycleRequest(req, lifecycleEnv);
+      if (!built.ok) throw new Error(built.code);
+      const outcome = await requestLifecycleApproval(built.planned, { channel: "cli-tty", confirm: async (x) => x.requirements.map((y) => y.id) });
+      if (outcome.status !== "approved") throw new Error(outcome.status);
+      const health = await runLifecycleTransaction(built.planned, outcome.approval, req, lifecycleEnv);
+      console.log("k8s add-elsewhere health " + JSON.stringify(health.health));
+      expect(health).toMatchObject({ status: "health-checked", health: { status: "healthy", toolCount: 13 } });
+      const status = await lifecycleStatus({ projectRoot: h.projectRoot, homeDir: h.homeDir, entries, platform, includeUser: true });
+      expect(status.ok && status.items.map((i) => i.scope + ":" + i.client + ":" + i.state)).toEqual(["project:codex:state-consistent", "project:cursor:state-consistent", "user:cursor:state-consistent"]);
+    } finally {
+      if (saved.cache === undefined) delete process.env["npm_config_cache"];
+      else process.env["npm_config_cache"] = saved.cache;
+      if (saved.kube === undefined) delete process.env["KUBECONFIG"];
+      else process.env["KUBECONFIG"] = saved.kube;
+      api.close();
+      await rm(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(() => undefined);
       await rm(npmCache, { recursive: true, force: true }).catch(() => undefined);
     }
   }, 900_000);
