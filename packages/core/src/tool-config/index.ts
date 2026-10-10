@@ -67,11 +67,13 @@ export const REVIEWED_TOOL_CONFIGS: Readonly<Record<string, ReviewedToolConfig>>
     // - Windows: Claude Code 2.1.258이 OpenHub가 쓴 항목으로 서버를 실제로 시작("Connected"). Codex CLI 0.147.0이 격리 CODEX_HOME에서
     //   trust한 프로젝트의 .codex/config.toml(OpenHub가 쓴 항목)로 서버를 시작하고 tools/call(ConfigMap 성공, Secret 거부)까지(app-server,
     //   모델 호출 0, trust 없는 대조군은 서버 0개). Cursor 미설치.
-    // - Linux: 설치·Health·drift·repair와 Client 항목의 실행 명령은 sandbox에서 검증. 실제 Client 프로그램은 실행하지 않았다.
+    // - Linux(registry-remote.yml real_clients=true, run 38059220353): 같은 검사를 Linux runner에서 버전 고정 CLI로 실행. Claude Code
+    //   2.1.258 "Connected", Codex CLI 0.147.0 app-server가 trust한 프로젝트 설정으로 서버 시작(13 tools)·ConfigMap 성공·Secret 거부,
+    //   대조군 0개. 로그인·API key·모델 호출 없음. Cursor는 Linux에서도 실행하지 않았다.
     // - macOS: 미검증.
     clientVerification: Object.freeze({
       windows: Object.freeze({ "claude-code": "launch-verified", codex: "launch-verified", cursor: "not-verified" } as const),
-      linux: Object.freeze({ "claude-code": "not-verified", codex: "not-verified", cursor: "not-verified" } as const),
+      linux: Object.freeze({ "claude-code": "launch-verified", codex: "launch-verified", cursor: "not-verified" } as const),
       macos: Object.freeze({ "claude-code": "not-verified", codex: "not-verified", cursor: "not-verified" } as const),
     }),
     platformVerified: Object.freeze({ windows: true, linux: true, macos: false }),

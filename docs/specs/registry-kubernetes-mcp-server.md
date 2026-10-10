@@ -21,7 +21,7 @@ Labels: **Fact**, **Decision**, **Proposal**, **Open Question**. All facts measu
 ### Install plan notices (Decision)
 
 - `tool-config` (fixed text): OpenHub writes the server policy file and passes it with `--config`; the server acts with the kubeconfig user's permissions; OpenHub does not read the kubeconfig; secrets printed in pod or node logs are not blocked; use a read-only RBAC user.
-- `client-launch-unverified` (new): one warning per selected client that has not been verified to start the server from an OpenHub-written entry. Cursor: not verified. Claude Code and Codex have no warning.
+- `client-launch-unverified` (new): one warning per selected client that has not been verified **on the plan's OS** to start the server from an OpenHub-written entry. The message names the client and the OS, e.g. "Cursor (Windows): …". Windows and Linux: Cursor only. macOS: every client.
 - `platform-unverified` (new): shown on macOS, where no real install or run was done.
 - The warning `code` is free text in InstallPlan v1, so the schema does not change. Existing tools get none of these warnings (their goldens change only because the Registry digest changed).
 
@@ -63,15 +63,21 @@ Measured with the real Registry Manifest (`kubernetes-tool-config.e2e.test.ts`, 
 
 ## Client and platform verification levels (Decision)
 
-| Client or platform | Level | Shown in install plan |
-| --- | --- | --- |
-| Claude Code | launch verified (server started, "Connected") | no warning |
-| Codex | launch verified (Codex CLI 0.147.0, Windows): with an isolated CODEX_HOME that trusts the test project, Codex loaded the OpenHub-written project `.codex/config.toml`, started the server (13 tools) and its tool calls read the ConfigMap and were refused for the Secret; without the trust entry the server is not loaded | no warning |
-| Cursor | not verified (not installed on the test machine) | `client-launch-unverified` |
-| Windows, Linux | install, Health, drift and repair verified | no warning |
-| macOS | not verified | `platform-unverified` |
+Levels are kept per OS and client (`clientVerification[platform][client]`). Evidence from one OS is never applied to another, and a client on an OS whose `platformVerified` is false is always `not-verified` (enforced by a test). Core's plan warnings and the Desktop's English text are both built from `toolConfigVerificationGaps()`; the client picker reads `clientVerificationLevel()`.
 
-Proposal: when a level changes, update `clientVerification` / `platformVerified` in `REVIEWED_TOOL_CONFIGS` with the evidence, never by assumption.
+| OS | Claude Code | Codex | Cursor | Platform |
+| --- | --- | --- | --- | --- |
+| Windows | launch-verified | launch-verified | not-verified | install, Health, drift, repair verified |
+| Linux | launch-verified | launch-verified | not-verified | install, Health, drift, repair verified |
+| macOS | not-verified | not-verified | not-verified | `platform-unverified` |
+
+Evidence (2026-10-10, same checks on both OSes; no login, no API key, no model call):
+
+- Claude Code 2.1.258: `claude mcp list` with an isolated config directory started the server from the OpenHub-written project entry and reported "Connected". Windows: local run. Linux: `registry-remote.yml` with `real_clients=true`, run 38059220353.
+- Codex CLI 0.147.0: `codex app-server` with an isolated CODEX_HOME that trusts only the test project loaded the OpenHub-written project `.codex/config.toml`, started the server (13 tools), `resources_get` read the ConfigMap and was refused for the Secret, no Secret API request, no fake token in output; without the trust entry no server is loaded. Windows: local run. Linux: run 38059220353.
+- Cursor: not installed on either machine.
+
+Proposal: when a level changes, update `clientVerification` / `platformVerified` in `REVIEWED_TOOL_CONFIGS` with the evidence for that OS, never by assumption.
 
 ## Risks kept (not blocked by OpenHub)
 

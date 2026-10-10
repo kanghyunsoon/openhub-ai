@@ -54,8 +54,8 @@ describe("Registry Kubernetes Manifest", () => {
     const expected = {
       // Windows: Claude Code·Codex 실제 실행 확인(launch-verified) → 경고 없음. Cursor 미검증.
       windows: ["Cursor (Windows): 이 OS에서 이 Client의 실제 실행은 OpenHub가 검증하지 않았습니다."],
-      // Linux: 설치·Health·실행 명령은 검증했지만 실제 Client 프로그램은 실행하지 않았다 → 세 Client 모두 경고.
-      linux: ["Claude Code (Linux)", "Codex (Linux)", "Cursor (Linux)"].map((who) => who + ": 이 OS에서 이 Client의 실제 실행은 OpenHub가 검증하지 않았습니다."),
+      // Linux: 같은 실제 Client 검사를 Linux runner에서 확인(Claude Code·Codex) → Cursor만 경고.
+      linux: ["Cursor (Linux): 이 OS에서 이 Client의 실제 실행은 OpenHub가 검증하지 않았습니다."],
       // macOS: 플랫폼 미검증 → 세 Client 경고 + 플랫폼 경고.
       macos: [
         ...["Claude Code (macOS)", "Codex (macOS)", "Cursor (macOS)"].map((who) => who + ": 이 OS에서 이 Client의 실제 실행은 OpenHub가 검증하지 않았습니다."),
@@ -84,7 +84,7 @@ describe("Registry Kubernetes Manifest", () => {
     const matrix = Object.fromEntries(TOOL_CONFIG_PLATFORMS.map((p) => [p, Object.fromEntries(TOOL_CONFIG_CLIENTS.map((c) => [c, clientVerificationLevel("kubernetes-mcp-server", c, p)]))]));
     expect(matrix).toEqual({
       windows: { "claude-code": "launch-verified", codex: "launch-verified", cursor: "not-verified" },
-      linux: { "claude-code": "not-verified", codex: "not-verified", cursor: "not-verified" },
+      linux: { "claude-code": "launch-verified", codex: "launch-verified", cursor: "not-verified" },
       macos: { "claude-code": "platform-unverified", codex: "platform-unverified", cursor: "platform-unverified" },
     });
     expect(clientVerificationLevel("not-reviewed", "codex", "windows")).toBeNull();
