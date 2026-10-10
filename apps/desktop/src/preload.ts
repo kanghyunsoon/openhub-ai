@@ -29,6 +29,7 @@ const lifecycleBridge = {
   planLifecycleUpdate: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-update", String(id)),
   planLifecycleRollback: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-rollback", String(id)),
   planLifecycleHealth: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-health", String(id)),
+  planLifecycleRepair: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-repair", String(id)),
   runLifecycle: (id: unknown) => ipcRenderer.invoke("lifecycle:run", String(id)),
 };
 

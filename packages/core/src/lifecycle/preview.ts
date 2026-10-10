@@ -14,7 +14,7 @@ import { LIFECYCLE_STATE_LOGICAL_PATH } from "./store";
 
 const SCOPE_LABEL = { project: "프로젝트", user: "사용자" } as const;
 const CLIENT_LABEL = { "claude-code": "Claude Code", codex: "Codex", cursor: "Cursor" } as const;
-const OPERATION_LABEL = { update: "업데이트", rollback: "롤백", health: "Health Check", repair: "tool config 복구" } as const;
+const OPERATION_LABEL = { update: "업데이트", rollback: "롤백", health: "Health Check", repair: "복구" } as const;
 
 export const HEALTH_NOT_VERIFIED_LINES = ["Health: Not verified", "Reason: Required environment is unchecked"] as const;
 

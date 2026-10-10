@@ -1,5 +1,6 @@
 // Lifecycle(TASK-046): INSTALLED 카드. 상태 → [업데이트 확인]·[업데이트 계획]·[Health Check]·[이전 버전으로 롤백]
 // → Preview → 승인 항목 체크 → (main 프로세스 네이티브 확인 대화상자) → 진행 → 결과.
+// [복구 계획 확인](v0.2.0): main이 Core로 ready Repair Plan을 만들 수 있다고 알려 준 항목(canRepair)에만 보인다.
 // renderer는 state entry id 하나만 보낸다. Plan·digest·승인을 보내지 않는다. timer·polling이 없고
 // 업데이트 확인(network)은 버튼을 눌렀을 때만 한다. 모든 문자열은 textContent로만 넣는다.
 // skip된 Health는 Core 문장 그대로 "Health: Not verified"로 보인다.
@@ -24,8 +25,9 @@
     update: (id) => window.openhub.planLifecycleUpdate(id),
     rollback: (id) => window.openhub.planLifecycleRollback(id),
     health: (id) => window.openhub.planLifecycleHealth(id),
+    repair: (id) => window.openhub.planLifecycleRepair(id),
   };
-  const TITLE = { update: "업데이트", rollback: "롤백", health: "Health Check" };
+  const TITLE = { update: "업데이트", rollback: "롤백", health: "Health Check", repair: "복구" };
   let current = null;
 
   function show(children) {
@@ -48,6 +50,7 @@
     }
     if (item.canHealth) actions.append(button("lifecycle-health", "Health Check", () => void open("health", item.id)));
     if (item.canRollback) actions.append(button("lifecycle-rollback", "이전 버전으로 롤백", () => void open("rollback", item.id)));
+    if (item.canRepair) actions.append(button("lifecycle-repair", "복구 계획 확인", () => void open("repair", item.id)));
     if (actions.childElementCount > 0) li.append(actions);
     return li;
   }
@@ -84,6 +87,8 @@
 
   function renderResult(result) {
     const nodes = [el("h3", "", "결과 · " + result.status + (result.code ? " (" + result.code + ")" : ""))];
+    // 성공·실패·부분 실패·실행 안 함을 한 줄로 먼저 보여 준다(Health 실패를 성공으로 보이지 않는다).
+    if (result.summary) nodes.push(el("p", "lifecycle-outcome outcome-" + result.outcome, result.summary));
     for (const line of result.lines) nodes.push(el("p", line.trim().startsWith("-") ? "install-warning" : "install-change", line));
     show(nodes);
     void refresh();
@@ -189,6 +194,25 @@
     await refresh();
     const after = [...list.querySelectorAll("li.entry")].find((x) => x.dataset.toolId === toolId);
     return { status: result.status, health: result.health || [], preview: view.previewLines.length, rollbackButton: Boolean(after && after.querySelector(".lifecycle-rollback")) };
+  };
+
+  // 스모크(--smoke + OPENHUB_SMOKE_REPAIR): 화면과 같은 경로로 상태 → [복구 계획 확인] → 체크 → 확인 → 결과 → 최신 상태.
+  window.__openhubRepair = async (toolId) => {
+    await refresh();
+    const li = [...list.querySelectorAll("li.entry")].find((x) => x.dataset.toolId === toolId && x.querySelector(".lifecycle-repair"));
+    if (!li) return { status: "no-repair-button", states: [...list.querySelectorAll("li.entry")].map((x) => x.dataset.entryId) };
+    const view = await open("repair", li.dataset.entryId);
+    if (view === null) return { status: "no-plan" };
+    for (const box of panel.querySelectorAll('input[type="checkbox"]')) {
+      box.checked = true;
+      box.dispatchEvent(new Event("change"));
+    }
+    const confirm = panel.querySelector(".lifecycle-confirm");
+    if (!confirm || confirm.disabled) return { status: "not-executable" };
+    confirm.disabled = true;
+    const result = await run("repair", li.dataset.entryId);
+    const after = await refresh();
+    return { status: result.status, outcome: result.outcome, health: result.health || [], preview: view.previewLines.length, after: after.items ? after.items.map((i) => i.state) : [] };
   };
 })();
 
