@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import {
   INSTALL_CLIENTS,
   analyzeProject,
+  clientVerificationLevel,
   defaultHostEnvironment,
   loadRegistry,
   locateWindowsNpxLauncher,
@@ -38,10 +39,13 @@ import { tr } from "./i18n/index";
  *   renderer 체크박스는 확인 버튼을 켜는 화면 단계일 뿐 Approval을 만들지 않는다.
  * - Desktop은 Host Probe를 실행하지 않으므로(D-003·TASK-015) project scope만 계획한다. user scope 설치는 CLI --scope user다.
  * - Preview 문장은 CLI와 같은 Core formatInstallPlanPreview를 쓴다.
+ * - Client 선택(v0.2.0 P0-3 PR C): install:options가 Client별 지원·탐지·검증 수준을 보여 주고, install:plan은 사용자가 고른 Client만
+ *   계획한다. 고른 목록은 INSTALL_CLIENTS와 Manifest targets로 엄격히 검증한다(그 밖의 값이 하나라도 있으면 계획하지 않는다).
  */
 
 export const INSTALL_PLAN_CHANNEL = "install:plan";
 export const INSTALL_RUN_CHANNEL = "install:run";
+export const INSTALL_OPTIONS_CHANNEL = "install:options";
 
 type Listener = (...args: unknown[]) => unknown;
 interface IpcMainLike {
@@ -94,6 +98,36 @@ export type InstallPlanResponse =
   | { status: "ok"; view: InstallPlanView }
   | { status: "no-project" | "not-recommended" | "no-client" }
   | { status: "error"; code: string; message: string };
+
+export type ClientVerificationView = "launch-verified" | "spec-launch-verified" | "config-recognized" | "not-verified" | "platform-unverified" | "not-recorded";
+
+/** 설치 Client 선택 화면 데이터(v0.2.0 P0-3 PR C). 문자열은 renderer가 textContent로만 넣는다. */
+export interface InstallOptionsView {
+  toolId: string;
+  displayName: string;
+  platform: "windows" | "macos" | "linux";
+  /** Manifest platform에 지금 OS가 있는가. */
+  platformSupported: boolean;
+  /** Manifest가 지원한다고 적은 OS. */
+  platforms: ("windows" | "macos" | "linux")[];
+  /** Desktop 설치 범위(이 PR은 project만). */
+  scope: "project";
+  clients: {
+    client: InstallClient;
+    label: string;
+    /** Manifest targets에 있는가(없으면 고를 수 없다). */
+    supported: boolean;
+    /** 이 프로젝트에서 탐지된 Client인가. */
+    detected: boolean;
+    /** 기본 선택(지원 + 탐지). */
+    selected: boolean;
+    /** 이 OS에서 OpenHub의 실제 실행 검증 수준. 기록이 없으면 not-recorded. */
+    verification: ClientVerificationView;
+    note: string;
+  }[];
+}
+
+export type InstallOptionsResponse = { status: "ok"; view: InstallOptionsView } | { status: "no-project" | "not-recommended" } | { status: "error"; code: string; message: string };
 
 export interface InstallResultView {
   status: InstallResultV1["status"];
@@ -231,23 +265,94 @@ function environment(deps: InstallDeps, entries: Awaited<ReturnType<typeof loadR
   };
 }
 
-/** install:plan — 현재 추천 목록에 있는 toolId만 받는다. */
-export async function planForRenderer(session: InstallSession, deps: InstallDeps, toolId: unknown): Promise<InstallPlanResponse> {
+const CLIENT_LABEL: Readonly<Record<InstallClient, string>> = { "claude-code": "Claude Code", codex: "Codex", cursor: "Cursor" };
+const PLATFORM_KEYS = ["windows", "macos", "linux"] as const;
+
+/** 추천 목록에 있는 toolId인지 확인하고 Manifest·탐지된 Client를 돌려준다(install:options·install:plan 공통). */
+async function recommendedTool(session: InstallSession, deps: InstallDeps, toolId: unknown) {
+  const profile = deps.recommend.profile;
+  const dir = session.projectDir;
+  if (profile === undefined || dir === undefined) return { status: "no-project" as const };
+  if (typeof toolId !== "string") return { status: "not-recommended" as const };
+  const recommended = await recommendCurrentProject(deps.recommend, { registryDir: deps.registryDir, metadataFile: deps.metadataFile, platform: deps.platform });
+  if (recommended.status !== "ok" || !recommended.view.items.some((i) => i.toolId === toolId)) return { status: "not-recommended" as const };
+  const { entries } = await loadRegistry(deps.registryDir);
+  const manifest = entries.find((e) => e.manifest.name === toolId)?.manifest;
+  if (manifest === undefined) return { status: "not-recommended" as const };
+  const supported = (c: InstallClient) => (manifest.targets as readonly string[]).includes(c);
+  const detected = (c: InstallClient) => profile.aiClients.some((a) => a.id === c && a.scope === "project");
+  return { status: "ok" as const, toolId, dir, entries, manifest, supported, detected };
+}
+
+/**
+ * renderer가 보낸 Client 선택을 검증한다. clients 속성이 있는 객체만 선택으로 본다. 그 밖의 값(경로 문자열, Plan 객체 등)은
+ * AC-036-01처럼 무시하고 기존 기본값(지원 + 탐지)을 쓴다. clients가 있으면 배열이어야 하고 각 값은 INSTALL_CLIENTS이면서 Manifest가
+ * 지원해야 한다. 하나라도 아니면 invalid(아무것도 계획하지 않는다). 중복은 한 번으로 본다.
+ */
+export function parseClientSelection(selection: unknown, supported: (c: InstallClient) => boolean, detected: (c: InstallClient) => boolean): { ok: true; clients: InstallClient[] } | { ok: false } {
+  const isSelection = selection !== null && typeof selection === "object" && !Array.isArray(selection) && Object.prototype.hasOwnProperty.call(selection, "clients");
+  if (!isSelection) return { ok: true, clients: INSTALL_CLIENTS.filter((c) => supported(c) && detected(c)) };
+  const raw = (selection as { clients?: unknown }).clients;
+  if (!Array.isArray(raw) || raw.length > INSTALL_CLIENTS.length * 2) return { ok: false };
+  const out: InstallClient[] = [];
+  for (const value of raw) {
+    if (typeof value !== "string" || !(INSTALL_CLIENTS as readonly string[]).includes(value) || !supported(value as InstallClient)) return { ok: false };
+    if (!out.includes(value as InstallClient)) out.push(value as InstallClient);
+  }
+  return { ok: true, clients: INSTALL_CLIENTS.filter((c) => out.includes(c)) };
+}
+
+/** install:options — 현재 추천 목록에 있는 toolId의 Client 선택 화면 데이터. 계획·쓰기·실행 0. */
+export async function optionsForRenderer(session: InstallSession, deps: InstallDeps, toolId: unknown): Promise<InstallOptionsResponse> {
+  try {
+    const found = await recommendedTool(session, deps, toolId);
+    if (found.status !== "ok") return { status: found.status };
+    const platform = toRecommendPlatform(deps.platform);
+    if (platform === undefined) return { status: "error", code: "platform-unsupported", message: tr("install.platformUnsupported") };
+    const platforms = PLATFORM_KEYS.filter((p) => found.manifest.platform[p] === true);
+    const clients = INSTALL_CLIENTS.map((client) => {
+      const supported = found.supported(client);
+      const detected = found.detected(client);
+      const verification: ClientVerificationView = clientVerificationLevel(found.toolId, client, platform) ?? "not-recorded";
+      return { client, label: CLIENT_LABEL[client], supported, detected, selected: supported && detected, verification, note: clientNote(supported, detected, verification, platform) };
+    });
+    return { status: "ok", view: { toolId: found.toolId, displayName: found.manifest.displayName ?? found.toolId, platform, platformSupported: platforms.includes(platform), platforms, scope: "project", clients } };
+  } catch {
+    return { status: "error", code: "options-failed", message: tr("install.planFailedMain") };
+  }
+}
+
+const OS_LABEL = { windows: "Windows", macos: "macOS", linux: "Linux" } as const;
+const VERIFY_KEY = {
+  "launch-verified": "install.verify.launchVerified",
+  "spec-launch-verified": "install.verify.specLaunchVerified",
+  "config-recognized": "install.verify.configRecognized",
+  "not-verified": "install.verify.notVerified",
+  "platform-unverified": "install.verify.platformUnverified",
+  "not-recorded": "install.verify.notRecorded",
+} as const;
+
+function clientNote(supported: boolean, detected: boolean, verification: ClientVerificationView, platform: "windows" | "macos" | "linux"): string {
+  if (!supported) return tr("install.client.unsupported");
+  return [tr(detected ? "install.client.detected" : "install.client.notDetected"), tr(VERIFY_KEY[verification], { os: OS_LABEL[platform] })].join(" · ");
+}
+
+/** install:plan — 현재 추천 목록에 있는 toolId와 사용자가 고른 Client만 받는다. */
+export async function planForRenderer(session: InstallSession, deps: InstallDeps, toolId: unknown, selection?: unknown): Promise<InstallPlanResponse> {
   const profile = deps.recommend.profile;
   const dir = session.projectDir;
   if (profile === undefined || dir === undefined) return { status: "no-project" };
   if (typeof toolId !== "string") return { status: "not-recommended" };
-  const recommended = await recommendCurrentProject(deps.recommend, { registryDir: deps.registryDir, metadataFile: deps.metadataFile, platform: deps.platform });
-  if (recommended.status !== "ok" || !recommended.view.items.some((i) => i.toolId === toolId)) return { status: "not-recommended" };
   const platform = toRecommendPlatform(deps.platform);
   if (platform === undefined) return { status: "error", code: "platform-unsupported", message: tr("install.platformUnsupported") };
   try {
-    const { entries } = await loadRegistry(deps.registryDir);
-    const manifest = entries.find((e) => e.manifest.name === toolId)?.manifest;
-    const clients = INSTALL_CLIENTS.filter((c) => profile.aiClients.some((a) => a.id === c && a.scope === "project") && (manifest?.targets as readonly string[] | undefined)?.includes(c));
-    if (clients.length === 0) return { status: "no-client" };
-    const request: InstallRequest = { toolId, projectRoot: dir, homeDir: deps.homeDir, targets: clients.map((client: InstallClient) => ({ client, scope: "project" as const })), includeHost: false, platform };
-    const { result } = await planInstall(request, environment(deps, entries));
+    const found = await recommendedTool(session, deps, toolId);
+    if (found.status !== "ok") return { status: found.status };
+    const chosen = parseClientSelection(selection, found.supported, found.detected);
+    if (!chosen.ok) return { status: "error", code: "invalid-selection", message: tr("install.invalidSelection") };
+    if (chosen.clients.length === 0) return { status: "no-client" };
+    const request: InstallRequest = { toolId, projectRoot: dir, homeDir: deps.homeDir, targets: chosen.clients.map((client: InstallClient) => ({ client, scope: "project" as const })), includeHost: false, platform };
+    const { result } = await planInstall(request, environment(deps, found.entries));
     if (!result.ok) return { status: "error", code: result.code, message: tr("install.manifestRejected") };
     session.remember(toolId, result.planned, request);
     return { status: "ok", view: buildInstallPlanView(result.planned) };
@@ -293,9 +398,10 @@ async function recordDesktopInstall(planned: PlannedInstall, result: InstallResu
   if (!recorded.ok) view.warnings.push(tr("install.stateRecordFailed", { code: recorded.code }));
 }
 
-/** IPC 핸들러 등록. 첫 번째 인자(toolId)만 쓰고 나머지는 무시한다. */
+/** IPC 핸들러 등록. install:plan은 toolId와 Client 선택만, 나머지는 toolId만 쓴다(그 밖의 인자는 무시한다). */
 export function registerInstall(ipc: IpcMainLike, session: InstallSession, deps: InstallDeps): void {
-  ipc.handle(INSTALL_PLAN_CHANNEL, (_event: unknown, toolId: unknown) => planForRenderer(session, deps, toolId));
+  ipc.handle(INSTALL_OPTIONS_CHANNEL, (_event: unknown, toolId: unknown) => optionsForRenderer(session, deps, toolId));
+  ipc.handle(INSTALL_PLAN_CHANNEL, (_event: unknown, toolId: unknown, selection: unknown) => planForRenderer(session, deps, toolId, selection));
   ipc.handle(INSTALL_RUN_CHANNEL, (_event: unknown, toolId: unknown) => runForRenderer(session, deps, toolId));
 }
 

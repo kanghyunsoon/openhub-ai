@@ -46,7 +46,9 @@ describe("REQ-010 Desktop Project Scan", () => {
     // TASK-046(M5): Lifecycle 브리지(lifecycleBridge)가 추가됐다. 경로가 아니라 state entry id 문자열 하나만 보낸다
     // (main이 현재 프로젝트의 Version State 항목인지 다시 확인한다). 분석 브리지는 여전히 인자가 없다.
     expect(preload).toMatch(/exposeInMainWorld\("openhub", \{\s*listRegistry: \(\) => ipcRenderer\.invoke\("registry:list"\),\s*\.\.\.projectBridge,\s*\.\.\.recommendBridge,\s*\.\.\.installBridge,\s*\.\.\.lifecycleBridge,\s*\}\)/u);
-    expect(preload).toMatch(/planInstall: \(toolId: unknown\) => ipcRenderer\.invoke\("install:plan", String\(toolId\)\)/u);
+    // v0.2.0 P0-3 PR C: 설치 브리지는 toolId 문자열과 Client 이름 문자열 목록만 보낸다(경로 없음).
+    expect(preload).toMatch(/planInstall: \(toolId: unknown, selection\?: unknown\) => \{/u);
+    expect(preload).toContain('ipcRenderer.invoke("install:plan", String(toolId), clients === undefined ? undefined : { clients })');
     expect(preload).toMatch(/runLifecycle: \(id: unknown\) => ipcRenderer\.invoke\("lifecycle:run", String\(id\)\)/u);
   });
 

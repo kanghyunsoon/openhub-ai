@@ -20,7 +20,7 @@ import {
   type ExecChild,
   type ExecSpawner,
 } from "@openhub/core";
-import { INSTALL_PLAN_CHANNEL, INSTALL_RUN_CHANNEL, InstallSession, buildInstallPlanView, nativeDialogPrompter, registerInstall, smokeInstallDeps, type InstallPlanResponse, type InstallRunResponse, type NativeDialogLike } from "../src/install";
+import { INSTALL_OPTIONS_CHANNEL, INSTALL_PLAN_CHANNEL, INSTALL_RUN_CHANNEL, InstallSession, buildInstallPlanView, nativeDialogPrompter, registerInstall, smokeInstallDeps, type InstallPlanResponse, type InstallRunResponse, type NativeDialogLike } from "../src/install";
 import { PROJECT_SCAN_CHANNEL, fixedDirectory, registerProjectScan } from "../src/project-scan";
 import { PROJECT_RECOMMEND_CHANNEL, RecommendSession, registerProjectRecommend } from "../src/recommend";
 
@@ -103,9 +103,13 @@ describe("REQ-034 Desktop 설치 흐름", () => {
     expect(ok.status).toBe("ok");
     if (ok.status === "ok") expect(ok.view.targets.map((t) => t.file)).toEqual([".mcp.json"]);
     for (const bad of ["no-such-tool", "../registry/x", 42, { toolId: "postgres-mcp" }]) expect((await w.plan(bad)).status, String(bad)).toBe("not-recommended");
-    expect([...w.handlers.keys()].filter((c) => c.startsWith("install:")).sort()).toEqual([INSTALL_PLAN_CHANNEL, INSTALL_RUN_CHANNEL].sort());
+    // v0.2.0 P0-3 PR C: Client 선택 화면 채널(install:options, toolId만)이 추가됐다. install:plan의 두 번째 인자는 clients 속성이 있는
+    // 객체일 때만 Client 선택으로 쓰고(엄격 검증), 위처럼 경로·Plan을 보내면 여전히 무시한다.
+    expect([...w.handlers.keys()].filter((c) => c.startsWith("install:")).sort()).toEqual([INSTALL_OPTIONS_CHANNEL, INSTALL_PLAN_CHANNEL, INSTALL_RUN_CHANNEL].sort());
     const preload = await read("src/preload.ts");
-    expect(preload).toContain('planInstall: (toolId: unknown) => ipcRenderer.invoke("install:plan", String(toolId))');
+    expect(preload).toContain('installOptions: (toolId: unknown) => ipcRenderer.invoke("install:options", String(toolId))');
+    expect(preload).toContain('return ipcRenderer.invoke("install:plan", String(toolId), clients === undefined ? undefined : { clients });');
+    expect(preload).toContain(".clients.slice(0, 6).map(String)");
     expect(preload).toContain('runInstall: (toolId: unknown) => ipcRenderer.invoke("install:run", String(toolId))');
     expect(await read("renderer/install.js")).toContain('t("install.open")');
     expect(ko["install.open"]).toBe("설치 계획 보기");

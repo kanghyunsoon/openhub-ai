@@ -71,6 +71,11 @@ button:hover { filter: brightness(1.1); }
 .install-targets, .install-stages, .install-next { margin: 6px 0; padding-left: 16px; font-size: 11px; line-height: 1.5; }
 .install-requirements { display: grid; gap: 6px; margin: 8px 0; font-size: 11px; line-height: 1.4; }
 .install-requirements .requirement { display: flex; gap: 6px; align-items: flex-start; }
+.install-clients { display: grid; gap: 6px; margin: 0 0 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(127, 127, 127, 0.25); font-size: 11px; line-height: 1.4; }
+.install-clients h3 { margin: 0 0 2px; }
+.client-choice { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.client-choice.unsupported { opacity: 0.55; }
+.client-choice .client-note { flex-basis: 100%; padding-left: 20px; opacity: 0.8; }
 .warn-user-scope { color: var(--warn); border-left: 3px solid var(--warn); padding-left: 6px; }
 .install-warning { color: var(--warn); font-size: 11px; }
 .lifecycle { list-style: none; padding: 0; margin: 8px 0 0; }

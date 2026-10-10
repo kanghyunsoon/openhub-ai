@@ -54,6 +54,8 @@ ipcMain.handle("i18n:set", async (_event, value: unknown) => {
 const screenshot = process.env["OPENHUB_SCREENSHOT"] || undefined;
 /** 스모크 설치(TASK-036): --smoke일 때만. 대상 프로젝트는 임시 복사본이고 fake probe·executor·자동 확인 대화상자를 쓴다. */
 const smokeInstall = smoke ? process.env["OPENHUB_SMOKE_INSTALL"] || undefined : undefined;
+/** 스모크 설치에서 Client 선택 화면에 체크할 Client(쉼표 목록, v0.2.0 P0-3 PR C). 없으면 기본 선택 그대로. */
+const smokeInstallClients = smokeInstall === undefined || !process.env["OPENHUB_SMOKE_INSTALL_CLIENTS"] ? undefined : process.env["OPENHUB_SMOKE_INSTALL_CLIENTS"].split(",").map((s) => s.trim()).filter((s) => s !== "");
 /** 스모크에서 [프로젝트 선택] 대신 분석할 폴더(TASK-015). 스모크 설치면 임시 복사본을 쓴다. */
 const smokeProjectSource = process.env["OPENHUB_SMOKE_PROJECT"] || undefined;
 const smokeProject =
@@ -205,7 +207,9 @@ async function createWindow(): Promise<void> {
       const install =
         smokeInstall === undefined || recommendations === undefined
           ? undefined
-          : ((await win.webContents.executeJavaScript("window.__openhubInstall(" + JSON.stringify(smokeInstall) + ")")) as { status: string; stages: string[] });
+          : ((await win.webContents.executeJavaScript(
+              "window.__openhubInstall(" + JSON.stringify(smokeInstall) + (smokeInstallClients === undefined ? "" : ", " + JSON.stringify(smokeInstallClients)) + ")",
+            )) as { status: string; stages: string[]; choices?: unknown[]; targets?: string[]; configChanges?: string[] });
       const update =
         smokeUpdate === undefined || install === undefined
           ? undefined
