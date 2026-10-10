@@ -14,8 +14,14 @@ import { PLAN_CHANGE_KINDS } from "./stale";
 export const INSTALL_RESULT_SCHEMA_VERSION = 1;
 export const INSTALL_RESULT_STATUSES = ["succeeded", "no-op", "failed", "partial-compensated", "stale", "rejected", "approval-required"] as const;
 export type InstallResultStatus = (typeof INSTALL_RESULT_STATUSES)[number];
-export const PREPARED_STATES = ["launch-on-demand", "pulled", "failed"] as const;
+/** cached: npx Prepare가 정확한 버전을 npx cache에 받아 두었다(v0.2.0). */
+export const PREPARED_STATES = ["launch-on-demand", "pulled", "cached", "failed"] as const;
 export type PreparedState = (typeof PREPARED_STATES)[number];
+
+/** 준비 단계가 모두 성공했을 때의 Prepared 상태. */
+export function preparedStateOf(preparation: "launch-on-demand" | "pull" | "npm-cache" | undefined): Exclude<PreparedState, "failed"> {
+  return preparation === "pull" ? "pulled" : preparation === "npm-cache" ? "cached" : "launch-on-demand";
+}
 
 const text = z.string().min(1).max(400);
 

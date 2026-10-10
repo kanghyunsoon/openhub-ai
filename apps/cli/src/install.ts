@@ -7,10 +7,12 @@ import {
   INSTALL_CLIENTS,
   LIFECYCLE_STATE_LOGICAL_PATH,
   analyzeProject,
+  defaultHostEnvironment,
   formatInstallPlanPreview,
   formatRegistryIssue,
   installPlanSchema,
   loadRegistry,
+  locateWindowsNpxLauncher,
   planInstall,
   probeBackends,
   recordInstallInState,
@@ -106,7 +108,7 @@ export function cliApprovalPrompter(toolId: string, prompter: InstallPrompter, i
   };
 }
 
-const VERIFICATION_LABEL = { "launch-on-demand": "launch-on-demand(Client 첫 실행 때 받음)", pulled: "pulled", failed: "failed" } as const;
+const VERIFICATION_LABEL = { "launch-on-demand": "launch-on-demand(Client 첫 실행 때 받음)", pulled: "pulled", cached: "cached(npx cache에 미리 받음)", failed: "failed" } as const;
 
 export function formatInstallResult(result: InstallResultV1): string[] {
   const lines = ["", "결과  " + result.status + (result.code === undefined ? "" : " (" + result.code + ")")];
@@ -222,6 +224,11 @@ export async function runInstall(argv: readonly string[], io: InstallCommandIO, 
     },
     probe: io.probe ?? (() => probeBackends()),
     verify: verifyInstallation,
+    // npx Prepare(정확한 버전 npx 패키지)는 Windows에서 cmd 없이 node.exe + npx-cli.js로 실행한다.
+    windowsNpx: async () => {
+      const host = { ...defaultHostEnvironment(), ...(io.hostEnvironment ?? {}) };
+      return locateWindowsNpxLauncher({ pathEnv: host.pathEnv, fs: host.fs });
+    },
     ...(io.spawner === undefined ? {} : { spawner: io.spawner }),
     ...(io.configFs === undefined ? {} : { configFs: io.configFs }),
     ...(io.isolatedDir === undefined ? {} : { isolatedDir: io.isolatedDir }),

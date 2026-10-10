@@ -4,6 +4,7 @@ import { containsAbsolutePath } from "../analyzer/index";
 import type { Manifest } from "../manifest/index";
 import type { RegistryEntry } from "../registry/index";
 import { TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, type RecommendationReport } from "../recommendation/index";
+import { parseNpxPrepareArgs } from "../process/npx-prepare";
 
 /**
  * Immutable InstallPlan v1(TASK-027, D-012).
@@ -41,6 +42,9 @@ export const PROBE_STATUSES = ["ok", "not-found", "timeout", "error", "shim-not-
 /** Plan Preview 고정 문구(§8, §9). */
 export const FLOATING_ARTIFACT_NOTICE =
   "이 설치 계획은 실행 명령과 설정을 고정하지만, 원격 패키지 내용 자체는 고정하지 않습니다. 동일한 계획을 나중에 실행하면 다른 artifact가 내려올 수 있습니다.";
+/** npx Prepare 고지(InstallPlan·LifecyclePlan 공통). */
+export const NPX_PREPARE_NOTICE =
+  "설정을 쓰기 전에 이 버전의 npm 패키지를 npx cache에 내려받습니다. MCP 서버는 실행하지 않지만, npm은 설치 중 의존성의 설치 스크립트를 실행할 수 있습니다(Client가 처음 실행할 때와 같습니다). 같은 패키지·버전의 불완전한 cache 항목이 있으면 그 항목만 지우고 다시 받습니다.";
 export function requiredEnvNotice(name: string): string {
   return `이 도구는 실행 시 ${name} 환경변수가 필요합니다. OpenHub는 값이나 설정 여부를 확인하거나 저장하지 않습니다.`;
 }
@@ -62,7 +66,8 @@ export type ServerEntry = z.output<typeof serverEntrySchema>;
 export const runStepSchema = z.strictObject({
   id: text,
   kind: z.literal("run"),
-  executable: z.literal("docker"),
+  /** docker: docker pull. npx: npx Prepare(고정 인자, process/npx-prepare.ts가 실행). */
+  executable: z.enum(["docker", "npx"]),
   args: z.array(text).min(1),
   cwd: z.enum(["project", "isolated"]),
   network: z.boolean(),
@@ -141,7 +146,8 @@ export const installPlanSchema = z
         kind: z.enum(["npm-package", "python-package", "container-image"]),
         spec: text,
         pinned: z.boolean(),
-        preparation: z.enum(["launch-on-demand", "pull"]),
+        /** npm-cache: 정확한 버전의 npm 패키지를 승인 후 npx cache에 미리 받는다(npx Prepare). */
+        preparation: z.enum(["launch-on-demand", "pull", "npm-cache"]),
       })
       .nullable(),
     launch: z
@@ -173,6 +179,14 @@ export const installPlanSchema = z
         ctx.addIssue({ code: "custom", path: ["launch", "clientSpec"], message: "clientSpec이 플랫폼별 launch 규칙(D-016)과 다릅니다" });
       }
     }
+    // npx Prepare는 고정 인자·정확한 버전이고, artifact(npm-cache)와 같은 spec이어야 한다.
+    plan.steps.forEach((step, i) => {
+      if (step.kind !== "run" || step.executable !== "npx") return;
+      const spec = parseNpxPrepareArgs(step.args);
+      if (spec === null || plan.artifact?.preparation !== "npm-cache" || plan.artifact.spec !== spec || plan.launch?.executable !== "npx") {
+        ctx.addIssue({ code: "custom", path: ["steps", i], message: "npx 준비 단계는 정확한 버전의 artifact와 같은 spec만 받을 수 있습니다" });
+      }
+    });
     for (const found of strings(plan)) {
       const problem = containsAbsolutePath(found.value)
         ? "절대 경로"
@@ -349,6 +363,7 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
   const warnings: InstallPlanV1["warnings"] = blockers.map((b) => ({ code: b.code, message: b.message }));
   if (!installed) {
     if (input.artifact !== null && !input.artifact.pinned) warnings.push({ code: "floating-artifact", message: FLOATING_ARTIFACT_NOTICE });
+    if (input.artifact?.preparation === "npm-cache") warnings.push({ code: "npx-prepare", message: NPX_PREPARE_NOTICE });
     if (input.backend?.adapter === "docker") warnings.push({ code: "docker-daemon-unchecked", message: "docker 데몬 연결 여부는 확인하지 않았습니다. 데몬이 꺼져 있으면 준비 단계가 실패합니다" });
     for (const name of requiredNames) warnings.push({ code: "required-env", message: requiredEnvNotice(name) });
     if (approvalRequirements.has("client-env-parse-risk")) warnings.push({ code: "client-env-parse-risk", message: clientEnvParseRiskNotice(requiredNames) });

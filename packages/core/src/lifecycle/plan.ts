@@ -14,13 +14,15 @@ import {
   type KernelPrompter,
   type KernelVerified,
 } from "../installer/approval-v1";
-import { BACKEND_ADAPTERS, DOCKER_PULL_TIMEOUT_MS, clientLaunchSpec } from "../installer/backends";
-import { isValidDockerImage, parseNpmSpec, tokenizeManifestCommand } from "../installer/command";
+import { BACKEND_ADAPTERS, DOCKER_PULL_TIMEOUT_MS, clientLaunchSpec, npxPrepareStepFor } from "../installer/backends";
+import { isPinnedArtifact, isValidDockerImage, npxArtifact, parseNpmSpec, tokenizeManifestCommand } from "../installer/command";
+import { parseNpxPrepareArgs } from "../process/npx-prepare";
 import { configTargetFor, inspectConfigTarget, nodeConfigFs, readConfiguredEntry, type ConfigFs } from "../installer/config-writer";
 import {
   CONFIG_SCOPES,
   INSTALL_BACKENDS,
   INSTALL_CLIENTS,
+  NPX_PREPARE_NOTICE,
   canonicalize,
   manifestDigest,
   registryDigestExcluding,
@@ -170,6 +172,11 @@ export const lifecyclePlanSchema = z
     if (plan.status === "ready" && hasHealth !== (plan.healthPolicy.gate === "required")) {
       ctx.addIssue({ code: "custom", path: ["steps"], message: "Health 단계는 gate가 required일 때만 있다" });
     }
+    plan.steps.forEach((step, i) => {
+      if (step.kind === "run" && step.executable === "npx" && (plan.backend !== "npx" || parseNpxPrepareArgs(step.args) === null)) {
+        ctx.addIssue({ code: "custom", path: ["steps", i], message: "npx 준비 단계는 npx backend의 정확한 버전 spec만 받을 수 있습니다" });
+      }
+    });
     for (const found of strings(plan)) {
       const problem = containsAbsolutePath(found.value) ? "절대 경로" : URL_CREDENTIAL_PATTERN.test(found.value) ? "URL credential" : TOKEN_PATTERN.test(found.value) ? "token" : undefined;
       if (problem !== undefined) ctx.addIssue({ code: "custom", path: found.path, message: "LifecyclePlan에 " + problem + "이(가) 포함될 수 없습니다" });
@@ -259,6 +266,12 @@ export function assembleLifecyclePlan(input: LifecyclePlanAssemblyInput): Planne
   if (ready && operation === "health") {
     steps.push(healthStep, { id: "health-record", kind: "health-record", entries: entryKeys });
   } else if (ready) {
+    // npx Prepare: 정확한 버전으로 고정된 대상이면 설정을 바꾸기 전에 npx cache를 채운다(Health 20 s 안에 시작하도록).
+    if (backend === "npx") {
+      const ref = npxArtifact(input.target.launchArgs);
+      const prepare = ref === null ? null : npxPrepareStepFor(backend, ref.spec, isPinnedArtifact("npx", ref));
+      if (prepare !== null) steps.push(prepare);
+    }
     if (backend === "docker") {
       // update는 resolved digest, rollback은 직전 identity(없으면 직전 launch 인자의 image)를 받는다.
       const image = input.target.identity?.spec ?? input.target.launchArgs[input.target.launchArgs.length - 1]!;
@@ -294,6 +307,7 @@ export function assembleLifecyclePlan(input: LifecyclePlanAssemblyInput): Planne
   if (ready) {
     if (operation !== "health" && backend !== "docker") warnings.push({ code: "version-level-lock", message: VERSION_LEVEL_LOCK_NOTICE });
     if (operation === "rollback" && input.target.identity === null) warnings.push({ code: "rollback-artifact-unlocked", message: ROLLBACK_UNLOCKED_NOTICE });
+    if (steps.some((s) => s.kind === "run" && s.executable === "npx")) warnings.push({ code: "npx-prepare", message: NPX_PREPARE_NOTICE });
     if (backend === "docker") warnings.push({ code: "docker-daemon-unchecked", message: "docker 데몬 연결 여부는 확인하지 않았습니다. 데몬이 꺼져 있으면 준비·Health 단계가 실패합니다" });
     if (steps.some((s) => s.kind === "health")) {
       warnings.push({ code: "health-execution", message: HEALTH_EXECUTION_NOTICE });

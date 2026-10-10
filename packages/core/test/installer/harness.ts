@@ -19,6 +19,7 @@ import {
   type RegistryEntry,
 } from "../../src/index";
 import { ALL_AVAILABLE } from "./helpers";
+import { fakeNpmSpawner, isNpxPrepareCall } from "../process/fake-npm";
 
 /**
  * 설치 흐름 테스트 harness: 임시 project·home, 실제 analyzeProject(home은 임시 디렉터리로 주입),
@@ -31,6 +32,8 @@ export interface HarnessOptions {
   failRenameFor?: string;
   verify?: boolean;
   packageJson?: string;
+  /** npx Prepare 가짜 npm의 동작(기본 ok). */
+  npmPrepare?: "ok" | "fail" | "incomplete" | "hang" | "wrong-version";
 }
 
 export interface Harness {
@@ -73,7 +76,14 @@ export async function createHarness(scratch: string, options: HarnessOptions): P
     mkdir: async (d) => (writes.push("mkdir:" + rel(d)), nodeConfigFs.mkdir(d)),
     rm: async (f) => (writes.push("rm:" + rel(f)), nodeConfigFs.rm(f)),
   };
-  const spawner: ExecSpawner = (executable, args) => {
+  // npx Prepare(npm config get cache, npx --package=…)는 임시 npm cache에 흉내 낸다(v0.2.0). 기록은 spawns에 함께 남는다.
+  const npm = fakeNpmSpawner({ cacheRoot: path.join(base, "npm-cache"), ...(options.npmPrepare === undefined ? {} : { prepare: options.npmPrepare }) });
+  const spawner: ExecSpawner = (executable, args, spawnOptions) => {
+    if (isNpxPrepareCall(args)) {
+      spawns.push([executable, ...args]);
+      log.push("spawn");
+      return npm.spawner(executable, args, spawnOptions);
+    }
     spawns.push([executable, ...args]);
     log.push("spawn");
     const events = new EventEmitter();

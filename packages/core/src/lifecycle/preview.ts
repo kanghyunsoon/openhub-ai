@@ -50,7 +50,10 @@ export function formatLifecyclePlanPreview(planned: PlannedLifecycle): string[] 
       "준비 단계    " +
         (run.length === 0
           ? "없음 — 패키지 매니저 명령을 실행하지 않고 Client 설정의 패키지 인자만 바꿉니다"
-          : run.map((s) => s.executable + " " + s.args.join(" ")).join(", ") + " — OpenHub가 실행합니다(네트워크·다운로드, 받은 image는 지우지 않습니다)"),
+          : run.map((s) => s.executable + " " + s.args.join(" ")).join(", ") +
+            (run.every((s) => s.executable === "npx")
+              ? " — OpenHub가 설정을 바꾸기 전에 이 버전을 npx cache에 받습니다(MCP 서버는 실행하지 않음, 네트워크·다운로드·의존성 설치 스크립트)"
+              : " — OpenHub가 실행합니다(네트워크·다운로드, 받은 image는 지우지 않습니다)")),
     );
     lines.push("Client 실행 명령");
     lines.push("  현재  " + spec(plan.current.clientSpec));

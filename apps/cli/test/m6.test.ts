@@ -7,6 +7,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { containsAbsolutePath, nodeConfigFs, readLifecycleState, type BackendProbeReport, type ConfigFs, type ExecChild, type ExecSpawner, type LifecycleEnvironment } from "@openhub/core";
 import { runCli } from "../src/cli";
 import { memoryIO } from "./helpers";
+import { fakeNpmSpawner, isNpxPrepareCall } from "../../../packages/core/test/process/fake-npm";
 import { COMMIT, newHome, pinokioManifest, ptermLayout, realFs } from "../../../packages/core/test/pinokio/helpers";
 
 /** TASK-056 CLI: releases·impact·update 머리말·discover·install --backend pinokio·pinokio inspect. 네트워크는 가짜 fetch뿐이다. */
@@ -76,6 +77,8 @@ async function ctx(): Promise<Ctx> {
     const io = memoryIO(c.repo);
     const spawner: ExecSpawner = (exe, a) => {
       c.spawns.push([exe, ...a]);
+      // npx Prepare(v0.2.0)는 임시 npm cache에 흉내 낸다.
+      if (isNpxPrepareCall(a)) return fakeNpmSpawner({ cacheRoot: path.join(base, "npm-cache") }).spawner(exe, a, { shell: false, cwd: base, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
       const events = new EventEmitter();
       queueMicrotask(() => events.emit("close", 0, null));
       return { stdout: null, stderr: null, on: (e: string, l: (...x: unknown[]) => void) => events.on(e, l), kill: () => true } as ExecChild;

@@ -7,6 +7,7 @@ import { isVerifiedPlan, type VerifiedPlan } from "../installer/approval-v1";
 import type { ConfigPatchStep, RunStep } from "../installer/plan";
 import { isVerifiedLifecyclePlan, type VerifiedLifecyclePlan } from "../lifecycle/plan";
 import { redactSensitive } from "../recommendation/index";
+import { prepareNpxPackage, type NpxPrepareContext } from "./npx-prepare";
 
 /**
  * 공통 Process Executor(TASK-031, D-012). 프로세스를 실행하는 곳은 여기(와 read-only probe)뿐이다.
@@ -16,6 +17,7 @@ import { redactSensitive } from "../recommendation/index";
  * - timeout이면 종료하고 signal을 기록한다. stdout·stderr는 각 64KB만 보관하고 결과에는 redact한 마지막 1KB만 남긴다.
  * - cwd는 project root 또는 OpenHub가 만든 격리 임시 디렉터리뿐이다. symlink·junction으로 밖을 가리키면 거부한다.
  * - 준비 단계(run)가 모두 성공한 뒤에만 config-patch 단계를 onConfigStep으로 넘긴다. 실패하면 이후 단계는 skipped다.
+ * - npx 준비 단계(npx Prepare)는 고정 인자만 받으며 process/npx-prepare.ts가 실행한다(executable "npx"를 그대로 spawn하지 않는다).
  * - probe 모듈을 import하지 않는다.
  */
 
@@ -27,6 +29,7 @@ interface DataStream {
   on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
 }
 export interface ExecChild {
+  readonly pid?: number | undefined;
   readonly stdout: DataStream | null;
   readonly stderr: DataStream | null;
   on(event: "close", listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
@@ -74,6 +77,8 @@ export interface ExecutorOptions {
   isolatedDir?: () => Promise<IsolatedDir>;
   /** config-patch 단계 적용(TASK-032 Config Writer·TASK-033 Transaction). 준비 단계가 모두 성공한 뒤에만 호출된다. */
   onConfigStep?: (step: ConfigPatchStep) => Promise<StepOutcome>;
+  /** npx Prepare 실행 문맥(플랫폼·Windows npx 경로·tree killer). 없으면 npx 준비 단계는 NPX_PREPARE_UNAVAILABLE로 실패한다. */
+  npx?: Omit<NpxPrepareContext, "spawner" | "timeoutMs">;
 }
 
 export type ExecutionReport =
@@ -145,6 +150,13 @@ async function resolveCwd(kind: RunStep["cwd"], options: ExecutorOptions): Promi
   }
 }
 
+async function runAnyStep(step: RunStep, cwd: string, spawner: ExecSpawner, options: ExecutorOptions): Promise<StepOutcome> {
+  if (step.executable !== "npx") return runStep(step, cwd, spawner);
+  if (options.npx === undefined) return { id: step.id, status: "failed", code: "NPX_PREPARE_UNAVAILABLE", excerpt: "npx 준비 단계를 실행할 문맥(플랫폼·실행 경로)이 없습니다" };
+  const outcome = await prepareNpxPackage(step.args, cwd, { ...options.npx, spawner, timeoutMs: step.timeoutMs });
+  return { ...outcome, id: step.id, ...(outcome.excerpt === undefined ? {} : { excerpt: redactExcerpt(outcome.excerpt) }) };
+}
+
 function runStep(step: RunStep, cwd: string, spawner: ExecSpawner): Promise<StepOutcome> {
   return new Promise((resolve) => {
     const stdout = new OutputTail();
@@ -213,7 +225,7 @@ export async function executeVerifiedPlan(verified: VerifiedPlan, options: Execu
       continue;
     }
     try {
-      const outcome = await runStep(step, cwd.cwd, spawner);
+      const outcome = await runAnyStep(step, cwd.cwd, spawner, options);
       steps.push(outcome);
       if (outcome.status !== "done") failedStep = step.id;
     } finally {
@@ -225,8 +237,8 @@ export async function executeVerifiedPlan(verified: VerifiedPlan, options: Execu
 }
 
 /**
- * LifecyclePlan 준비 단계(docker pull image@sha256)를 실행한다(TASK-043, D-020). 검증된 LifecyclePlan만, 한 번만 실행한다.
- * npx·uvx update에는 준비 단계가 없다(패키지 매니저 명령을 실행하지 않는다). 받은 image는 지우지 않는다.
+ * LifecyclePlan 준비 단계(docker pull image@sha256, 정확한 버전 npx 패키지의 npx Prepare)를 실행한다(TASK-043, D-020).
+ * 검증된 LifecyclePlan만, 한 번만 실행한다. uvx update에는 준비 단계가 없다. 받은 image·완성된 npx cache는 지우지 않는다.
  */
 export async function executeLifecyclePreparation(
   verified: VerifiedLifecyclePlan,
@@ -249,7 +261,7 @@ export async function executeLifecyclePreparation(
       continue;
     }
     try {
-      steps.push(await runStep(step, cwd.cwd, spawner));
+      steps.push(await runAnyStep(step, cwd.cwd, spawner, options));
     } finally {
       await cwd.cleanup?.();
     }

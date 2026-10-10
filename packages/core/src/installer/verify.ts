@@ -2,6 +2,7 @@ import { resolveInstalledTools } from "../recommendation/index";
 import { manualSetupInstructions, readConfiguredEntry } from "./config-writer";
 import { canonicalize, requiredEnvNotice, type ConfigPatchStep, type InstallClient, type InstallPlanV1 } from "./plan";
 import type { InstallVerifier, VerifierOutput } from "./transaction";
+import { preparedStateOf } from "./result";
 
 /**
  * Post-install Verification(TASK-034, D-015 §11). 확인 상태는 Prepared / Configured / Detected다.
@@ -41,7 +42,7 @@ export function installNextActions(plan: InstallPlanV1): string[] {
 export const verifyInstallation: InstallVerifier = async ({ verified, request, steps, env }): Promise<VerifierOutput> => {
   const plan = verified.plan;
   const runSteps = plan.steps.filter((s) => s.kind === "run");
-  const prepared = runSteps.every((s) => steps.find((o) => o.id === s.id)?.status === "done") ? (plan.artifact?.preparation === "pull" ? "pulled" : "launch-on-demand") : "failed";
+  const prepared = runSteps.every((s) => steps.find((o) => o.id === s.id)?.status === "done") ? preparedStateOf(plan.artifact?.preparation) : "failed";
   const nextActions = installNextActions(plan);
   if (prepared === "failed") return { verification: { prepared, configured: false, detected: "skipped" }, warnings: [], nextActions };
 

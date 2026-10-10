@@ -2,13 +2,14 @@ import type { ProjectProfile } from "../analyzer/index";
 import type { BackendProbeReport } from "../process/probe";
 import { probeToRecommendContext } from "../process/probe";
 import { executeVerifiedPlan, type ExecSpawner, type IsolatedDir, type StepOutcome } from "../process/executor";
+import { createTreeKiller, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
 import { recommend, type MetadataSnapshot, type RecommendPlatform, type RecommendationReport } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
 import { verifyApprovedPlan, type InstallApproval, type VerifiedPlan } from "./approval-v1";
 import { ConfigWriteError, applyConfigPatch, inspectConfigTarget, readConfiguredEntry, restoreConfig, type ConfigFs, type ConfigWriteReceipt } from "./config-writer";
 import { canonicalize, type ConfigPatchStep, type ConfigScope, type InstallClient, type PlannedInstall } from "./plan";
 import { buildInstallPlan, type PlanBuildResult } from "./plan-builder";
-import { installResultSchema, type InstallResultV1, type InstallVerification } from "./result";
+import { installResultSchema, preparedStateOf, type InstallResultV1, type InstallVerification } from "./result";
 
 /**
  * Install Transaction(TASK-033). 순서: 승인 확인 → 실행 직전 Plan 재생성·digest 비교 → 선택 backend 재확인(probe)
@@ -52,6 +53,10 @@ export interface InstallEnvironment {
   configFs?: ConfigFs;
   spawner?: ExecSpawner;
   isolatedDir?: () => Promise<IsolatedDir>;
+  /** Windows에서 npx Prepare 실행 경로(probe 단계처럼 PATH에서 찾는다). npx 준비 단계가 있을 때만 부른다. */
+  windowsNpx?: () => Promise<WindowsNpxLauncher | null>;
+  /** npx Prepare timeout 때 process tree를 끝낸다. 기본 createTreeKiller. */
+  killTree?: TreeKiller;
   /** 확인 단계(TASK-034). 없으면 Prepared·Configured만 확인하고 Detected는 skipped다. */
   verify?: InstallVerifier;
   trace?: (phase: TransactionPhase) => void;
@@ -87,6 +92,14 @@ const configChangesOf = (plan: VerifiedPlan["plan"], receipts: readonly ConfigWr
 
 const requiredEnvOf = (plan: PlannedInstall["plan"]) => plan.requiredEnv.filter((e) => e.required).map((e) => ({ name: e.name, status: "unchecked" as const }));
 
+/** npx 준비 단계가 있을 때만 npx Prepare 문맥(플랫폼·Windows 실행 경로·tree killer)을 만든다. */
+async function npxContextFor(plan: VerifiedPlan["plan"], request: InstallRequest, env: InstallEnvironment) {
+  if (!plan.steps.some((s) => s.kind === "run" && s.executable === "npx") || plan.launch === null) return {};
+  const platform = plan.launch.platform;
+  const windowsNpx = platform === "windows" && env.windowsNpx !== undefined ? await env.windowsNpx() : null;
+  return { npx: { platform, windowsNpx, killTree: env.killTree ?? createTreeKiller({ cwd: request.projectRoot }) } };
+}
+
 function finalize(result: InstallResultV1): InstallResultV1 {
   return installResultSchema.parse(result);
 }
@@ -113,7 +126,7 @@ function notExecuted(planned: PlannedInstall, status: InstallResultV1["status"],
 /** 기본 확인: Prepared(준비 단계 결과)·Configured(파일 재확인). Detected는 TASK-034 verifier가 채운다. */
 export const basicVerifier: InstallVerifier = async ({ verified, request, steps, env }) => {
   const runSteps = verified.plan.steps.filter((s) => s.kind === "run");
-  const prepared = runSteps.every((s) => steps.find((o) => o.id === s.id)?.status === "done") ? (verified.plan.artifact?.preparation === "pull" ? "pulled" : "launch-on-demand") : "failed";
+  const prepared = runSteps.every((s) => steps.find((o) => o.id === s.id)?.status === "done") ? preparedStateOf(verified.plan.artifact?.preparation) : "failed";
   let configured = prepared !== "failed";
   for (const step of verified.plan.steps.filter((s): s is ConfigPatchStep => s.kind === "config-patch")) {
     const entry = await readConfiguredEntry(step.client, step.scope, step.path[1]!, { projectRoot: request.projectRoot, homeDir: request.homeDir, ...(env.configFs === undefined ? {} : { fs: env.configFs }) });
@@ -166,6 +179,7 @@ export async function runInstallTransaction(planned: PlannedInstall, approval: I
     projectRoot: request.projectRoot,
     ...(env.spawner === undefined ? {} : { spawner: env.spawner }),
     ...(env.isolatedDir === undefined ? {} : { isolatedDir: env.isolatedDir }),
+    ...(await npxContextFor(verified.plan, request, env)),
     onConfigStep: async (step) => {
       if (!configTraced) {
         trace("config-write");
@@ -223,7 +237,7 @@ export async function runInstallTransaction(planned: PlannedInstall, approval: I
       ...(report.failedStep === undefined ? {} : { failedStep: report.failedStep }),
       retryable: CONFIG_RETRYABLE[configError] ?? false,
       configChanges: configChangesOf(verified.plan, receipts, restored),
-      verification: { prepared: verified.plan.artifact?.preparation === "pull" ? "pulled" : "launch-on-demand", configured: false, detected: "skipped" },
+      verification: { prepared: preparedStateOf(verified.plan.artifact?.preparation), configured: false, detected: "skipped" },
       warnings: [],
       nextActions: receipts.length > 0 ? ["설정 쓰기가 중간에 실패해 이미 쓴 설정 파일을 원래 내용으로 되돌렸습니다"] : ["설정 파일을 쓰지 못했습니다"],
     });

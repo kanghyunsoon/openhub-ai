@@ -42,6 +42,21 @@
   "status": "ready",
   "steps": [
     {
+      "args": [
+        "--yes",
+        "--package=@modelcontextprotocol/server-memory@1.2.3",
+        "--",
+        "node",
+        "--version"
+      ],
+      "cwd": "isolated",
+      "executable": "npx",
+      "id": "npx-prepare",
+      "kind": "run",
+      "network": true,
+      "timeoutMs": 600000
+    },
+    {
       "client": "claude-code",
       "expectedEntryDigest": "sha256:6dbcc13b0ece8d3788eb0a72464736a74bf543df7b2ada71fab79baece5164f3",
       "file": ".mcp.json",
@@ -121,6 +136,10 @@
     {
       "code": "health-execution",
       "message": "Health Check는 MCP 서버(제3자 코드)를 격리된 임시 디렉터리에서 실행하며 패키지나 이미지를 내려받을 수 있습니다."
+    },
+    {
+      "code": "npx-prepare",
+      "message": "설정을 쓰기 전에 이 버전의 npm 패키지를 npx cache에 내려받습니다. MCP 서버는 실행하지 않지만, npm은 설치 중 의존성의 설치 스크립트를 실행할 수 있습니다(Client가 처음 실행할 때와 같습니다). 같은 패키지·버전의 불완전한 cache 항목이 있으면 그 항목만 지우고 다시 받습니다."
     },
     {
       "code": "version-level-lock",
