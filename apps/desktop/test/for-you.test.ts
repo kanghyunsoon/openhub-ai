@@ -96,7 +96,8 @@ describe("REQ-022 Desktop FOR YOU", () => {
     expect(js).not.toMatch(/createElement\("button"\)|install|addEventListener\("click"/iu);
     expect([...new Set([...js.matchAll(/window\.openhub\.(\w+)/gu)].map((m) => m[1]))]).toEqual(["recommendProject"]);
     const install = await read("renderer/install.js");
-    expect([...new Set([...install.matchAll(/window\.openhub\.(\w+)/gu)].map((m) => m[1]))].sort()).toEqual(["planInstall", "runInstall"]);
+    // v0.2.0 P0-3 PR C: Client 선택 화면(installOptions)이 추가됐다. 설치 버튼은 여전히 install.js만 붙인다.
+    expect([...new Set([...install.matchAll(/window\.openhub\.(\w+)/gu)].map((m) => m[1]))].sort()).toEqual(["discardInstallPlan", "installOptions", "planInstall", "runInstall"]);
     expect(install).toContain('t("install.open")');
     expect(ko["install.open"]).toBe("설치 계획 보기");
   });

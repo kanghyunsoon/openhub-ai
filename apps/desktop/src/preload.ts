@@ -38,8 +38,14 @@ const recommendBridge = {
  * 최종 승인은 main 프로세스의 네이티브 확인 대화상자에서만 만들어진다.
  */
 const installBridge = {
-  planInstall: (toolId: unknown) => ipcRenderer.invoke("install:plan", String(toolId)),
+  // Client 선택(v0.2.0 P0-3 PR C): Client 이름 문자열 목록만 넘긴다. 검증은 main이 한다.
+  installOptions: (toolId: unknown) => ipcRenderer.invoke("install:options", String(toolId)),
+  planInstall: (toolId: unknown, selection?: unknown) => {
+    const clients = selection !== null && typeof selection === "object" && Array.isArray((selection as { clients?: unknown }).clients) ? ((selection as { clients: unknown[] }).clients.slice(0, 6).map(String)) : undefined;
+    return ipcRenderer.invoke("install:plan", String(toolId), clients === undefined ? undefined : { clients });
+  },
   runInstall: (toolId: unknown) => ipcRenderer.invoke("install:run", String(toolId)),
+  discardInstallPlan: (toolId: unknown) => ipcRenderer.invoke("install:discard", String(toolId)),
 };
 
 /**
