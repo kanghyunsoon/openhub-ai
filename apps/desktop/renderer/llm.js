@@ -2,6 +2,7 @@
 // 누를 때만 main process가 OPENAI_API_KEY를 읽어 호출한다(이 화면은 key를 받지도 보내지도 않는다).
 // 결과·오류는 textContent로만 넣는다. 실패해도 결정론 요약은 그대로다. timer·polling이 없다.
 (() => {
+  const t = window.openhubI18n.t;
   function el(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -15,7 +16,7 @@
     const li = view.closest("li.entry");
     if (!li) return;
     const box = el("div", "ai-summary");
-    const label = el("label", "field", "AI Summary model ");
+    const label = el("label", "field", t("ai.model") + " ");
     const input = document.createElement("input");
     input.type = "text";
     input.autocomplete = "off";
@@ -25,14 +26,14 @@
     label.append(input);
     const out = el("pre", "ai-summary-text");
     out.hidden = true;
-    const note = el("p", "todo", "명시적으로 누를 때만 api.openai.com으로 보냅니다(OPENAI_API_KEY 환경변수). 결과는 표시용입니다.");
-    const run = el("button", "ai-summary-run", "AI Summary");
+    const note = el("p", "todo", t("ai.note"));
+    const run = el("button", "ai-summary-run", t("ai.run"));
     run.type = "button";
     run.addEventListener("click", async () => {
       out.hidden = false;
-      out.textContent = "AI 요약을 요청하는 중…";
+      out.textContent = t("ai.requesting");
       const r = await window.openhubAi.aiSummary(li.dataset.entryId, input.value);
-      out.textContent = r.status === "ok" ? "AI Summary (" + r.model + ", 표시용)\n" + r.text : r.message;
+      out.textContent = r.status === "ok" ? t("ai.result", { model: r.model }) + "\n" + r.text : r.message;
     });
     box.append(label, run, note, out);
     view.append(box);

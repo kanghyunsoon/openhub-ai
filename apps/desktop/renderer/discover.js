@@ -3,6 +3,7 @@
 // Candidate 카드에는 UNVERIFIED·DRAFT 배지와 [Prepare contribution package]만 있고 설치·Adopt·업데이트 버튼은 없다.
 // 비신뢰 문자열(Candidate 설명·설치 문구)은 textContent로만 넣는다. timer·polling 없음.
 (() => {
+  const t = window.openhubI18n.t;
   function el(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -17,10 +18,10 @@
   }
 
   const TABS = [
-    ["new", "New for your project"],
-    ["trending", "Trending"],
-    ["verified", "Verified Registry"],
-    ["candidates", "Unverified Candidates"],
+    ["new", t("discover.tab.new")],
+    ["trending", t("discover.tab.trending")],
+    ["verified", t("discover.tab.verified")],
+    ["candidates", t("discover.tab.candidates")],
   ];
   const tabBar = document.getElementById("discover-tabs");
   const status = document.getElementById("discover-status");
@@ -41,7 +42,7 @@
   select("verified");
 
   function detailButton(toolId) {
-    return button("detail-open", "상세", () => document.dispatchEvent(new CustomEvent("openhub:tool-detail", { detail: toolId })));
+    return button("detail-open", t("discover.detail"), () => document.dispatchEvent(new CustomEvent("openhub:tool-detail", { detail: toolId })));
   }
   function toolItem(item) {
     const li = el("li", "discover-item");
@@ -55,24 +56,24 @@
     const badges = el("div", "badges");
     for (const b of c.badges) badges.append(el("span", "badge unverified", b));
     li.append(badges, el("p", "entry-title", c.id), el("p", "entry-line", c.line));
-    if (c.untrusted.description !== null) li.append(el("p", "untrusted-label", "설명(비신뢰, 원문 텍스트)"), el("p", "untrusted", c.untrusted.description));
-    if (c.untrusted.installText !== null) li.append(el("p", "untrusted-label", "설치 문구(비신뢰, 실행하지 않음)"), el("pre", "untrusted", c.untrusted.installText));
+    if (c.untrusted.description !== null) li.append(el("p", "untrusted-label", t("discover.untrustedDescription")), el("p", "untrusted", c.untrusted.description));
+    if (c.untrusted.installText !== null) li.append(el("p", "untrusted-label", t("discover.untrustedInstall")), el("pre", "untrusted", c.untrusted.installText));
     if (c.evidence.length > 0) {
       const ev = el("ul", "install-next");
       for (const e of c.evidence) ev.append(el("li", "", e));
-      li.append(el("p", "untrusted-label", "근거"), ev);
+      li.append(el("p", "untrusted-label", t("discover.evidence")), ev);
     }
-    if (c.actions.includes("prepare-contribution")) li.append(button("candidate-prepare", "Prepare contribution package", () => void prepare(c.id)));
+    if (c.actions.includes("prepare-contribution")) li.append(button("candidate-prepare", t("discover.prepare"), () => void prepare(c.id)));
     return li;
   }
 
   async function prepare(id) {
     const out = document.getElementById("candidate-result");
-    out.textContent = "저장할 폴더를 고르세요…";
+    out.textContent = t("discover.chooseFolder");
     const r = await window.openhubDiscover.prepareCandidate(id);
-    if (r.status === "cancelled") out.textContent = "취소했습니다. 아무것도 쓰지 않았습니다.";
-    else if (r.status !== "ok") out.textContent = "만들 수 없습니다: " + (r.message || r.code);
-    else out.textContent = "기여 패키지 " + r.files.length + "개 파일을 만들었습니다. " + r.note;
+    if (r.status === "cancelled") out.textContent = t("discover.cancelled");
+    else if (r.status !== "ok") out.textContent = t("discover.prepareFailed", { message: r.message || r.code });
+    else out.textContent = t("discover.prepared", { count: r.files.length, note: r.note });
     return r;
   }
 
@@ -91,7 +92,7 @@
   let sequence = 0;
   async function load() {
     const mine = ++sequence;
-    status.textContent = "DISCOVER 불러오는 중…";
+    status.textContent = t("discover.loading");
     const r = await window.openhubDiscover.discoverView();
     if (mine !== sequence) return r;
     if (r.status !== "ok") {
@@ -99,11 +100,11 @@
       return r;
     }
     const s = r.sections;
-    fill("discover-new-list", s.newForProject.map(toolItem), "프로젝트를 고르면 이 프로젝트에 맞는 새 도구를 보여줍니다.");
-    document.getElementById("trend-meaning").textContent = "Trend 점수: " + r.trendMeaning;
-    fill("discover-trending-list", s.trending.map(toolItem), "metadata가 없어 Trending을 계산할 수 없습니다.");
-    fill("discover-candidates-list", s.candidates.map(candidateItem), "검토할 Candidate가 없습니다.");
-    status.textContent = "기준 " + r.asOf.slice(0, 10) + " · metadata " + (r.metadataCollectedAt === null ? "없음" : r.metadataCollectedAt.slice(0, 10)) + " · Candidate " + s.candidates.length + "개";
+    fill("discover-new-list", s.newForProject.map(toolItem), t("discover.newEmpty"));
+    document.getElementById("trend-meaning").textContent = t("discover.trendMeaning", { meaning: r.trendMeaning });
+    fill("discover-trending-list", s.trending.map(toolItem), t("discover.trendingEmpty"));
+    fill("discover-candidates-list", s.candidates.map(candidateItem), t("discover.candidatesEmpty"));
+    status.textContent = t("discover.status", { asOf: r.asOf.slice(0, 10), metadata: r.metadataCollectedAt === null ? t("common.none") : r.metadataCollectedAt.slice(0, 10), count: s.candidates.length });
     decorateVerified();
     return r;
   }
@@ -138,7 +139,8 @@
       forbiddenButtons: forbidden,
       badges,
       untrustedText,
-      trendClean: !/security|quality|보안|품질/iu.test(trendText),
+      // Trend를 보안·품질·신뢰 점수로 표현하지 않는다(Core AC와 같은 규칙). "보안·품질을 평가하지 않는다"는 부정 고지는 허용한다.
+      trendClean: !/(security|quality|trust)[ -]score|보안 점수|품질 점수|신뢰 점수/iu.test(trendText),
       firstTool: first ? first.dataset.toolId : null,
       innerHtml: document.querySelectorAll("#discover img, #discover script").length,
     };

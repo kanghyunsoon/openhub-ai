@@ -1,11 +1,8 @@
 import { EventEmitter } from "node:events";
 import {
-  APPROVAL_REQUIREMENT_MESSAGES as APPROVAL_TEXT,
   INSTALL_CLIENTS,
   analyzeProject,
   defaultHostEnvironment,
-  formatInstallPlanPreview,
-  installationStatusLabel,
   loadRegistry,
   locateWindowsNpxLauncher,
   npmChildEnv,
@@ -23,6 +20,7 @@ import {
   type ExecSpawner,
   type InstallClient,
   type InstallEnvironment,
+  type InstallPlanV1,
   type InstallRequest,
   type InstallResultV1,
   type IsolatedDir,
@@ -30,6 +28,8 @@ import {
 } from "@openhub/core";
 import type { DirectoryPicker } from "./project-scan";
 import { recommendCurrentProject, type RecommendSession } from "./recommend";
+import { installApprovalText, installNextActionTexts, installPreviewLines, installWarningTexts, installationStatusText } from "./i18n/core-text";
+import { tr } from "./i18n/index";
 
 /**
  * Desktop 설치 흐름(TASK-036, D-005·D-012). FOR YOU 카드 → Plan Preview → 추가 승인 체크 → 네이티브 확인 → 실행 → 결과.
@@ -122,19 +122,20 @@ export function buildInstallPlanView(planned: PlannedInstall): InstallPlanView {
     toolId: plan.toolId,
     displayName: plan.displayName,
     status: plan.status,
-    installationStatus: installationStatusLabel(plan),
-    previewLines: formatInstallPlanPreview(planned),
+    installationStatus: installationStatusText(plan),
+    previewLines: installPreviewLines(planned),
     targets: plan.targets.map((t) => ({ file: t.file, client: t.client, scope: t.scope, userScope: t.scope === "user", manual: t.envReference === "manual" })),
-    requirements: plan.approvalRequirements.map((id) => ({ id, message: (APPROVAL_TEXT as Record<string, string>)[id] ?? id, userScope: id === "user-scope-config" })),
+    requirements: plan.approvalRequirements.map((id) => ({ id, message: installApprovalText(id), userScope: id === "user-scope-config" })),
     userScope,
     executable: plan.status === "installable",
     alreadyInstalled: plan.status === "already-installed",
   };
 }
 
-const PREPARED_LABEL: Readonly<Record<string, string>> = { "launch-on-demand": "launch-on-demand(Client 첫 실행 때 받음)", pulled: "pulled", cached: "cached(npx cache에 미리 받음)", failed: "failed" };
+const preparedLabel = (value: string) => (value === "launch-on-demand" ? tr("install.prepared.launchOnDemand") : value === "cached" ? tr("install.prepared.cached") : value);
 
-export function buildInstallResultView(result: InstallResultV1): InstallResultView {
+/** InstallResult → 화면 데이터. plan이 있으면 English 모드의 다음에 할 일·경고를 Plan 구조에서 만든다(한국어는 Core 문장 그대로). */
+export function buildInstallResultView(result: InstallResultV1, plan?: InstallPlanV1): InstallResultView {
   const v = result.verification;
   return {
     status: result.status,
@@ -144,13 +145,15 @@ export function buildInstallResultView(result: InstallResultV1): InstallResultVi
       v === null
         ? []
         : [
-            { name: "Prepared", value: PREPARED_LABEL[v.prepared] ?? v.prepared },
-            { name: "Configured", value: v.configured ? "예" : "아니오" },
-            { name: "Detected", value: v.detected === "skipped" ? "확인 안 함" : v.detected ? "예" : "아니오" },
+            { name: "Prepared", value: preparedLabel(v.prepared) },
+            { name: "Configured", value: tr(v.configured ? "common.yes" : "common.no") },
+            { name: "Detected", value: v.detected === "skipped" ? tr("install.detected.skipped") : tr(v.detected ? "common.yes" : "common.no") },
           ],
-    configChanges: result.configChanges.map((c) => c.file + " (" + (c.scope === "user" ? "사용자" : "프로젝트") + " 범위): " + (c.restored ? "원래 내용으로 되돌림" : c.applied ? "기록함" : "쓰지 않음")),
-    warnings: result.warnings.map((w) => "[" + w.code + "] " + w.message),
-    nextActions: [...result.nextActions],
+    configChanges: result.configChanges.map((c) =>
+      tr("install.configChange", { file: c.file, scope: tr(c.scope === "user" ? "scope.user" : "scope.project"), state: tr(c.restored ? "install.configChange.restored" : c.applied ? "install.configChange.applied" : "install.configChange.none") }),
+    ),
+    warnings: plan === undefined ? result.warnings.map((w) => "[" + w.code + "] " + w.message) : installWarningTexts(result, plan),
+    nextActions: plan === undefined ? [...result.nextActions] : installNextActionTexts(result, plan),
     reapprove: result.status === "stale",
   };
 }
@@ -161,13 +164,13 @@ export function nativeDialogPrompter(dialog: NativeDialogLike): ApprovalPrompter
     channel: "desktop-native-dialog",
     async confirm(request) {
       const { plan, planDigest } = request.planned;
-      const detail = [...request.requirements.map((r) => "• [" + r.id + "] " + r.message), "", "Plan digest " + planDigest].join("\n");
+      const detail = [...request.requirements.map((r) => tr("dialog.requirement", { id: r.id, message: installApprovalText(r.id) })), "", tr("dialog.digest", { digest: planDigest })].join("\n");
       const { response } = await dialog.showMessageBox({
         type: "warning",
-        title: "OpenHub 설치 승인",
-        message: plan.displayName + " 설치 계획을 승인합니까?",
+        title: tr("install.dialog.title"),
+        message: tr("install.dialog.message", { name: plan.displayName }),
         detail,
-        buttons: ["취소", "설치 승인"],
+        buttons: [tr("dialog.cancel"), tr("install.dialog.approve")],
         defaultId: 0,
         cancelId: 0,
         noLink: true,
@@ -237,7 +240,7 @@ export async function planForRenderer(session: InstallSession, deps: InstallDeps
   const recommended = await recommendCurrentProject(deps.recommend, { registryDir: deps.registryDir, metadataFile: deps.metadataFile, platform: deps.platform });
   if (recommended.status !== "ok" || !recommended.view.items.some((i) => i.toolId === toolId)) return { status: "not-recommended" };
   const platform = toRecommendPlatform(deps.platform);
-  if (platform === undefined) return { status: "error", code: "platform-unsupported", message: "이 운영체제에서는 설치를 지원하지 않습니다" };
+  if (platform === undefined) return { status: "error", code: "platform-unsupported", message: tr("install.platformUnsupported") };
   try {
     const { entries } = await loadRegistry(deps.registryDir);
     const manifest = entries.find((e) => e.manifest.name === toolId)?.manifest;
@@ -245,11 +248,11 @@ export async function planForRenderer(session: InstallSession, deps: InstallDeps
     if (clients.length === 0) return { status: "no-client" };
     const request: InstallRequest = { toolId, projectRoot: dir, homeDir: deps.homeDir, targets: clients.map((client: InstallClient) => ({ client, scope: "project" as const })), includeHost: false, platform };
     const { result } = await planInstall(request, environment(deps, entries));
-    if (!result.ok) return { status: "error", code: result.code, message: "Manifest가 설치 정책을 통과하지 못했습니다" };
+    if (!result.ok) return { status: "error", code: result.code, message: tr("install.manifestRejected") };
     session.remember(toolId, result.planned, request);
     return { status: "ok", view: buildInstallPlanView(result.planned) };
   } catch {
-    return { status: "error", code: "plan-failed", message: "설치 계획을 만들지 못했습니다" };
+    return { status: "error", code: "plan-failed", message: tr("install.planFailedMain") };
   }
 }
 
@@ -258,24 +261,24 @@ export async function runForRenderer(session: InstallSession, deps: InstallDeps,
   if (typeof toolId !== "string") return { status: "no-plan" };
   const pending = session.take(toolId);
   if (pending === undefined) return { status: "no-plan" };
-  const changed = { status: "project-changed" as const, message: "계획을 만든 뒤 다른 프로젝트를 선택해 이 설치 계획과 승인을 버렸습니다. 아무것도 실행하거나 바꾸지 않았습니다. 지금 프로젝트에서 계획을 다시 확인하세요." };
+  const changed = { status: "project-changed" as const, message: tr("install.projectChanged") };
   if (session.projectDir !== pending.request.projectRoot) return changed;
   try {
     const { entries } = await loadRegistry(deps.registryDir);
     const env = environment(deps, entries);
     if (pending.planned.plan.status === "already-installed") {
-      return { status: "done", result: buildInstallResultView(await runInstallTransaction(pending.planned, undefined, pending.request, env)) };
+      return { status: "done", result: buildInstallResultView(await runInstallTransaction(pending.planned, undefined, pending.request, env), pending.planned.plan) };
     }
     const outcome = await requestApproval(pending.planned, nativeDialogPrompter(deps.dialog));
     if (outcome.status !== "approved") return { status: "rejected" };
     // 대화상자가 열린 동안 다른 프로젝트를 골랐으면 방금 받은 승인도 쓰지 않는다.
     if (session.projectDir !== pending.request.projectRoot) return changed;
     const result = await runInstallTransaction(pending.planned, outcome.approval, pending.request, env);
-    const view = buildInstallResultView(result);
+    const view = buildInstallResultView(result, pending.planned.plan);
     await recordDesktopInstall(pending.planned, result, pending.request, deps, view);
     return { status: "done", result: view };
   } catch {
-    return { status: "error", code: "install-failed", message: "설치를 실행하지 못했습니다" };
+    return { status: "error", code: "install-failed", message: tr("install.runFailed") };
   }
 }
 
@@ -287,7 +290,7 @@ async function recordDesktopInstall(planned: PlannedInstall, result: InstallResu
     ...(deps.configFs === undefined ? {} : { fs: deps.configFs }),
     now: deps.now ?? (() => new Date()),
   });
-  if (!recorded.ok) view.warnings.push("[version-state] Version State를 기록하지 못했습니다(" + recorded.code + "). 설치 결과는 그대로입니다.");
+  if (!recorded.ok) view.warnings.push(tr("install.stateRecordFailed", { code: recorded.code }));
 }
 
 /** IPC 핸들러 등록. 첫 번째 인자(toolId)만 쓰고 나머지는 무시한다. */

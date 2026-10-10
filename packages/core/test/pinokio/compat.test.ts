@@ -61,8 +61,12 @@ describe("REQ-065 Pinokio 호환성과 수동 E2E", () => {
     // TASK-073: README.md는 English가 되었고 한국어 README는 README.ko.md다. 각 언어의 고정 문구를 그대로 쓴다.
     expect(read("README.md")).toContain(PINOKIO_SUPPORT_NOTICE);
     expect(read("README.ko.md")).toContain(PINOKIO_SUPPORT_NOTICE_KO);
-    expect(read("apps/desktop/renderer/index.html")).toContain(PINOKIO_SUPPORT_NOTICE_KO);
-    const files = ["README.md", "README.ko.md", "docs/supported-platforms.md", "apps/desktop/renderer/index.html", ...readdirSync(path.join(REPO_ROOT, "apps/cli/src")).map((f) => "apps/cli/src/" + f), ...readdirSync(path.join(REPO_ROOT, "apps/desktop/src")).map((f) => "apps/desktop/src/" + f)];
+    // v0.2.0 PR B: Desktop은 English(기본 HTML·en 카탈로그)와 한국어(ko 카탈로그)를 고른다. 언어마다 같은 고정 문구를 쓴다.
+    expect(read("apps/desktop/renderer/index.html")).toContain(PINOKIO_SUPPORT_NOTICE);
+    expect(read("apps/desktop/src/i18n/en.ts")).toContain(PINOKIO_SUPPORT_NOTICE);
+    expect(read("apps/desktop/src/i18n/ko.ts")).toContain(PINOKIO_SUPPORT_NOTICE_KO);
+    const sourceFiles = (dir: string) => (readdirSync(path.join(REPO_ROOT, dir), { recursive: true }) as string[]).filter((f) => /\.(?:ts|js|html)$/u.test(f)).map((f) => dir + "/" + f.replace(/\\/gu, "/"));
+    const files = ["README.md", "README.ko.md", "docs/supported-platforms.md", "apps/desktop/renderer/index.html", ...sourceFiles("apps/cli/src"), ...sourceFiles("apps/desktop/src")];
     for (const f of files) {
       const lines = read(f).split("\n").filter((l) => /pinokio|pterm/iu.test(l));
       for (const l of lines) expect(l, f).not.toMatch(/모든 (?:Pinokio )?환경|all environments|fully (?:verified|supported)|검증 완료|보장합니다|guaranteed/iu);

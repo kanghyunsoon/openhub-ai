@@ -21,6 +21,7 @@ import {
   type ToolState,
 } from "@openhub/core";
 import type { LifecycleSession } from "./lifecycle";
+import { formatDate, getDesktopLocale, tr } from "./i18n/index";
 
 /**
  * Desktop Release·Impact·Pinokio Preview(TASK-057, D-022·D-024·D-027).
@@ -95,14 +96,14 @@ export async function releaseCheckForRenderer(session: LifecycleSession, deps: R
     const { entries } = await loadRegistry(deps.registryDir);
     const manifest = entries.find((e) => e.manifest.name === state.toolId)?.manifest;
     const base = manifest === undefined ? null : releaseRequestOf(manifest);
-    if (manifest === undefined || base === null) return { status: "error", code: "RELEASE_SOURCE_UNSUPPORTED", message: "이 도구의 버전 출처는 지원하지 않습니다" };
+    if (manifest === undefined || base === null) return { status: "error", code: "RELEASE_SOURCE_UNSUPPORTED", message: tr("release.unsupportedSource") };
     const snap = await collectReleaseSnapshot(
       { ...base, backend: state.backend, requested: state.artifact.requested, resolved: state.artifact.resolved, github: manifest.repository.github },
       { now: deps.now ?? (() => new Date()), ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }) },
     );
     if (!snap.ok) {
-      const hint = snap.code === "RELEASE_RATE_LIMITED" ? " GitHub 비인증 요청 한도에 걸렸습니다" + (snap.resetAt === null ? "." : "(재시도 가능 " + snap.resetAt + ").") + " CLI openhub releases는 인증을 쓸 수 있습니다." : "";
-      return { status: "error", code: snap.code, message: "release 정보를 가져오지 못했습니다." + hint };
+      const hint = snap.code === "RELEASE_RATE_LIMITED" ? tr("release.rateLimited", { reset: snap.resetAt === null ? "." : tr("release.rateLimitedReset", { at: snap.resetAt }) }) : "";
+      return { status: "error", code: snap.code, message: tr("release.fetchFailed", { hint }) };
     }
     const summary = summarizeReleases(snap.snapshot);
     deps.onSnapshot?.(id as string, snap.snapshot, summary);
@@ -116,9 +117,10 @@ export async function releaseCheckForRenderer(session: LifecycleSession, deps: R
       status: "ok",
       view: {
         id: id as string,
-        title: (manifest.displayName ?? manifest.name) + " 릴리스",
-        current: snap.snapshot.current.version ?? "확인되지 않음",
-        latest: t === null ? "비교할 수 없음" : t.version + (t.publishedAt === null ? "" : " (" + t.publishedAt.slice(0, 10) + ")"),
+        title: tr("release.title", { name: manifest.displayName ?? manifest.name }),
+        current: snap.snapshot.current.version ?? tr("release.currentUnknown"),
+        // 날짜: 한국어 화면은 기존 표기(YYYY-MM-DD), English는 지역 표기.
+        latest: t === null ? tr("release.latestIncomparable") : t.version + (t.publishedAt === null ? "" : " (" + (getDesktopLocale() === "ko" ? t.publishedAt.slice(0, 10) : formatDate(t.publishedAt)) + ")"),
         updateAvailable: impact.reasons.some((r) => r.code.startsWith("version-") && r.code !== "version-incomparable"),
         impact: { verdict: impact.verdict.toUpperCase(), status: impact.status, reasons: impact.reasons.map((r) => r.code + " (" + r.level + ")") },
         summary: SUMMARY_CATEGORIES.map((c) => ({ label: LABEL[c], count: summary.categories[c].length, items: summary.categories[c].slice(0, 5).map((i) => "[" + i.version + " L" + String(i.line) + "] " + clean(i.text)) })),
@@ -127,7 +129,7 @@ export async function releaseCheckForRenderer(session: LifecycleSession, deps: R
       },
     };
   } catch {
-    return { status: "error", code: "release-check-failed", message: "release 정보를 확인하지 못했습니다" };
+    return { status: "error", code: "release-check-failed", message: tr("release.checkFailedMain") };
   }
 }
 
@@ -136,10 +138,10 @@ const nodeProbeFs = { stat: (f: string) => stat(f), readFile: (f: string) => rea
 /** pinokio:preview — Registry toolId 하나. 비실행 probe로 PinokioPlan을 만들어 보여 주기만 한다(실행 채널 없음). */
 export async function pinokioPreviewForRenderer(deps: ReleaseDeps, toolId: unknown): Promise<PinokioPreviewResponse> {
   try {
-    if (typeof toolId !== "string") return { status: "error", code: "PINOKIO_NOT_SUPPORTED", message: "도구를 고르세요" };
+    if (typeof toolId !== "string") return { status: "error", code: "PINOKIO_NOT_SUPPORTED", message: tr("pinokio.chooseTool") };
     const { entries } = await loadRegistry(deps.registryDir);
     const manifest = entries.find((e) => e.manifest.name === toolId)?.manifest;
-    if (manifest === undefined) return { status: "error", code: "TOOL_NOT_FOUND", message: "Registry에 없는 도구입니다" };
+    if (manifest === undefined) return { status: "error", code: "TOOL_NOT_FOUND", message: tr("pinokio.toolNotFound") };
     const probe: PinokioProbeEnv = {
       pathEnv: deps.pinokioProbe?.pathEnv ?? "",
       platform: deps.pinokioProbe?.platform ?? process.platform,
@@ -149,25 +151,31 @@ export async function pinokioPreviewForRenderer(deps: ReleaseDeps, toolId: unkno
     const r = await planPinokio({ operation: "install", manifest }, { probe, homeDir: deps.homeDir });
     if (!r.ok) return { status: "error", code: r.code, message: r.message };
     const plan = r.planned.plan;
-    const lines = [plan.toolId + " Pinokio 설치 계획(미리보기)", "저장소 " + plan.repo + " @ " + plan.commit, "Pinokio app " + plan.appRef, "버전 pterm " + plan.versions.pterm + " · pinokiod " + plan.versions.pinokiod + " · script " + plan.versions.script, ""];
+    const lines = [
+      tr("pinokio.lines.title", { toolId: plan.toolId }),
+      tr("pinokio.lines.repo", { repo: plan.repo, commit: plan.commit }),
+      tr("pinokio.lines.app", { app: plan.appRef }),
+      tr("pinokio.lines.versions", { pterm: plan.versions.pterm, pinokiod: plan.versions.pinokiod, script: plan.versions.script }),
+      "",
+    ];
     for (const s of plan.scripts) {
       lines.push(s.name + "  " + s.digest);
       const body = JSON.parse(s.content.slice("module.exports = ".length, -2)) as { run: { method: string; params: Record<string, unknown> }[] };
       for (const step of body.run) lines.push("  - " + step.method + (typeof step.params["message"] === "string" ? ": " + step.params["message"] : ""));
     }
-    lines.push("", "Health " + plan.health.url + " → " + String(plan.health.expectStatus) + " 확인 후 종료(상주하지 않음)");
+    lines.push("", tr("pinokio.lines.health", { url: plan.health.url, status: plan.health.expectStatus }));
     for (const n of plan.notices) lines.push("[" + n.code + "] " + n.message);
-    lines.push("승인 요구 " + plan.approvalRequirements.join(", "), "Plan digest " + r.planned.planDigest, "", "설치는 CLI에서 승인합니다: openhub install " + plan.toolId + " --backend pinokio");
+    lines.push(tr("pinokio.lines.approvals", { ids: plan.approvalRequirements.join(", ") }), "Plan digest " + r.planned.planDigest, "", tr("pinokio.lines.cli", { toolId: plan.toolId }));
     return { status: "ok", lines: lines.map((l) => clean(l, 400)) };
   } catch {
-    return { status: "error", code: "pinokio-preview-failed", message: "Pinokio 계획을 만들지 못했습니다" };
+    return { status: "error", code: "pinokio-preview-failed", message: tr("pinokio.previewFailed") };
   }
 }
 
 /** pinokio:inspect — "owner/repo@commit"과 script 경로. 원문·정적 경고만 보여 준다(실행 없음, GitHub 비인증). */
 export async function pinokioInspectForRenderer(deps: ReleaseDeps, ref: unknown, scriptPath: unknown): Promise<PinokioInspectResponse> {
   const m = typeof ref === "string" ? /^([A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100})@([0-9a-f]{40})$/u.exec(ref.trim()) : null;
-  if (m === null) return { status: "error", code: "THIRD_PARTY_INPUT_INVALID", message: "owner/repo@40자리 commit 형식으로 고정하세요" };
+  if (m === null) return { status: "error", code: "THIRD_PARTY_INPUT_INVALID", message: tr("pinokio.refInvalid") };
   const r = await fetchThirdPartyScript({ repo: m[1]!, commit: m[2]!, path: typeof scriptPath === "string" && scriptPath.trim() !== "" ? scriptPath.trim() : "install.js" }, deps.fetch === undefined ? {} : { fetch: deps.fetch });
   if (!r.ok) return { status: "error", code: r.code, message: r.message };
   const p = r.preview;

@@ -3,6 +3,7 @@
 // 체크박스는 확인 버튼을 켜는 화면 단계일 뿐이고, 실제 Approval은 main 프로세스의 네이티브 대화상자에서만 만들어진다.
 // 모든 문자열은 textContent로만 넣는다. 확인 상태 이름은 Prepared / Configured / Detected다.
 (() => {
+  const t = window.openhubI18n.t;
   function el(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -20,58 +21,60 @@
   }
 
   function renderResult(result) {
-    const nodes = [el("h3", "", "설치 결과 · " + result.status + (result.code ? " (" + result.code + ")" : ""))];
+    const nodes = [el("h3", "", t("install.resultTitle", { status: result.status, code: result.code ? " (" + result.code + ")" : "" }))];
     const stages = el("ul", "install-stages");
     for (const s of result.stages) stages.append(el("li", "stage", s.name + "  " + s.value));
     nodes.push(stages);
-    if (result.stages.length > 0) nodes.push(el("p", "todo", "Prepared·Configured·Detected는 서버가 실행 중이거나 정상임을 뜻하지 않습니다"));
+    if (result.stages.length > 0) nodes.push(el("p", "todo", t("install.stagesNote")));
     for (const c of result.configChanges) nodes.push(el("p", "install-change", c));
     for (const w of result.warnings) nodes.push(el("p", "install-warning", w));
     if (result.nextActions.length > 0) {
       const next = el("ul", "install-next");
       for (const a of result.nextActions) next.append(el("li", "", a));
-      nodes.push(el("h4", "", "다음에 할 일"), next);
+      nodes.push(el("h4", "", t("install.nextActions")), next);
     }
     show(nodes);
     return result;
   }
 
   async function run(toolId) {
-    const status = el("p", "todo", "확인 대화상자에서 승인하면 실행합니다…");
+    const status = el("p", "todo", t("install.waiting"));
     panel.append(status);
     const response = await window.openhub.runInstall(toolId);
     if (response.status === "rejected") {
-      status.textContent = "승인하지 않아 설치를 중단했습니다. 아무것도 바꾸지 않았습니다.";
+      status.textContent = t("install.rejected");
       return { status: "rejected", stages: [] };
     }
     if (response.status !== "done") {
-      status.textContent = "설치할 수 없습니다: " + (response.message || response.status);
+      status.textContent = t("install.cannotRun", { message: response.message || response.status });
       return { status: response.status, stages: [] };
     }
     if (response.result.reapprove) {
       // PLAN_STALE: 계획이 바뀌었으므로 새 계획을 다시 보여 주고 재승인을 받는다.
       const view = await open(toolId);
-      panel.prepend(el("p", "install-warning", "승인 후 설치 계획이 바뀌었습니다(" + response.result.changed.join(", ") + "). 새 계획을 확인하고 다시 승인하세요."));
+      panel.prepend(el("p", "install-warning", t("install.stale", { changed: response.result.changed.join(", ") })));
       return { status: "stale", stages: [], reopened: view !== null };
     }
     return renderResult(response.result);
   }
 
   function renderPlan(view) {
-    const nodes = [el("h3", "", view.displayName + " 설치 계획")];
+    const nodes = [el("h3", "", t("install.planTitle", { name: view.displayName }))];
     nodes.push(el("pre", "install-preview", view.previewLines.join("\n")));
     const targets = el("ul", "install-targets");
-    for (const t of view.targets) {
-      targets.append(el("li", t.userScope ? "target warn-user-scope" : "target", t.file + " · " + t.client + " · " + (t.userScope ? "사용자 범위(다른 프로젝트에도 영향)" : "프로젝트 범위") + (t.manual ? " · 직접 설정" : "")));
+    for (const target of view.targets) {
+      targets.append(
+        el("li", target.userScope ? "target warn-user-scope" : "target", t("install.target", { file: target.file, client: target.client, scope: t(target.userScope ? "install.target.userScope" : "install.target.projectScope"), manual: target.manual ? t("install.target.manual") : "" })),
+      );
     }
     nodes.push(targets);
     if (view.alreadyInstalled) {
-      nodes.push(el("p", "todo", "이미 설정되어 있어 바꿀 것이 없습니다."));
+      nodes.push(el("p", "todo", t("install.noChanges")));
       show(nodes);
       return;
     }
     if (!view.executable) {
-      nodes.push(el("p", "install-warning", "이 환경에서는 실행할 수 없는 계획입니다 (" + view.status + ")."));
+      nodes.push(el("p", "install-warning", t("install.notExecutable", { status: view.status })));
       show(nodes);
       return;
     }
@@ -82,11 +85,11 @@
       const box = document.createElement("input");
       box.type = "checkbox";
       box.dataset.requirement = r.id;
-      label.append(box, el("span", "", "[" + r.id + "] " + r.message));
+      label.append(box, el("span", "", t("requirement.line", { id: r.id, message: r.message })));
       list.append(label);
       boxes.push(box);
     }
-    const confirm = el("button", "install-confirm", "승인 대화상자 열기");
+    const confirm = el("button", "install-confirm", t("install.openDialog"));
     confirm.type = "button";
     confirm.disabled = true;
     const update = () => {
@@ -102,18 +105,18 @@
   }
 
   const MESSAGES = {
-    "no-project": "프로젝트를 먼저 선택하세요.",
-    "not-recommended": "현재 추천 목록에 있는 도구만 설치할 수 있습니다.",
-    "no-client": "프로젝트에서 지원 Agent Client를 찾지 못했습니다. CLI의 --client를 쓰세요.",
+    "no-project": t("install.msg.noProject"),
+    "not-recommended": t("install.msg.notRecommended"),
+    "no-client": t("install.msg.noClient"),
   };
 
   async function open(toolId) {
     current = toolId;
-    show([el("p", "todo", "설치 계획을 만드는 중…")]);
+    show([el("p", "todo", t("install.planning"))]);
     const response = await window.openhub.planInstall(toolId);
     if (current !== toolId) return null;
     if (response.status !== "ok") {
-      show([el("p", "install-warning", MESSAGES[response.status] || "설치 계획을 만들 수 없습니다: " + (response.message || response.status))]);
+      show([el("p", "install-warning", MESSAGES[response.status] || t("install.planFailed", { message: response.message || response.status }))]);
       return null;
     }
     renderPlan(response.view);
@@ -124,7 +127,7 @@
   function decorate() {
     for (const li of document.querySelectorAll("#for-you-list li.rec")) {
       if (li.querySelector(".install-open")) continue;
-      const button = el("button", "install-open", "설치 계획 보기");
+      const button = el("button", "install-open", t("install.open"));
       button.type = "button";
       button.addEventListener("click", () => void open(li.dataset.toolId));
       li.append(button);

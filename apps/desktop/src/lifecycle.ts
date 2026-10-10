@@ -3,13 +3,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  LIFECYCLE_APPROVAL_MESSAGES,
   defaultHostEnvironment,
   entryKeyOf,
-  formatLifecyclePlanPreview,
-  formatLifecycleResult,
-  formatLifecycleStatusItem,
-  healthLines,
   lifecycleStatus,
   loadRegistry,
   locateWindowsNpxLauncher,
@@ -22,7 +17,6 @@ import {
   readLifecycleState,
   requestLifecycleApproval,
   runLifecycleTransaction,
-  stateUnreadableMessage,
   toRecommendPlatform,
   type BackendProbeReport,
   type ClientLauncher,
@@ -34,6 +28,7 @@ import {
   type IsolatedDir,
   type LauncherCheckFs,
   type LifecycleApprovalPrompter,
+  type LifecycleApprovalRequirement,
   type LifecycleEnvironment,
   type LifecycleOperation,
   type LifecycleRequest,
@@ -42,6 +37,8 @@ import {
   type PlannedLifecycle,
 } from "@openhub/core";
 import type { NativeDialogLike } from "./install";
+import { lifecycleApprovalText, lifecyclePreviewLines, lifecycleResultLines, healthTextLines, planWarningTexts, stateUnreadableText, statusItemLines } from "./i18n/core-text";
+import { tr, type MessageKey } from "./i18n/index";
 
 /**
  * Desktop Lifecycle(TASK-046, D-005·D-017~D-020). INSTALLED 카드 → 상태(drift·lock·Health) → [업데이트 확인]·[업데이트 계획]·
@@ -147,54 +144,53 @@ export type LifecycleRunResponse =
   | { status: "rejected" | "no-plan" }
   | { status: "project-changed"; message: string }
   | { status: "error"; code: string; message: string };
-export const PROJECT_CHANGED_MESSAGE = "계획을 만든 뒤 다른 프로젝트를 선택해 이 계획과 승인을 버렸습니다. 아무것도 실행하거나 바꾸지 않았습니다. 지금 프로젝트에서 계획을 다시 확인하세요.";
+/** project-changed 안내(현재 Desktop 언어). */
+export const projectChangedMessage = (): string => tr("life.projectChanged");
 
 const STATE_CODES = new Set(["STATE_CORRUPT", "STATE_VERSION_UNSUPPORTED", "STATE_PATH_ESCAPE"]);
-const OPERATION_TITLE = { update: "업데이트", rollback: "롤백", health: "Health Check", repair: "복구" } as const;
+const OPERATION_KEY = { update: "lifecycle.op.update", rollback: "lifecycle.op.rollback", health: "lifecycle.op.health", repair: "lifecycle.op.repair" } as const;
+const opTitle = (op: LifecycleOperation) => tr(OPERATION_KEY[op]);
 /** Repair 대상 상태. config-drift는 Core가 "OpenHub 관리 경로만 다름"으로 받아 줄 때만 버튼이 생긴다. */
 const REPAIR_STATES = new Set<LifecycleToolStatus["state"]>(["tool-config-missing", "tool-config-drift", "tool-config-relocated", "client-launcher-invalid", "config-drift"]);
-const WARNINGS: Partial<Record<LifecycleToolStatus["state"], string>> = {
-  "config-drift": "설정이 OpenHub가 기록한 내용과 달라 업데이트·롤백을 막았습니다. 설정 파일을 직접 확인하세요.",
-  "missing-config": "설정 항목이 없어 업데이트·롤백을 막았습니다.",
-  "tool-config-missing": "OpenHub 관리 tool config가 없어 업데이트·롤백·Health를 막았습니다.",
-  "tool-config-drift": "tool config가 OpenHub가 기록한 내용과 달라 업데이트·롤백·Health를 막았습니다.",
-  "tool-config-relocated": "옮기거나 복사한 프로젝트입니다. 이 프로젝트용 tool config와 기록이 아직 없습니다.",
-  "client-launcher-invalid": "Client 설정에 기록된 Node.js 실행 경로(node.exe·npx-cli.js)가 지금은 유효하지 않습니다(재설치·이동 등). Health를 막았습니다.",
-  "untracked-foreign": "OpenHub가 관리하지 않는 설정입니다. 자동으로 편입하지 않습니다.",
-  "untracked-adoptable": "OpenHub 표준 항목과 같지만 Version State에 없습니다. 업데이트·롤백 대상이 아닙니다.",
+const WARNING_KEY: Partial<Record<LifecycleToolStatus["state"], MessageKey>> = {
+  "config-drift": "life.warn.configDrift",
+  "missing-config": "life.warn.missingConfig",
+  "tool-config-missing": "life.warn.toolConfigMissing",
+  "tool-config-drift": "life.warn.toolConfigDrift",
+  "tool-config-relocated": "life.warn.toolConfigRelocated",
+  "client-launcher-invalid": "life.warn.clientLauncherInvalid",
+  "untracked-foreign": "life.warn.untrackedForeign",
+  "untracked-adoptable": "life.warn.untrackedAdoptable",
 };
-const REPAIR_AVAILABLE = " [복구 계획 확인]에서 바뀔 내용을 보고 승인하면 복구합니다. 자동으로 고치지 않습니다.";
-const repairUnavailable = (reason: string) => " 지금은 복구 계획을 만들 수 없습니다(" + reason + "). 자동으로 고치지 않습니다.";
+const warningFor = (state: LifecycleToolStatus["state"]) => (WARNING_KEY[state] === undefined ? null : tr(WARNING_KEY[state]!));
 
 const CLIENT_NAME = { "claude-code": "Claude Code", codex: "Codex", cursor: "Cursor" } as const;
-const SCOPE_NAME = { project: "프로젝트", user: "사용자" } as const;
-const TOOL_CONFIG_ACTION = { create: "새로 만듭니다", replace: "검토된 내용으로 바꿉니다", keep: "바꾸지 않습니다(이미 검토된 내용)" } as const;
+const scopeName = (scope: "project" | "user") => tr(scope === "project" ? "scope.project" : "scope.user");
+const TOOL_CONFIG_ACTION = { create: "dialog.toolConfig.create", replace: "dialog.toolConfig.replace", keep: "dialog.toolConfig.keep" } as const;
 
 /**
  * 네이티브 확인 대화상자 본문. 화면 Preview와 같은 Plan에서 만든다(경로 없음): 도구·Client·scope·바뀔 설정·준비 명령·tool config·
  * Node.js 실행 경로·Health·주의·승인 항목·digest. 보여 주지 않은 변경을 승인 버튼 하나로 실행하지 않도록 Plan의 쓰기·실행을 모두 나열한다.
+ * 승인 항목 문장은 요구 ID로 현재 언어 문장을 고른다(의미는 Core 승인 문구와 같다).
  */
-export function lifecycleDialogDetail(planned: PlannedLifecycle, requirements: readonly { id: string; message: string }[]): string {
+export function lifecycleDialogDetail(planned: PlannedLifecycle, requirements: readonly { id: LifecycleApprovalRequirement }[]): string {
   const { plan, planDigest } = planned;
-  const lines = ["도구: " + plan.displayName + " (" + plan.toolId + ")"];
+  const lines = [tr("dialog.tool", { name: plan.displayName, toolId: plan.toolId })];
   for (const t of plan.targets) {
-    const where = CLIENT_NAME[t.client] + " · " + SCOPE_NAME[t.scope] + " 범위 · " + t.file;
-    lines.push("대상: " + where + (plan.operation === "health" ? " (설정 변경 없음)" : " — " + t.serverName + " 항목 교체"));
+    const action = plan.operation === "health" ? tr("dialog.target.noChange") : tr("dialog.target.replace", { server: t.serverName });
+    lines.push(tr("dialog.target", { client: CLIENT_NAME[t.client], scope: scopeName(t.scope), file: t.file, action }));
     if (t.launcher !== undefined) {
-      const recorded = t.launcher.recorded === "invalid" ? "기록된 Node.js 실행 경로가 유효하지 않음" : "기록된 Node.js 실행 경로 유효";
-      lines.push("  " + recorded + (plan.operation === "health" ? "" : " → 지금 검증한 Node.js 설치로 실행 경로를 씁니다"));
+      const recorded = tr(t.launcher.recorded === "invalid" ? "dialog.launcher.invalid" : "dialog.launcher.valid");
+      lines.push("  " + recorded + (plan.operation === "health" ? "" : tr("dialog.launcher.rewrite")));
     }
   }
   const run = plan.steps.filter((s) => s.kind === "run");
-  lines.push("준비 명령: " + (run.length === 0 ? "없음" : run.map((s) => s.executable + " " + s.args.join(" ")).join(" / ")));
-  for (const s of plan.steps) if (s.kind === "tool-config") lines.push("tool config(" + SCOPE_NAME[s.scope] + " 범위): " + TOOL_CONFIG_ACTION[s.action]);
+  lines.push(tr("dialog.prepare", { commands: run.length === 0 ? tr("common.none") : run.map((s) => s.executable + " " + s.args.join(" ")).join(" / ") }));
+  for (const s of plan.steps) if (s.kind === "tool-config") lines.push(tr("dialog.toolConfig", { scope: scopeName(s.scope), action: tr(TOOL_CONFIG_ACTION[s.action]) }));
   const health = plan.steps.some((s) => s.kind === "health");
-  lines.push(
-    "Health Check: " +
-      (!health ? "생략(사전 승인)" : plan.operation === "health" ? "실행(설정 변경 없음)" : "실행 — 실패하면 이번에 바꾼 설정을 되돌리고 Version State를 바꾸지 않습니다"),
-  );
-  for (const w of plan.warnings) lines.push("주의 [" + w.code + "] " + w.message);
-  lines.push("", "승인 항목:", ...requirements.map((r) => "• [" + r.id + "] " + r.message), "", "Plan digest " + planDigest);
+  lines.push(tr(!health ? "dialog.health.skipped" : plan.operation === "health" ? "dialog.health.only" : "dialog.health.gate"));
+  for (const w of planWarningTexts(plan, plan.warnings)) lines.push(tr("dialog.warning", { code: w.code, message: w.text }));
+  lines.push("", tr("dialog.requirements"), ...requirements.map((r) => tr("dialog.requirement", { id: r.id, message: lifecycleApprovalText(r.id) })), "", tr("dialog.digest", { digest: planDigest }));
   return lines.join("\n");
 }
 
@@ -210,10 +206,10 @@ export function nativeLifecycleDialogPrompter(dialog: NativeDialogLike): Lifecyc
       const detail = lifecycleDialogDetail(request.planned, request.requirements);
       const { response } = await dialog.showMessageBox({
         type: "warning",
-        title: "OpenHub " + OPERATION_TITLE[plan.operation] + " 승인",
-        message: plan.displayName + " " + OPERATION_TITLE[plan.operation] + " 계획을 승인합니까?",
+        title: tr("dialog.title", { operation: opTitle(plan.operation) }),
+        message: tr("dialog.message", { name: plan.displayName, operation: opTitle(plan.operation) }),
         detail,
-        buttons: ["취소", "승인"],
+        buttons: [tr("dialog.cancel"), tr("dialog.approve")],
         defaultId: 0,
         cancelId: 0,
         noLink: true,
@@ -272,11 +268,11 @@ async function snapshot(session: LifecycleSession, deps: LifecycleDeps): Promise
   const dir = session.projectDir();
   if (dir === undefined) return { status: "no-project" };
   const platform = toRecommendPlatform(deps.platform);
-  if (platform === undefined) return { status: "error", code: "platform-unsupported", message: "이 운영체제에서는 lifecycle을 지원하지 않습니다" };
+  if (platform === undefined) return { status: "error", code: "platform-unsupported", message: tr("life.platformUnsupported") };
   const { entries } = await loadRegistry(deps.registryDir);
   const fs = deps.configFs === undefined ? {} : { fs: deps.configFs };
   const status = await lifecycleStatus({ projectRoot: dir, homeDir: deps.homeDir, entries, platform, includeUser: false, ...fs, ...(deps.launcherCheckFs === undefined ? {} : { launcherCheckFs: deps.launcherCheckFs }) });
-  if (!status.ok) return STATE_CODES.has(status.code) ? { status: "state-unreadable", code: status.code, message: stateUnreadableMessage(status.code) } : { status: "error", code: status.code, message: "Version State를 읽지 못했습니다" };
+  if (!status.ok) return STATE_CODES.has(status.code) ? { status: "state-unreadable", code: status.code, message: stateUnreadableText(status.code) } : { status: "error", code: status.code, message: tr("life.stateUnreadable") };
   const state = await readLifecycleState({ homeDir: deps.homeDir, ...fs });
   const projectKey = await projectKeyFor(dir, deps.configFs);
   const raw = new Map<string, LifecycleToolStatus>();
@@ -289,18 +285,18 @@ async function snapshot(session: LifecycleSession, deps: LifecycleDeps): Promise
     const consistent = managed && item.state === "state-consistent";
     const key = entryKeyOf({ client: item.client as InstallClient, scope: item.scope, file: item.file, serverName: item.serverName, projectName: null, projectKey: item.scope === "project" ? projectKey : null });
     const hasPrevious = state.ok && (state.state.entries[key]?.previous ?? null) !== null;
-    const [title, ...lines] = formatLifecycleStatusItem(item);
+    const [title, ...lines] = statusItemLines(item);
     // Repair 버튼: 오류 상태만 보고 켜지 않는다. Core가 지금 ready Repair Plan을 만들 수 있을 때만(파일 읽기·PATH 탐색만, 실행·쓰기·network 0).
     let canRepair = false;
-    let warning = WARNINGS[item.state] ?? null;
+    let warning = warningFor(item.state);
     if (REPAIR_STATES.has(item.state) && item.toolId !== null && item.scope === "project") {
       const request = repairRequest(item.toolId, item, dir, deps, platform);
       const built = await planLifecycleRequest(request, env).catch(() => null);
       canRepair = built !== null && built.ok && built.planned.plan.status === "ready";
       const reason = built === null ? "plan-failed" : !built.ok ? built.code : built.planned.plan.warnings.filter((w) => w.code === w.code.toUpperCase()).map((w) => w.code).join(", ") || built.planned.plan.status;
       // 일반 config-drift(Core가 repair를 받지 않음)는 기존 경고 그대로다.
-      if (canRepair) warning = (warning ?? "") + REPAIR_AVAILABLE;
-      else if (item.state !== "config-drift") warning = (warning ?? "") + repairUnavailable(reason);
+      if (canRepair) warning = (warning ?? "") + tr("life.warn.repairAvailable");
+      else if (item.state !== "config-drift") warning = (warning ?? "") + tr("life.warn.repairUnavailable", { reason });
     }
     items.push({ id, toolId: item.toolId, title: title!, lines, state: item.state, managed, canUpdate: consistent, canRollback: consistent && hasPrevious, canHealth: consistent, canRepair, warning });
   }
@@ -316,9 +312,9 @@ export async function statusForRenderer(session: LifecycleSession, deps: Lifecyc
   try {
     const snap = await snapshot(session, deps);
     if (!("raw" in snap)) return snap;
-    return { status: "ok", items: snap.items, note: "사용자 범위 설정은 Desktop에서 확인하지 않습니다(CLI --include-host)." };
+    return { status: "ok", items: snap.items, note: tr("life.note") };
   } catch {
-    return { status: "error", code: "status-failed", message: "상태를 읽지 못했습니다" };
+    return { status: "error", code: "status-failed", message: tr("life.statusFailed") };
   }
 }
 
@@ -348,15 +344,15 @@ export async function checkForRenderer(session: LifecycleSession, deps: Lifecycl
     const r = await requestFor("update", session, deps, id);
     if ("error" in r) return r.error;
     const built = await planLifecycleRequest(r.request, r.env);
-    if (!built.ok) return { status: "ok", view: { id: id as string, result: "check-failed", from: null, to: null, message: "확인하지 못했습니다 (" + built.code + ")" } };
+    if (!built.ok) return { status: "ok", view: { id: id as string, result: "check-failed", from: null, to: null, message: tr("life.check.failedCode", { code: built.code }) } };
     const p = built.planned.plan;
     const from = p.current.identity?.spec ?? p.current.requested;
     const to = p.target.identity?.spec ?? null;
     const result = p.status === "ready" ? "update-available" : p.status === "up-to-date" ? "up-to-date" : "blocked";
-    const message = result === "update-available" ? "업데이트 있음 " + from + " → " + to : result === "up-to-date" ? "최신 버전입니다" : "확인할 수 없습니다 (" + p.warnings.map((w) => w.code).join(", ") + ")";
+    const message = result === "update-available" ? tr("life.check.available", { from, to: to ?? "" }) : result === "up-to-date" ? tr("life.check.upToDate") : tr("life.check.blocked", { codes: p.warnings.map((w) => w.code).join(", ") });
     return { status: "ok", view: { id: id as string, result, from, to, message } };
   } catch {
-    return { status: "error", code: "check-failed", message: "업데이트를 확인하지 못했습니다" };
+    return { status: "error", code: "check-failed", message: tr("life.check.failed") };
   }
 }
 
@@ -376,42 +372,35 @@ export async function planForRenderer(operation: LifecycleOperation, session: Li
         operation,
         displayName: plan.displayName,
         status: plan.status,
-        previewLines: formatLifecyclePlanPreview(built.planned),
-        requirements: plan.approvalRequirements.map((rid) => ({ id: rid, message: LIFECYCLE_APPROVAL_MESSAGES[rid] })),
+        previewLines: lifecyclePreviewLines(built.planned),
+        requirements: plan.approvalRequirements.map((rid) => ({ id: rid, message: lifecycleApprovalText(rid) })),
         executable: plan.status === "ready",
         upToDate: plan.status === "up-to-date",
       },
     };
   } catch {
-    return { status: "error", code: "plan-failed", message: "계획을 만들지 못했습니다" };
+    return { status: "error", code: "plan-failed", message: tr("life.planFailed") };
   }
 }
 
-/** 실패 코드별 다음 행동(고정 문장). 코드는 Core LifecycleResult 계약 그대로다. */
-const CODE_GUIDANCE: Readonly<Record<string, string>> = {
-  PLAN_STALE: "승인 뒤 설정 파일·tool config·Node.js 설치가 바뀌어 실행하지 않았습니다. 새 계획을 확인하고 다시 승인하세요.",
-  CLIENT_LAUNCHER_UNAVAILABLE: "지금 Node.js 설치(node.exe·npm)를 검증하지 못해 아무것도 바꾸지 않았습니다. Node.js 설치를 확인한 뒤 다시 계획하세요.",
-  TOOL_CONFIG_DRIFT: "실행 중 tool config가 승인한 내용과 달라져 중단했습니다. 상태를 다시 읽고 새 계획을 승인하세요.",
-  TOOL_CONFIG_STALE: "승인 뒤 tool config가 바뀌어 쓰지 않았습니다. 새 계획을 확인하고 다시 승인하세요.",
-  CONFIG_DRIFT: "설정 항목이 승인 때와 달라 바꾸지 않았습니다. 설정 파일을 직접 확인하세요.",
-  CONFIG_RESTORE_FAILED: "이번에 바꾼 설정 일부를 원래대로 되돌리지 못했습니다. 그 사이 다른 프로그램이 바꾼 내용은 덮어쓰지 않았습니다. 결과에 표시된 파일을 직접 확인하세요. Version State는 바꾸지 않았습니다.",
-  COMPENSATION_INCOMPLETE: "이번에 바꾼 설정 일부를 원래대로 되돌리지 못했습니다. 결과에 표시된 파일을 직접 확인하세요.",
-  MANUAL_SETUP_REQUIRED: "Client 설정에 안전하게 쓸 수 없어 아무것도 바꾸지 않았습니다.",
-};
+/** 실패 코드별 다음 행동(고정 문장, 카탈로그 guide.<CODE>). 코드는 Core LifecycleResult 계약 그대로다. */
+const GUIDED_CODES = ["PLAN_STALE", "CLIENT_LAUNCHER_UNAVAILABLE", "TOOL_CONFIG_DRIFT", "TOOL_CONFIG_STALE", "CONFIG_DRIFT", "CONFIG_RESTORE_FAILED", "COMPENSATION_INCOMPLETE", "MANUAL_SETUP_REQUIRED"] as const;
+const guidance = (code: string | undefined): string | undefined => ((GUIDED_CODES as readonly string[]).includes(code ?? "") ? tr(("guide." + code) as MessageKey) : undefined);
 const SUCCEEDED = new Set<LifecycleResultV1["status"]>(["updated", "rolled-back", "health-checked", "repaired", "up-to-date"]);
 
 function outcomeOf(result: LifecycleResultV1): Pick<LifecycleResultView, "outcome" | "summary"> {
-  const op = OPERATION_TITLE[result.operation];
-  const guide = result.code === undefined ? undefined : CODE_GUIDANCE[result.code];
-  if (SUCCEEDED.has(result.status)) return { outcome: "succeeded", summary: op + " 완료(" + result.status + ")" };
-  if (result.status === "rollback-failed") return { outcome: "partial", summary: op + " 부분 실패(" + (result.code ?? result.status) + "): " + (guide ?? CODE_GUIDANCE["CONFIG_RESTORE_FAILED"]!) };
-  if (result.status === "stale" || result.status === "approval-required") return { outcome: "not-run", summary: op + " 실행 안 함(" + (result.code ?? result.status) + "): " + (guide ?? "계획을 확인하고 다시 승인하세요.") };
+  const operation = opTitle(result.operation);
+  const guide = guidance(result.code);
+  const code = result.code ?? result.status;
+  if (SUCCEEDED.has(result.status)) return { outcome: "succeeded", summary: tr("outcome.succeeded", { operation, status: result.status }) };
+  if (result.status === "rollback-failed") return { outcome: "partial", summary: tr("outcome.partial", { operation, code, guide: guide ?? tr("guide.CONFIG_RESTORE_FAILED") }) };
+  if (result.status === "stale" || result.status === "approval-required") return { outcome: "not-run", summary: tr("outcome.notRun", { operation, code, guide: guide ?? tr("outcome.notRunDefault") }) };
   if (result.status === "health-failed") {
-    const reverted = result.compensated ? " 이번에 바꾼 설정은 원래대로 되돌렸고 Version State는 바꾸지 않았습니다." : "";
-    return { outcome: "failed", summary: op + " 실패(HEALTH_FAILED" + (result.code === undefined ? "" : ": " + result.code) + "): MCP 서버가 정상 응답하지 않았습니다." + reverted + (guide === undefined ? "" : " " + guide) };
+    const reverted = result.compensated ? tr("outcome.healthReverted") : "";
+    return { outcome: "failed", summary: tr("outcome.healthFailed", { operation, code: result.code === undefined ? "" : ": " + result.code, reverted, guide: guide === undefined ? "" : " " + guide }) };
   }
-  const reverted = result.compensated ? " 이번에 바꾼 설정은 원래대로 되돌렸습니다." : "";
-  return { outcome: "failed", summary: op + " 실패(" + (result.code ?? result.status) + "):" + reverted + " " + (guide ?? "결과의 다음에 할 일을 확인하세요.") };
+  const reverted = result.compensated ? tr("outcome.reverted") : "";
+  return { outcome: "failed", summary: tr("outcome.failed", { operation, code, reverted, guide: guide ?? tr("outcome.failedDefault") }) };
 }
 
 export function buildLifecycleResultView(result: LifecycleResultV1): LifecycleResultView {
@@ -419,8 +408,8 @@ export function buildLifecycleResultView(result: LifecycleResultV1): LifecycleRe
     status: result.status,
     code: result.code ?? null,
     ...outcomeOf(result),
-    lines: formatLifecycleResult(result).filter((l) => l !== ""),
-    health: result.health === null ? [] : healthLines(result.health),
+    lines: lifecycleResultLines(result, guidance(result.code) ?? null).filter((l) => l !== ""),
+    health: result.health === null ? [] : healthTextLines(result.health),
     changed: [...(result.changed ?? [])],
     reapprove: result.status === "stale",
   };
@@ -433,7 +422,7 @@ export async function runForRenderer(session: LifecycleSession, deps: LifecycleD
   if (pending === undefined) return { status: "no-plan" };
   // 계획을 만든 뒤 다른 프로젝트를 선택했으면 이전 계획을 실행하지 않는다(계획은 이미 버렸다). 대화상자도 열지 않는다.
   const sameProject = () => session.projectDir() === pending.request.projectRoot;
-  if (!sameProject()) return { status: "project-changed", message: PROJECT_CHANGED_MESSAGE };
+  if (!sameProject()) return { status: "project-changed", message: projectChangedMessage() };
   try {
     const { entries } = await loadRegistry(deps.registryDir);
     const env = environment(deps, entries);
@@ -441,10 +430,10 @@ export async function runForRenderer(session: LifecycleSession, deps: LifecycleD
     const outcome = await requestLifecycleApproval(pending.planned, nativeLifecycleDialogPrompter(deps.dialog));
     if (outcome.status !== "approved") return { status: "rejected" };
     // 대화상자가 열린 동안 다른 프로젝트를 골랐으면 방금 받은 승인도 쓰지 않는다(승인·계획 폐기, 실행·쓰기 0).
-    if (!sameProject()) return { status: "project-changed", message: PROJECT_CHANGED_MESSAGE };
+    if (!sameProject()) return { status: "project-changed", message: projectChangedMessage() };
     return { status: "done", result: buildLifecycleResultView(await runLifecycleTransaction(pending.planned, outcome.approval, pending.request, env)) };
   } catch {
-    return { status: "error", code: "run-failed", message: "실행하지 못했습니다" };
+    return { status: "error", code: "run-failed", message: tr("life.runFailed") };
   }
 }
 

@@ -1,10 +1,11 @@
+import "./locale-ko";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { loadRegistry, recordInstallInState, runInstallTransaction, type BackendProbeReport, type FetchLike, type HealthRunReport } from "@openhub/core";
 import { INSTALL_PLAN_CHANNEL, INSTALL_RUN_CHANNEL, InstallSession, registerInstall, type InstallRunResponse, type NativeDialogLike } from "../src/install";
-import { LIFECYCLE_PLAN_CHANNELS, LIFECYCLE_RUN_CHANNEL, LifecycleSession, PROJECT_CHANGED_MESSAGE, registerLifecycle, type LifecyclePlanResponse, type LifecycleRunResponse } from "../src/lifecycle";
+import { LIFECYCLE_PLAN_CHANNELS, LIFECYCLE_RUN_CHANNEL, LifecycleSession, projectChangedMessage, registerLifecycle, type LifecyclePlanResponse, type LifecycleRunResponse } from "../src/lifecycle";
 import { PROJECT_SCAN_CHANNEL, registerProjectScan } from "../src/project-scan";
 import { PROJECT_RECOMMEND_CHANNEL, RecommendSession, registerProjectRecommend } from "../src/recommend";
 import { approveAll, createHarness, plannedOf } from "../../../packages/core/test/installer/harness";
@@ -117,14 +118,14 @@ describe("PR #14 [A] 승인 대화상자 중 프로젝트 변경", () => {
       expect((await plan(op)).status, op).toBe("ok");
       dir = other;
       const before = await snapshot();
-      expect(await run(), op).toEqual({ status: "project-changed", message: PROJECT_CHANGED_MESSAGE });
+      expect(await run(), op).toEqual({ status: "project-changed", message: projectChangedMessage() });
       expect(await snapshot()).toEqual(before);
       dir = h.projectRoot;
       // 대화상자가 열린 동안 다른 프로젝트 선택: 승인을 받았어도 실행하지 않는다.
       expect((await plan(op)).status, op).toBe("ok");
       switchDuringDialog = true;
       dialogs.length = 0;
-      expect(await run(), op).toEqual({ status: "project-changed", message: PROJECT_CHANGED_MESSAGE });
+      expect(await run(), op).toEqual({ status: "project-changed", message: projectChangedMessage() });
       expect(dialogs, op).toHaveLength(1);
       expect(await snapshot()).toEqual(before);
       switchDuringDialog = false;
@@ -138,7 +139,7 @@ describe("PR #14 [A] 승인 대화상자 중 프로젝트 변경", () => {
     expect((await plan("rollback")).status).toBe("ok");
     switchDuringDialog = true;
     const before = await snapshot();
-    expect(await run()).toEqual({ status: "project-changed", message: PROJECT_CHANGED_MESSAGE });
+    expect(await run()).toEqual({ status: "project-changed", message: projectChangedMessage() });
     expect(await snapshot()).toEqual(before);
     expect(healthRuns).toEqual(["update"]);
     switchDuringDialog = false;

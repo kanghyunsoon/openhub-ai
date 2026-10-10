@@ -1,5 +1,6 @@
 // 화면 렌더러. 데이터는 preload가 노출한 window.openhub로만 받는다. innerHTML을 쓰지 않는다.
-const number = new Intl.NumberFormat("ko-KR");
+// 문구·숫자·날짜는 window.openhubI18n(현재 언어)으로 만든다.
+const i18nRenderer = window.openhubI18n;
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -13,7 +14,7 @@ function toolItem(tool) {
   li.dataset.toolId = tool.name;
   const head = el("div", "tool-head");
   head.append(el("strong", "tool-name", tool.displayName));
-  head.append(el("span", "stars", tool.stars === null ? "★ —" : `★ ${number.format(tool.stars)}`));
+  head.append(el("span", "stars", tool.stars === null ? "★ —" : `★ ${i18nRenderer.formatNumber(tool.stars)}`));
   li.append(head);
   li.append(el("p", "summary", tool.summary));
   const meta = el("div", "meta");
@@ -35,9 +36,9 @@ async function render() {
   issues.hidden = view.issues.length === 0;
 
   const collected = view.metadataCollectedAt
-    ? `메타데이터 ${new Date(view.metadataCollectedAt).toLocaleString("ko-KR")}`
-    : "메타데이터 없음 — pnpm openhub collect";
-  document.getElementById("status").textContent = `Registry ${view.tools.length}개 · ${collected}`;
+    ? i18nRenderer.t("registry.metadataAt", { date: i18nRenderer.formatDateTime(view.metadataCollectedAt) })
+    : i18nRenderer.t("registry.metadataMissing");
+  document.getElementById("status").textContent = i18nRenderer.t("registry.status", { count: view.tools.length, metadata: collected });
   return view.tools.length;
 }
 

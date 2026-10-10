@@ -1,3 +1,5 @@
+import "./locale-ko";
+import { ko } from "../src/i18n/ko";
 import { EventEmitter } from "node:events";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -106,7 +108,8 @@ describe("REQ-045 REQ-041 REQ-042 REQ-032 Desktop Release·Impact·Pinokio", () 
     expect(code).not.toMatch(/resolveGitHubToken|GITHUB_TOKEN|GH_TOKEN|githubToken|"gh"|child_process/u);
     const js = await read("renderer/release.js");
     expect([...js.matchAll(/window\.openhubRelease\.checkRelease\(/gu)]).toHaveLength(1);
-    expect(js).toContain('button("release-check", "릴리스 확인", () => void check(li))');
+    expect(js).toContain('button("release-check", t("release.check"), () => void check(li))');
+    expect(ko["release.check"]).toBe("릴리스 확인");
     const preload = await read("src/preload.ts");
     expect(preload).toContain('checkRelease: (id: unknown) => ipcRenderer.invoke("release:check", String(id))');
     expect(preload).toContain('contextBridge.exposeInMainWorld("openhubRelease", releaseBridge);');
@@ -121,7 +124,8 @@ describe("REQ-045 REQ-041 REQ-042 REQ-032 Desktop Release·Impact·Pinokio", () 
     // postgres-mcp는 Python 최소 버전을 선언하지만 probe는 Python 버전을 모르므로 runtime-unverified(unknown)가 함께 붙는다.
     expect(r.view.impact).toEqual({ verdict: "HIGH", status: "WARNING", reasons: ["version-minor-zero (high)", "notes-breaking (high)", "runtime-unverified (unknown)"] });
     const js = await read("renderer/release.js");
-    expect(js).toContain('"Impact: " + view.impact.verdict');
+    expect(js).toContain('t("release.impact", { verdict: view.impact.verdict, status: view.impact.status })');
+    expect(ko["release.impact"]).toBe("Impact: {verdict} ({status})");
     expect(js).toContain("for (const reason of view.impact.reasons)");
   }, 30_000);
 
@@ -130,7 +134,8 @@ describe("REQ-045 REQ-041 REQ-042 REQ-032 Desktop Release·Impact·Pinokio", () 
     expect((await w.check(ID)).status).toBe("ok");
     const js = await read("renderer/release.js");
     expect(js).toContain('const plan = li.querySelector(".lifecycle-update");');
-    expect(js).toContain('button("release-plan", "업데이트 계획", () => plan.click())');
+    expect(js).toContain('button("release-plan", t("release.plan"), () => plan.click())');
+    expect(ko["release.plan"]).toBe("업데이트 계획");
     // 같은 항목 id로 M5 update 계획이 만들어진다(계획·승인은 기존 Lifecycle 경로).
     expect(((await w.call(LIFECYCLE_PLAN_CHANNELS.update, ID)) as LifecyclePlanResponse).status).toBe("ok");
   }, 30_000);
@@ -156,7 +161,7 @@ describe("REQ-045 REQ-041 REQ-042 REQ-032 Desktop Release·Impact·Pinokio", () 
     // PINOKIO 카드의 버튼은 release.js가 만드는 미리보기 두 개뿐이다(실행 버튼 0개).
     const js = await read("renderer/release.js");
     const pinokioPart = js.slice(js.indexOf("PINOKIO 카드 입력·버튼은"), js.indexOf("async function preview"));
-    expect([...pinokioPart.matchAll(/button\("([^"]+)", "([^"]+)"/gu)].map((m) => [m[1], m[2]])).toEqual([["pinokio-preview", "Pinokio 계획 미리보기"], ["pinokio-inspect", "제3자 script 미리보기"]]);
+    expect([...pinokioPart.matchAll(/button\("([^"]+)", t\("([^"]+)"\)/gu)].map((m) => [m[1], ko[m[2] as keyof typeof ko]])).toEqual([["pinokio-preview", "Pinokio 계획 미리보기"], ["pinokio-inspect", "제3자 script 미리보기"]]);
     expect([...js.matchAll(/window\.openhubRelease\.(\w+)/gu)].map((m) => m[1]).sort()).toEqual(["checkRelease", "inspectPinokio", "previewPinokio"]);
     for (const f of ["renderer/release.js", "src/release.ts", "src/preload.ts"]) expect(await read(f), f).not.toMatch(/runPinokio|pinokio:run|executeWithPinokioApproval|executePinokioPlan/u);
   }, 30_000);

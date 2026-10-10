@@ -4,6 +4,7 @@
 // PINOKIO 카드: Plan Preview와 제3자 script Preview만 보여 준다(실행 버튼 없음).
 // 모든 외부 문자열은 textContent로만 넣는다. timer·polling이 없고 network는 버튼을 눌렀을 때만이다.
 (() => {
+  const t = window.openhubI18n.t;
   function el(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -22,34 +23,34 @@
   function renderView(li, view) {
     const box = el("div", "release-view");
     box.append(el("p", "entry-title", view.title));
-    box.append(el("p", "entry-line", "현재 " + view.current + " · 최신 " + view.latest + (view.updateAvailable ? " · 업데이트 있음" : "")));
-    box.append(el("p", view.impact.status === "OK" ? "entry-line" : "install-warning", "Impact: " + view.impact.verdict + " (" + view.impact.status + ")"));
+    box.append(el("p", "entry-line", t("release.versions", { current: view.current, latest: view.latest, available: view.updateAvailable ? t("release.updateAvailable") : "" })));
+    box.append(el("p", view.impact.status === "OK" ? "entry-line" : "install-warning", t("release.impact", { verdict: view.impact.verdict, status: view.impact.status })));
     for (const reason of view.impact.reasons) box.append(el("p", "entry-line", "  - " + reason));
     const summary = el("div", "release-summary");
     for (const s of view.summary) {
-      summary.append(el("p", "entry-line", s.label + " " + s.count));
+      summary.append(el("p", "entry-line", t("release.summaryLine", { label: s.label, count: s.count })));
       for (const item of s.items) summary.append(el("p", "entry-line release-item", "    " + item));
     }
     box.append(summary);
     if (view.notes) {
-      box.append(el("p", "entry-line", "Release notes " + view.notes.version + " (원문, 해석하지 않음)"));
-      box.append(el("pre", "release-notes", view.notes.lines.join("\n") + (view.notes.more > 0 ? "\n… " + view.notes.more + "줄 더" : "")));
+      box.append(el("p", "entry-line", t("release.notesTitle", { version: view.notes.version })));
+      box.append(el("pre", "release-notes", view.notes.lines.join("\n") + (view.notes.more > 0 ? "\n" + t("release.notesMore", { count: view.notes.more }) : "")));
     }
-    if (view.url) box.append(el("p", "entry-line release-link", "링크(텍스트): " + view.url));
-    box.append(el("p", "todo", "Impact·요약은 판단 근거이며 승인이 아닙니다."));
+    if (view.url) box.append(el("p", "entry-line release-link", t("release.link", { url: view.url })));
+    box.append(el("p", "todo", t("release.notApproval")));
     const plan = li.querySelector(".lifecycle-update");
-    if (plan) box.append(button("release-plan", "업데이트 계획", () => plan.click()));
+    if (plan) box.append(button("release-plan", t("release.plan"), () => plan.click()));
     li.append(box);
   }
 
   async function check(li) {
     const old = li.querySelector(".release-view, .release-status");
     if (old) old.remove();
-    const status = el("p", "release-status", "릴리스 확인 중…");
+    const status = el("p", "release-status", t("release.checking"));
     li.append(status);
     const response = await window.openhubRelease.checkRelease(li.dataset.entryId);
     if (response.status !== "ok") {
-      status.textContent = "릴리스를 확인할 수 없습니다: " + (response.message || response.status);
+      status.textContent = t("release.checkFailed", { message: response.message || response.status });
       return response;
     }
     status.remove();
@@ -61,7 +62,7 @@
     for (const li of list.querySelectorAll("li.entry")) {
       if (li.querySelector(".release-check") || !li.querySelector(".lifecycle-update")) continue;
       const actions = li.querySelector(".entry-actions");
-      if (actions) actions.append(button("release-check", "릴리스 확인", () => void check(li)));
+      if (actions) actions.append(button("release-check", t("release.check"), () => void check(li)));
     }
   }
   // INSTALLED 목록이 다시 그려질 때만 버튼을 붙인다(timer·polling 없음).
@@ -83,24 +84,24 @@
     return { wrap, input };
   }
   // PINOKIO 카드 입력·버튼은 여기서 만든다. 미리보기 버튼 두 개뿐이고 실행 버튼은 없다.
-  const toolField = field("Registry 도구 ID", "");
-  const refField = field("제3자 script owner/repo@commit", "");
-  const pathField = field("script 경로", "install.js");
-  const previewButton = button("pinokio-preview", "Pinokio 계획 미리보기", () => void preview());
-  const inspectButton = button("pinokio-inspect", "제3자 script 미리보기", () => void inspect());
+  const toolField = field(t("pinokio.toolField"), "");
+  const refField = field(t("pinokio.refField"), "");
+  const pathField = field(t("pinokio.pathField"), "install.js");
+  const previewButton = button("pinokio-preview", t("pinokio.preview"), () => void preview());
+  const inspectButton = button("pinokio-inspect", t("pinokio.inspect"), () => void inspect());
   document.getElementById("pinokio-body").append(toolField.wrap, previewButton, refField.wrap, pathField.wrap, inspectButton);
   async function preview() {
-    show([el("p", "todo", "Pinokio 계획을 만드는 중…")]);
+    show([el("p", "todo", t("pinokio.planning"))]);
     const response = await window.openhubRelease.previewPinokio(toolField.input.value);
-    if (response.status !== "ok") return show([el("p", "install-warning", "계획을 만들 수 없습니다: " + (response.message || response.code))]);
+    if (response.status !== "ok") return show([el("p", "install-warning", t("pinokio.planFailed", { message: response.message || response.code }))]);
     show([el("pre", "install-preview", response.lines.join("\n"))]);
   }
   async function inspect() {
-    show([el("p", "todo", "제3자 script를 가져오는 중…")]);
+    show([el("p", "todo", t("pinokio.fetching"))]);
     const response = await window.openhubRelease.inspectPinokio(refField.input.value, pathField.input.value);
-    if (response.status !== "ok") return show([el("p", "install-warning", "미리 볼 수 없습니다: " + (response.message || response.code))]);
+    if (response.status !== "ok") return show([el("p", "install-warning", t("pinokio.inspectFailed", { message: response.message || response.code }))]);
     const p = response.preview;
-    show([el("p", "entry-title", p.title), el("pre", "install-preview", p.lines.join("\n")), el("p", "install-warning", "정적 경고: " + (p.warnings.length === 0 ? "없음" : p.warnings.join(", "))), el("p", "todo", p.notice)]);
+    show([el("p", "entry-title", p.title), el("pre", "install-preview", p.lines.join("\n")), el("p", "install-warning", t("pinokio.staticWarnings", { warnings: p.warnings.length === 0 ? t("common.none") : p.warnings.join(", ") })), el("p", "todo", p.notice)]);
   }
 
   // 스모크(--smoke + OPENHUB_SMOKE_RELEASE): 화면과 같은 경로로 [릴리스 확인]을 누르고 텍스트 렌더링을 확인한다.

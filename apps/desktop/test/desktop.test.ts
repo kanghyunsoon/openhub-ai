@@ -1,3 +1,4 @@
+import "./locale-ko";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -36,7 +37,7 @@ describe("REQ-005 Desktop Shell", () => {
 
   it("AC-007-02 Desktop은 Core를 import하고 Manifest 파싱·검증 로직을 복제하지 않는다", async () => {
     const src = path.resolve(import.meta.dirname, "../src");
-    const texts = await Promise.all((await readdir(src)).map((f) => readFile(path.join(src, f), "utf8")));
+    const texts = await Promise.all((await readdir(src, { recursive: true })).filter((f) => f.endsWith(".ts")).map((f) => readFile(path.join(src, f), "utf8")));
     expect(texts.some((t) => t.includes('from "@openhub/core"'))).toBe(true);
     for (const t of texts) expect(t).not.toMatch(/from "(zod|yaml)"|parseDocument|safeParse/u);
   });

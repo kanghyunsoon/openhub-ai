@@ -5,6 +5,7 @@
 // 업데이트 확인(network)은 버튼을 눌렀을 때만 한다. 모든 문자열은 textContent로만 넣는다.
 // skip된 Health는 Core 문장 그대로 "Health: Not verified"로 보인다.
 (() => {
+  const t = window.openhubI18n.t;
   function el(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -27,7 +28,7 @@
     health: (id) => window.openhub.planLifecycleHealth(id),
     repair: (id) => window.openhub.planLifecycleRepair(id),
   };
-  const TITLE = { update: "업데이트", rollback: "롤백", health: "Health Check", repair: "복구" };
+  const TITLE = { update: t("lifecycle.op.update"), rollback: t("lifecycle.op.rollback"), health: t("lifecycle.op.health"), repair: t("lifecycle.op.repair") };
   let current = null;
 
   function show(children) {
@@ -45,12 +46,12 @@
     if (item.warning) li.append(el("p", "entry-warning", item.warning));
     const actions = el("div", "entry-actions");
     if (item.canUpdate) {
-      actions.append(button("lifecycle-check", "업데이트 확인", () => void check(item.id, li)));
-      actions.append(button("lifecycle-update", "업데이트 계획", () => void open("update", item.id)));
+      actions.append(button("lifecycle-check", t("lifecycle.check"), () => void check(item.id, li)));
+      actions.append(button("lifecycle-update", t("lifecycle.planUpdate"), () => void open("update", item.id)));
     }
-    if (item.canHealth) actions.append(button("lifecycle-health", "Health Check", () => void open("health", item.id)));
-    if (item.canRollback) actions.append(button("lifecycle-rollback", "이전 버전으로 롤백", () => void open("rollback", item.id)));
-    if (item.canRepair) actions.append(button("lifecycle-repair", "복구 계획 확인", () => void open("repair", item.id)));
+    if (item.canHealth) actions.append(button("lifecycle-health", t("lifecycle.health"), () => void open("health", item.id)));
+    if (item.canRollback) actions.append(button("lifecycle-rollback", t("lifecycle.rollback"), () => void open("rollback", item.id)));
+    if (item.canRepair) actions.append(button("lifecycle-repair", t("lifecycle.repair"), () => void open("repair", item.id)));
     if (actions.childElementCount > 0) li.append(actions);
     return li;
   }
@@ -58,7 +59,7 @@
   async function refresh() {
     const response = await window.openhub.lifecycleStatus();
     if (response.status === "no-project") {
-      statusEl.textContent = "프로젝트를 선택하면 OpenHub가 설치한 도구의 버전·drift·Health 상태를 보여줍니다.";
+      statusEl.textContent = t("lifecycle.prompt");
       list.replaceChildren();
       return response;
     }
@@ -70,7 +71,7 @@
       return response;
     }
     statusEl.className = "todo";
-    statusEl.textContent = response.items.length === 0 ? "OpenHub가 이 프로젝트에 설치한 도구가 없습니다." : response.note;
+    statusEl.textContent = response.items.length === 0 ? t("lifecycle.empty") : response.note;
     list.replaceChildren(...response.items.map(renderEntry));
     return response;
   }
@@ -78,15 +79,16 @@
   async function check(id, li) {
     const old = li.querySelector(".entry-check");
     if (old) old.remove();
-    const line = el("p", "entry-check", "업데이트 확인 중…");
+    const line = el("p", "entry-check", t("lifecycle.checking"));
     li.append(line);
     const response = await window.openhub.checkLifecycle(id);
-    line.textContent = response.status === "ok" ? response.view.message : "확인할 수 없습니다: " + (response.message || response.status);
+    line.textContent = response.status === "ok" ? response.view.message : t("lifecycle.checkFailed", { message: response.message || response.status });
     return response;
   }
 
   function renderResult(result) {
-    const nodes = [el("h3", "", "결과 · " + result.status + (result.code ? " (" + result.code + ")" : ""))];
+    const nodes = [el("h3", "", t("lifecycle.resultTitle", { status: result.status, code: result.code ? " (" + result.code + ")" : "" }))];
+    nodes[0].dataset.status = result.status;
     // 성공·실패·부분 실패·실행 안 함을 한 줄로 먼저 보여 준다(Health 실패를 성공으로 보이지 않는다).
     if (result.summary) nodes.push(el("p", "lifecycle-outcome outcome-" + result.outcome, result.summary));
     for (const line of result.lines) nodes.push(el("p", line.trim().startsWith("-") ? "install-warning" : "install-change", line));
@@ -96,39 +98,39 @@
   }
 
   async function run(operation, id) {
-    const status = el("p", "todo", "확인 대화상자에서 승인하면 실행합니다…");
+    const status = el("p", "todo", t("lifecycle.waiting"));
     panel.append(status);
     const response = await window.openhub.runLifecycle(id);
     if (response.status === "rejected") {
-      status.textContent = "승인하지 않아 중단했습니다. 아무것도 바꾸지 않았습니다.";
+      status.textContent = t("lifecycle.rejected");
       status.dataset.runDone = "1";
       return { status: "rejected", health: [] };
     }
     if (response.status !== "done") {
-      status.textContent = "실행할 수 없습니다: " + (response.message || response.status);
+      status.textContent = t("lifecycle.cannotRun", { message: response.message || response.status });
       status.dataset.runDone = "1";
       return { status: response.status, health: [] };
     }
     if (response.result.reapprove) {
       // PLAN_STALE: 새 계획을 다시 보여 주고 재승인을 받는다.
       const view = await open(operation, id);
-      panel.prepend(el("p", "install-warning", "승인 후 계획이 바뀌었습니다(" + response.result.changed.join(", ") + "). 새 계획을 확인하고 다시 승인하세요."));
+      panel.prepend(el("p", "install-warning", t("lifecycle.stale", { changed: response.result.changed.join(", ") })));
       return { status: "stale", health: [], reopened: view !== null };
     }
-    status.textContent = "진행: 승인 확인 → 계획 재확인 → 준비 → 설정 교체 → Health → Version State 기록";
+    status.textContent = t("lifecycle.progress");
     return renderResult(response.result);
   }
 
   function renderPlan(view) {
-    const nodes = [el("h3", "", view.displayName + " " + TITLE[view.operation] + " 계획")];
+    const nodes = [el("h3", "", t("lifecycle.planTitle", { name: view.displayName, operation: TITLE[view.operation] }))];
     nodes.push(el("pre", "install-preview", view.previewLines.join("\n")));
     if (view.upToDate) {
-      nodes.push(el("p", "todo", "이미 같은 버전입니다. 바꿀 것이 없습니다."));
+      nodes.push(el("p", "todo", t("lifecycle.upToDate")));
       show(nodes);
       return;
     }
     if (!view.executable) {
-      nodes.push(el("p", "install-warning", "실행할 수 없는 계획입니다 (" + view.status + "). 자동으로 고치지 않습니다."));
+      nodes.push(el("p", "install-warning", t("lifecycle.notExecutable", { status: view.status })));
       show(nodes);
       return;
     }
@@ -139,11 +141,11 @@
       const box = document.createElement("input");
       box.type = "checkbox";
       box.dataset.requirement = r.id;
-      label.append(box, el("span", "", "[" + r.id + "] " + r.message));
+      label.append(box, el("span", "", t("requirement.line", { id: r.id, message: r.message })));
       requirementList.append(label);
       boxes.push(box);
     }
-    const confirm = el("button", "lifecycle-confirm", "승인 대화상자 열기");
+    const confirm = el("button", "lifecycle-confirm", t("lifecycle.openDialog"));
     confirm.type = "button";
     confirm.disabled = true;
     const update = () => {
@@ -160,11 +162,11 @@
 
   async function open(operation, id) {
     current = operation + ":" + id;
-    show([el("p", "todo", TITLE[operation] + " 계획을 만드는 중…")]);
+    show([el("p", "todo", t("lifecycle.planning", { operation: TITLE[operation] }))]);
     const response = await PLANNERS[operation](id);
     if (current !== operation + ":" + id) return null;
     if (response.status !== "ok") {
-      show([el("p", "install-warning", "계획을 만들 수 없습니다: " + (response.message || response.status))]);
+      show([el("p", "install-warning", t("lifecycle.planFailed", { message: response.message || response.status }))]);
       return null;
     }
     renderPlan(response.view);
@@ -231,10 +233,10 @@
     if (ready.disabled) return { status: "not-executable", boxes: boxes.length };
     ready.click();
     const done = await waitFor(panel, () => panel.querySelector(".lifecycle-outcome") || panel.querySelector('[data-run-done="1"]'));
-    const heading = panel.querySelector("h3")?.textContent || "";
+    const heading = panel.querySelector("h3");
     const after = await refresh();
     return {
-      status: done.classList.contains("lifecycle-outcome") ? heading.replace(/^결과 · /u, "").split(" ")[0] : "not-run",
+      status: done.classList.contains("lifecycle-outcome") && heading ? heading.dataset.status || "unknown" : "not-run",
       outcome: done.classList.contains("lifecycle-outcome") ? [...done.classList].find((c) => c.startsWith("outcome-")).slice("outcome-".length) : done.textContent,
       health: [...panel.querySelectorAll(".install-change")].map((p) => p.textContent.trim()).filter((t) => t.startsWith("Health:")),
       preview,
