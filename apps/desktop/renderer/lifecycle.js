@@ -245,5 +245,30 @@
       after: after.items ? after.items.filter((i) => i.toolId === toolId).map((i) => i.state) : [],
     };
   };
+
+  // 스모크(--smoke + OPENHUB_SMOKE_ROLLBACK): toolId 항목의 op 버튼(rollback·health 등) click → 승인 항목 checkbox click → 확인 click →
+  // 결과를 기다린다(사람과 같은 DOM 조작, timer 없음).
+  window.__openhubLifecycleRun = async (toolId, op) => {
+    await refresh();
+    const li = [...list.querySelectorAll("li.entry")].find((x) => x.dataset.toolId === toolId && x.querySelector(".lifecycle-" + op));
+    if (!li) return { status: "no-" + op + "-button" };
+    li.querySelector(".lifecycle-" + op).click();
+    const ready = await waitFor(panel, () => panel.querySelector(".lifecycle-confirm") || panel.querySelector(".install-warning"));
+    if (!ready.classList.contains("lifecycle-confirm")) return { status: "not-executable", message: ready.textContent };
+    const requirements = [...panel.querySelectorAll('input[type="checkbox"]')].map((b) => b.dataset.requirement);
+    for (const box of panel.querySelectorAll('input[type="checkbox"]')) box.click();
+    ready.click();
+    const done = await waitFor(panel, () => panel.querySelector(".lifecycle-outcome") || panel.querySelector('[data-run-done="1"]'));
+    const heading = panel.querySelector("h3");
+    const lines = [...panel.querySelectorAll(".install-change, .install-warning")].map((p) => p.textContent.trim());
+    const after = await refresh();
+    return {
+      status: done.classList.contains("lifecycle-outcome") && heading ? heading.dataset.status || "unknown" : "not-run",
+      outcome: done.classList.contains("lifecycle-outcome") ? [...done.classList].find((c) => c.startsWith("outcome-")).slice("outcome-".length) : done.textContent,
+      requirements,
+      lines,
+      after: after.items ? after.items.filter((i) => i.toolId === toolId).map((i) => i.state) : [],
+    };
+  };
 })();
 

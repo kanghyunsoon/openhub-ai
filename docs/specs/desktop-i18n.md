@@ -78,7 +78,7 @@ The same rule applies to lifecycle result warnings and Adopt/Benchmark errors.
 
 ## Known limitation (Fact)
 
-The Desktop update smoke (`OPENHUB_SMOKE_UPDATE`) uses a fake spawner that exits 0 without creating an npx cache entry, so npx tools stop at npx Prepare verification (`preparation-failed`). This is a test-environment gap, not an update failure, and predates this change (the smoke dependencies are unchanged since v0.1.0; npx Prepare arrived in #8). uvx tools such as `serena` pass install → update → Health → release in both languages. Follow-up (separate pull request, required before the v0.2.0 release): make the fake npm create the cache entry npx Prepare verifies (as the repair smoke already does) and cover npx install → update → Health → rollback.
+The Desktop update smoke (`OPENHUB_SMOKE_UPDATE`) used a fake spawner that exited 0 without creating an npx cache entry, so npx tools stopped at npx Prepare verification (`preparation-failed`). This was a test-environment gap, not an update failure. Resolved in the follow-up pull request (`test/npx-lifecycle-smoke`): install, update and rollback smokes now share `smokeNpmSpawner`, which meets the npx Prepare cache contract; `OPENHUB_SMOKE_ROLLBACK=1` adds rollback and Health. Covered: npx install → update (Prepare) → Health → rollback → Health in the real window, and exact-version npx install Prepare → update Prepare → Health → rollback → Health at IPC level.
 
 ## Open Questions
 

@@ -260,7 +260,7 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 Desktop Lifecycle", () => {
 
   it("AC-046-08 fake resolver·Health·executor smoke가 통과하고 main은 --smoke + OPENHUB_SMOKE_UPDATE일 때만 쓴다", async () => {
     const install = smokeInstallDeps();
-    const life = smokeLifecycleDeps();
+    const life = smokeLifecycleDeps(path.join(scratch, "smoke-npm-cache"));
     const base = await mkdtemp(path.join(scratch, "smoke-"));
     const project = path.join(base, "project");
     await mkdir(project);

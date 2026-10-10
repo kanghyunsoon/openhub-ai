@@ -31,6 +31,7 @@ import type { DirectoryPicker } from "./project-scan";
 import { recommendCurrentProject, type RecommendSession } from "./recommend";
 import { installApprovalText, installNextActionTexts, installPreviewLines, installWarningTexts, installationStatusText } from "./i18n/core-text";
 import { tr } from "./i18n/index";
+import { smokeNpmSpawner } from "./lifecycle";
 
 /**
  * Desktop 설치 흐름(TASK-036, D-005·D-012). FOR YOU 카드 → Plan Preview → 추가 승인 체크 → 네이티브 확인 → 실행 → 결과.
@@ -454,9 +455,10 @@ export function registerInstall(ipc: IpcMainLike, session: InstallSession, deps:
 
 /**
  * 스모크 전용(AC-036-09, --smoke + OPENHUB_SMOKE_INSTALL일 때만 main이 사용).
- * fake probe·fake executor(실제 프로세스 없음)·자동 확인 대화상자. 호출 기록을 남긴다.
+ * fake probe·가짜 npm(실제 프로세스 없음, npx Prepare 캐시 계약을 지킨다: smokeNpmSpawner)·자동 확인 대화상자. 호출 기록을 남긴다.
+ * cacheRoot: 가짜 npm 캐시 위치(스모크 임시 폴더). 정확한 버전 npx 설치의 Prepare가 이 아래에 캐시 항목을 만든다.
  */
-export function smokeInstallDeps(): { probe: () => Promise<BackendProbeReport>; spawner: ExecSpawner; dialog: NativeDialogLike; spawned: string[][]; dialogs: number } {
+export function smokeInstallDeps(cacheRoot?: string): { probe: () => Promise<BackendProbeReport>; spawner: ExecSpawner; dialog: NativeDialogLike; spawned: string[][]; dialogs: number } {
   const record = { spawned: [] as string[][], dialogs: 0 };
   const probes: BackendProbeReport = {
     node: { name: "node", available: true, version: "22.0.0", status: "ok" },
@@ -466,12 +468,15 @@ export function smokeInstallDeps(): { probe: () => Promise<BackendProbeReport>; 
   };
   return Object.assign(record, {
     probe: async () => probes,
-    spawner: ((executable: string, args: readonly string[]) => {
-      record.spawned.push([executable, ...args]);
-      const events = new EventEmitter();
-      queueMicrotask(() => events.emit("close", 0, null));
-      return { stdout: null, stderr: null, on: (e: string, l: (...a: unknown[]) => void) => events.on(e, l), kill: () => true } as ExecChild;
-    }) as ExecSpawner,
+    spawner:
+      cacheRoot === undefined
+        ? (((executable: string, args: readonly string[]) => {
+            record.spawned.push([executable, ...args]);
+            const events = new EventEmitter();
+            queueMicrotask(() => events.emit("close", 0, null));
+            return { stdout: null, stderr: null, on: (e: string, l: (...a: unknown[]) => void) => events.on(e, l), kill: () => true } as ExecChild;
+          }) as ExecSpawner)
+        : smokeNpmSpawner(cacheRoot, record.spawned),
     dialog: {
       showMessageBox: async () => {
         record.dialogs += 1;

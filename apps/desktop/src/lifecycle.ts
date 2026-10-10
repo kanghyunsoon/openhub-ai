@@ -449,9 +449,10 @@ export function registerLifecycle(ipc: IpcMainLike, session: LifecycleSession, d
 
 /**
  * 스모크 전용(AC-046-08, --smoke + OPENHUB_SMOKE_UPDATE일 때만 main이 사용).
- * fake resolver(네트워크 없음)·fake Health(프로세스 없음)·fake executor·자동 확인 대화상자. 호출 기록을 남긴다.
+ * fake resolver(네트워크 없음)·fake Health(프로세스 없음)·가짜 npm(npx Prepare 캐시 계약, smokeNpmSpawner)·자동 확인 대화상자. 호출 기록을 남긴다.
+ * (v0.2.0) 이전에는 가짜 실행기가 종료 코드 0만 돌려주고 npx 캐시 항목을 만들지 않아 정확한 버전 npx update가 Prepare 검증에서 멈췄다.
  */
-export function smokeLifecycleDeps(): Required<Pick<LifecycleDeps, "fetch" | "runHealth" | "spawner" | "dialog">> & { fetched: string[]; healthRuns: number; spawned: string[][]; dialogs: number } {
+export function smokeLifecycleDeps(cacheRoot: string): Required<Pick<LifecycleDeps, "fetch" | "runHealth" | "spawner" | "dialog">> & { fetched: string[]; healthRuns: number; spawned: string[][]; dialogs: number } {
   const record = { fetched: [] as string[], healthRuns: 0, spawned: [] as string[][], dialogs: 0 };
   const json = (doc: unknown) => new Response(JSON.stringify(doc), { status: 200 });
   return Object.assign(record, {
@@ -469,12 +470,7 @@ export function smokeLifecycleDeps(): Required<Pick<LifecycleDeps, "fetch" | "ru
       record.healthRuns += 1;
       return { ok: true, result: { status: "healthy", reason: null, toolCount: 1, environmentUnverified: verified.plan.requiredEnv.some((e) => e.required), terminated: true, excerpt: null } };
     }) as NonNullable<LifecycleEnvironment["runHealth"]>,
-    spawner: ((executable: string, args: readonly string[]) => {
-      record.spawned.push([executable, ...args]);
-      const events = new EventEmitter();
-      queueMicrotask(() => events.emit("close", 0, null));
-      return { stdout: null, stderr: null, on: (e: string, l: (...a: unknown[]) => void) => events.on(e, l), kill: () => true } as ExecChild;
-    }) as ExecSpawner,
+    spawner: smokeNpmSpawner(cacheRoot, record.spawned),
     dialog: {
       showMessageBox: async () => {
         record.dialogs += 1;
@@ -484,15 +480,18 @@ export function smokeLifecycleDeps(): Required<Pick<LifecycleDeps, "fetch" | "ru
   });
 }
 
+
 /**
- * 스모크 전용 Repair(v0.2.0 P0-3, --smoke + OPENHUB_SMOKE_REPAIR일 때만 main이 사용). 실제 Electron 창에서 renderer의
- * [복구 계획 확인] → 승인 → 실행 경로를 통과시키기 위한 가짜 npm(npx Prepare 흉내: cacheRoot 아래에 cache 항목만 만든다, network 0)·
- * 가짜 Health(프로세스 없음)·자동 확인 대화상자. 호출 기록을 남긴다.
+ * 스모크 전용 가짜 npm(실제 npm·network 0). npx Prepare가 확인하는 캐시 계약을 지킨다:
+ * - `npm config get cache`(argv 끝): stdout으로 cacheRoot.
+ * - npx Prepare(`--package=<정확한 spec>`): npm처럼 `<cacheRoot>/_npx/<key>`에 package.json(_npx.packages)·node_modules/<name>/package.json·
+ *   node_modules/.package-lock.json(완료 표시)을 만든다.
+ * - 그 밖의 명령(docker pull 등): 종료 코드 0.
+ * 모든 호출은 calls에 [executable, ...args]로 남긴다. 설치·update·rollback·repair 스모크가 같은 구현을 쓴다.
  */
-export function smokeRepairDeps(cacheRoot: string): Required<Pick<LifecycleDeps, "runHealth" | "spawner" | "dialog">> & { npmCalls: string[][]; healthRuns: number; dialogs: string[] } {
-  const record = { npmCalls: [] as string[][], healthRuns: 0, dialogs: [] as string[] };
-  const spawner = ((executable: string, args: readonly string[]) => {
-    record.npmCalls.push([executable, ...args]);
+export function smokeNpmSpawner(cacheRoot: string, calls: string[][] = []): ExecSpawner {
+  return ((executable: string, args: readonly string[]) => {
+    calls.push([executable, ...args]);
     const stdout = new EventEmitter();
     const child = Object.assign(new EventEmitter(), { stdout, stderr: new EventEmitter(), pid: 4242, kill: () => true });
     const pkg = args.find((a) => a.startsWith("--package="));
@@ -514,6 +513,16 @@ export function smokeRepairDeps(cacheRoot: string): Required<Pick<LifecycleDeps,
     });
     return child as never;
   }) as ExecSpawner;
+}
+
+/**
+ * 스모크 전용 Repair(v0.2.0 P0-3, --smoke + OPENHUB_SMOKE_REPAIR일 때만 main이 사용). 실제 Electron 창에서 renderer의
+ * [복구 계획 확인] → 승인 → 실행 경로를 통과시키기 위한 가짜 npm(npx Prepare 흉내: cacheRoot 아래에 cache 항목만 만든다, network 0)·
+ * 가짜 Health(프로세스 없음)·자동 확인 대화상자. 호출 기록을 남긴다.
+ */
+export function smokeRepairDeps(cacheRoot: string): Required<Pick<LifecycleDeps, "runHealth" | "spawner" | "dialog">> & { npmCalls: string[][]; healthRuns: number; dialogs: string[] } {
+  const record = { npmCalls: [] as string[][], healthRuns: 0, dialogs: [] as string[] };
+  const spawner = smokeNpmSpawner(cacheRoot, record.npmCalls);
   return Object.assign(record, {
     spawner,
     runHealth: (async () => {
