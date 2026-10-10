@@ -5,6 +5,7 @@ import {
   clientVerificationLevel,
   configTargetFor,
   defaultHostEnvironment,
+  installTargetChange,
   loadRegistry,
   locateWindowsNpxLauncher,
   npmChildEnv,
@@ -25,6 +26,7 @@ import {
   type InstallPlanV1,
   type InstallRequest,
   type InstallResultV1,
+  type InstallTargetChange,
   type IsolatedDir,
   type PlannedInstall,
 } from "@openhub/core";
@@ -91,7 +93,8 @@ export interface InstallPlanView {
   status: string;
   installationStatus: string;
   previewLines: string[];
-  targets: { file: string; client: string; scope: "project" | "user"; userScope: boolean; manual: boolean }[];
+  /** change: 이 대상에 하는 일(Core installTargetChange). unchanged는 같은 항목이 이미 있어 쓰지 않는다. */
+  targets: { file: string; client: string; scope: "project" | "user"; userScope: boolean; manual: boolean; change: InstallTargetChange }[];
   requirements: { id: string; message: string; userScope: boolean }[];
   userScope: boolean;
   executable: boolean;
@@ -166,7 +169,7 @@ export function buildInstallPlanView(planned: PlannedInstall): InstallPlanView {
     status: plan.status,
     installationStatus: installationStatusText(plan),
     previewLines: installPreviewLines(planned),
-    targets: plan.targets.map((t) => ({ file: t.file, client: t.client, scope: t.scope, userScope: t.scope === "user", manual: t.envReference === "manual" })),
+    targets: plan.targets.map((t) => ({ file: t.file, client: t.client, scope: t.scope, userScope: t.scope === "user", manual: t.envReference === "manual", change: installTargetChange(plan, t) })),
     requirements: plan.approvalRequirements.map((id) => ({ id, message: installApprovalText(id), userScope: id === "user-scope-config" })),
     userScope,
     executable: plan.status === "installable",
@@ -206,9 +209,15 @@ export function nativeDialogPrompter(dialog: NativeDialogLike): ApprovalPrompter
     channel: "desktop-native-dialog",
     async confirm(request) {
       const { plan, planDigest } = request.planned;
-      // 바뀔 설정 파일(범위·Client)을 승인 화면에 그대로 나열한다. user 범위가 있으면 더 넓은 영향을 따로 경고한다.
-      const written = plan.targets.filter((t) => t.envReference !== "manual");
-      const targetLines = written.map((t) => tr("install.dialog.target", { client: CLIENT_LABEL[t.client], scope: tr(t.scope === "user" ? "install.target.userScope" : "install.target.projectScope"), file: t.file }));
+      // 바뀔 설정 파일(범위·Client)을 승인 화면에 그대로 나열한다. user 범위에 쓰면 더 넓은 영향을 따로 경고한다.
+      // 같은 항목이 이미 있어 쓰지 않는 대상(v0.2.0 범위별 설치 판정)은 "변경 없음"으로 따로 적는다.
+      const scopeText = (t: { scope: string }) => tr(t.scope === "user" ? "install.target.userScope" : "install.target.projectScope");
+      const written = plan.targets.filter((t) => installTargetChange(plan, t) === "add");
+      const unchanged = plan.targets.filter((t) => installTargetChange(plan, t) === "unchanged");
+      const targetLines = [
+        ...written.map((t) => tr("install.dialog.target", { client: CLIENT_LABEL[t.client], scope: scopeText(t), file: t.file })),
+        ...unchanged.map((t) => tr("install.dialog.targetUnchanged", { client: CLIENT_LABEL[t.client], scope: scopeText(t), file: t.file })),
+      ];
       const userWarning = written.some((t) => t.scope === "user") ? [tr("install.dialog.userScopeWarning")] : [];
       const detail = [...targetLines, ...userWarning, "", ...request.requirements.map((r) => tr("dialog.requirement", { id: r.id, message: installApprovalText(r.id) })), "", tr("dialog.digest", { digest: planDigest })].join("\n");
       const { response } = await dialog.showMessageBox({

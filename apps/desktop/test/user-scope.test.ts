@@ -399,13 +399,16 @@ describe("v0.2.0 P0-3 C2 사용자 범위 Lifecycle(INSTALLED)", () => {
     expect(b.items.filter((i) => i.scope === "project")).toEqual([]);
   });
 
-  it("User·Project 중복 설치: 범위별로 따로 보이고 사용자 항목 Health는 사용자 대상만 실행한다", async () => {
+  it("User·Project 독립 설치: 프로젝트에 이미 있어도 사용자 범위를 추가하고, 범위별로 따로 보이며 같은 대상 재요청은 변경 없음이다", async () => {
     const w = await wired();
-    // 사용자 범위를 먼저 설치한다(프로젝트 분석은 사용자 설정을 읽지 않으므로 프로젝트 범위 설치가 이어서 가능하다).
-    // 반대 순서(프로젝트에 이미 있음)는 Core가 already-installed로 보고 사용자 설정을 쓰지 않는다(아래 테스트).
-    await installUser(w, "postgres-mcp", ["cursor"]);
+    // v0.2.0 범위별 설치 판정: 프로젝트 범위를 먼저 설치해도 사용자 범위는 별도 대상(Tool + Client + scope + 서버 이름)이다.
     expect((await w.plan("postgres-mcp", { clients: ["cursor"], scope: "project" })).status).toBe("ok");
-    expect((await w.install("postgres-mcp")).status).toBe("done");
+    const project = await w.install("postgres-mcp");
+    expect(project.status === "done" && project.result.status).toBe("succeeded");
+    const { plan: userPlan, run: userRun } = await installUser(w, "postgres-mcp", ["cursor"]);
+    expect(userPlan.status === "ok" && [userPlan.view.alreadyInstalled, userPlan.view.executable, userPlan.view.targets.map((t) => t.change)]).toEqual([false, true, ["add"]]);
+    expect(userRun.status === "done" && userRun.result.status).toBe("succeeded");
+    expect(await w.read(".cursor/mcp.json")).not.toBe(CURSOR_USER);
     const s = await w.status({ includeUser: true });
     if (s.status !== "ok") throw new Error(s.status);
     expect(s.items.filter((i) => i.toolId === "postgres-mcp").map((i) => [i.id, i.scope, i.state])).toEqual([
@@ -416,15 +419,20 @@ describe("v0.2.0 P0-3 C2 사용자 범위 Lifecycle(INSTALLED)", () => {
     expect(plan.status === "ok" && plan.view.previewLines.join("\n")).toContain("~/.cursor/mcp.json");
     await w.lifeRun("user:cursor:postgres");
     expect(w.healthRuns).toEqual(["user:cursor"]);
-    const again = await w.plan("postgres-mcp", { clients: ["codex"], scope: "user" });
-    expect(again.status === "ok" && [again.view.alreadyInstalled, again.view.executable]).toEqual([true, false]);
-    // 성공이 아니라 변경 없음(no-op)이고 사용자 Codex 설정·Version State에 아무것도 기록하지 않는다.
+    // 같은 대상(사용자 Cursor)을 다시 요청: 같은 항목이 있으므로 변경 없음(no-op)이고 사용자 설정·Version State에 아무것도 기록하지 않는다.
+    const again = await w.plan("postgres-mcp", { clients: ["cursor"], scope: "user" });
+    expect(again.status === "ok" && [again.view.alreadyInstalled, again.view.executable, again.view.targets.map((t) => t.change)]).toEqual([true, false, ["unchanged"]]);
+    const cursorUserBefore = await w.read(".cursor/mcp.json");
     const stateBefore = JSON.stringify(await readLifecycleState({ homeDir: w.home }));
     const noop = await w.install("postgres-mcp");
     expect(noop.status === "done" && noop.result.status).toBe("no-op");
+    expect(await w.read(".cursor/mcp.json")).toBe(cursorUserBefore);
     expect(await w.read(".codex/config.toml")).toBe(CODEX_USER);
     expect(JSON.stringify(await readLifecycleState({ homeDir: w.home }))).toBe(stateBefore);
     expect(await readFile(path.join(ROOT, "apps/desktop/renderer/install.js"), "utf8")).toContain('t(view.userScope ? "install.noChangesUserScope" : "install.noChanges")');
+    // 다른 Client(사용자 Codex)는 아직 없으므로 추가할 수 있다.
+    const codex = await w.plan("postgres-mcp", { clients: ["codex"], scope: "user" });
+    expect(codex.status === "ok" && [codex.view.alreadyInstalled, codex.view.executable]).toEqual([false, true]);
   });
 
   it("사용자 범위 tool config 손상 → Repair Plan(user-scope-config 승인) → 승인 → 복구 → Health. 거절·Health 실패는 Version State·설정을 바꾸지 않는다", async () => {

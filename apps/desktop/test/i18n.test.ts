@@ -282,6 +282,24 @@ describe("v0.2.0 PR B English 표시(실제 Plan·IPC 결과)", () => {
     expect(lines).not.toMatch(/(Claude Code|Codex) \(Linux\): running/u);
   });
 
+  it("(v0.2.0 범위별 설치 판정) 설치 Plan Preview가 대상별 추가·변경 없음·충돌을 영어로 보여 주고, 충돌 경고는 충돌 대상만 옮긴다", async () => {
+    const h = await createHarness(scratch, { entries });
+    const cursor = h.request("playwright-mcp", [{ client: "cursor", scope: "project" }]);
+    const first = await plannedOf(h, cursor);
+    expect((await runInstallTransaction(first, await approveAll(first), cursor, h.env)).status).toBe("succeeded");
+    await writeFile(path.join(h.projectRoot, ".mcp.json"), '{ "mcpServers": { "playwright": { "command": "mine" } } }\n');
+    const planned = await plannedOf(h, h.request("playwright-mcp", (["claude-code", "codex", "cursor"] as const).map((client) => ({ client, scope: "project" as const }))));
+    expect(planned.plan.status).toBe("blocked");
+    const lines = installPreviewEn(planned).join("\n");
+    expect(lines).not.toMatch(HANGUL);
+    expect(lines).toContain(".mcp.json (Claude Code, project scope) mcpServers.playwright not written — an entry with the same name but different content exists (conflict; not overwritten)");
+    expect(lines).toContain(".codex/config.toml (Codex, project scope) adds the mcp_servers.playwright entry");
+    expect(lines).toContain(".cursor/mcp.json (Cursor, project scope) mcpServers.playwright no change — the same entry already exists");
+    expect(lines).toContain("  - .mcp.json already has a playwright entry; OpenHub does not overwrite it.");
+    expect(lines).not.toContain(".cursor/mcp.json already has");
+    expect(lines).toContain("Already configured for another client or scope");
+  });
+
   it("Repair: 상태·Preview·승인 대화상자·성공 결과가 영어이고 승인 요구 ID는 그대로다", async () => {
     const c = await k8sDesktop();
     await unlink(c.toolConfig);

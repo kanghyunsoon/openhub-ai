@@ -219,13 +219,24 @@ describe("REQ-034 CLI openhub install", () => {
     expect(out).toContain("status: unchecked");
   });
 
-  it("AC-035-02 이미 설정된 Tool은 승인 없이 no-op이고 아무것도 실행하지 않는다", async () => {
+  it("AC-035-02 고른 대상에 같은 항목이 이미 있으면 승인 없이 no-op이고 아무것도 실행하지 않는다(v0.2.0: 다른 항목이면 충돌로 막는다)", async () => {
     const dirs = await setup();
-    await writeFile(path.join(dirs.project, ".mcp.json"), '{ "mcpServers": { "memory": { "command": "npx", "args": [] } } }\n');
+    await writeFile(path.join(dirs.project, ".mcp.json"), '{ "mcpServers": { "memory": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"] } } }\n');
     const r = await install(["memory-mcp", "--client", "claude-code"], { dirs });
     expect(r.code).toBe(0);
     expect(r.stdout.join("\n")).toContain("결과  no-op");
+    expect(r.stdout.join("\n")).toContain("mcpServers.memory 변경 없음");
     expect(r.questions).toEqual([]);
     expect(r.spawns).toEqual([]);
+    // 같은 이름의 다른 항목: 충돌로 막고 묻지도, 실행하지도, 덮어쓰지도 않는다.
+    const other = await setup();
+    const mine = '{ "mcpServers": { "memory": { "command": "npx", "args": [] } } }\n';
+    await writeFile(path.join(other.project, ".mcp.json"), mine);
+    const c = await install(["memory-mcp", "--client", "claude-code"], { dirs: other });
+    expect(c.code).toBe(1);
+    expect(c.stdout.join("\n")).toContain("충돌, 덮어쓰지 않음");
+    expect(c.questions).toEqual([]);
+    expect(c.spawns).toEqual([]);
+    expect(await readFile(path.join(other.project, ".mcp.json"), "utf8")).toBe(mine);
   });
 });

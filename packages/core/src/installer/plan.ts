@@ -140,6 +140,12 @@ const preconditionSchema = z.strictObject({
   exists: z.boolean(),
   fileDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u).nullable(),
   keyAbsent: z.boolean(),
+  /**
+   * (v0.2.0 범위별 설치 판정, 선택) 같은 서버 이름 항목이 이미 있을 때만: 그 항목을 Plan 형태로 되돌린 값의 sha256.
+   * 설치할 표준 항목과 같으면 그 대상은 "변경 없음"이고, 다르면 CONFIG_KEY_EXISTS로 막는다. 항목이 없으면 이 필드도 없다
+   * (기존 InstallPlan v1 데이터·golden은 그대로 해석된다).
+   */
+  entryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u).optional(),
 });
 
 const targetSchema = z.strictObject({
@@ -305,7 +311,7 @@ export interface PlanTargetInput {
   /** 논리 경로. 쓸 수 없는 대상(Claude Code user)은 envReference "manual"이다. */
   file: string;
   envReference: EnvReferenceStyle;
-  precondition: { exists: boolean; fileDigest: string | null; keyAbsent: boolean };
+  precondition: { exists: boolean; fileDigest: string | null; keyAbsent: boolean; entryDigest?: string };
 }
 
 export interface PlanAssemblyInput {
@@ -348,6 +354,26 @@ export function serverEntry(client: InstallClient, launch: NonNullable<InstallPl
   return { ...base, env: Object.fromEntries(requiredNames.map((n) => [n, ref(n)])) };
 }
 
+/**
+ * (v0.2.0 범위별 설치 판정) Plan 형태 서버 항목의 canonical sha256. lifecycle configEntryDigest와 같은 계산이다
+ * (installer → lifecycle 순환 import를 피하려고 여기 둔다). Client 설정에서 읽은 항목은 planFormOfEntry로 되돌린 뒤 넣는다.
+ */
+export function entryPlanDigest(value: unknown): string {
+  return "sha256:" + createHash("sha256").update(JSON.stringify(canonicalize(value))).digest("hex");
+}
+
+/** 대상 하나에 이 Plan이 하는 일. add: 항목 추가, unchanged: 같은 항목이 이미 있어 그대로 둔다, conflict: 다른 항목이 있어 막았다, manual: OpenHub가 쓰지 않는다. */
+export type InstallTargetChange = "add" | "unchanged" | "conflict" | "manual";
+
+/** Plan 구조만으로 대상별 변경을 계산한다(Preview·Desktop이 같은 판정을 쓴다). */
+export function installTargetChange(plan: Pick<InstallPlanV1, "status" | "launch">, target: PlanTarget): InstallTargetChange {
+  if (target.envReference === "manual") return "manual";
+  if (target.precondition.keyAbsent) return "add";
+  if (plan.status === "already-installed") return "unchanged";
+  if (plan.launch === null || target.precondition.entryDigest === undefined) return "conflict";
+  return target.precondition.entryDigest === entryPlanDigest(serverEntry(target.client, plan.launch, plan.launch.envNames)) ? "unchanged" : "conflict";
+}
+
 /** Router 결과(backend 선택·fallback·불가 사유, REQ-030)를 InstallPlan v1 계약(REQ-034)으로 조립한다. */
 export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
   const { toolId, manifest, report } = input;
@@ -364,17 +390,28 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
   const targets: PlanTarget[] = [...input.targets]
     .sort((a, b) => CLIENT_ORDER[a.client] - CLIENT_ORDER[b.client] || SCOPE_ORDER[a.scope] - SCOPE_ORDER[b.scope])
     .map((t) => ({ client: t.client, scope: t.scope, file: t.file, serverName: alias ?? toolId, precondition: { ...t.precondition }, envReference: t.envReference }));
+  // v0.2.0 범위별 설치 판정: 대상(Tool + Client + scope + 서버 이름)마다 따로 본다. 다른 Client·scope에 이미 있어도 이 대상은 판단에 쓰지 않는다.
+  // - 같은 서버 이름 항목이 없으면: 추가한다.
+  // - 있고 설치할 표준 항목과 같으면: 변경 없음(단계 없음, Version State에도 기록하지 않는다).
+  // - 있고 다르면: CONFIG_KEY_EXISTS로 막는다(자동으로 덮어쓰지 않는다).
+  const unchanged = new Set<string>();
   for (const t of targets) {
-    if (t.envReference !== "manual" && !t.precondition.keyAbsent) {
-      blockers.push({ code: "CONFIG_KEY_EXISTS", message: `${t.file}에 이미 ${t.serverName} 항목이 있습니다` });
-    }
+    if (t.envReference === "manual" || t.precondition.keyAbsent) continue;
+    const expected = input.launch === null ? undefined : entryPlanDigest(serverEntry(t.client, input.launch, requiredNames));
+    if (expected !== undefined && t.precondition.entryDigest === expected) unchanged.add(t.client + ":" + t.scope);
+    else blockers.push({ code: "CONFIG_KEY_EXISTS", message: `${t.file}에 이미 ${t.serverName} 항목이 있습니다` });
   }
+  const writable = targets.filter((t) => t.envReference !== "manual");
+  const writeTargets = writable.filter((t) => !unchanged.has(t.client + ":" + t.scope));
   // v0.2.0 tool config: 쓸 Client 설정의 scope마다 OpenHub 관리 파일 1개. 상태를 모르면 막는다(승인 전 확인 필수).
   const reviewed = REVIEWED_TOOL_CONFIGS[manifest.name];
   const usesToolConfig = manifest.toolConfig !== undefined && input.launch !== null && input.launch.args.includes(TOOL_CONFIG_PLACEHOLDER);
   const toolConfigSteps: ToolConfigStep[] = [];
-  if (usesToolConfig) {
-    const scopes = [...new Set(targets.filter((t) => t.envReference !== "manual").map((t) => t.scope))].sort((a, b) => SCOPE_ORDER[a] - SCOPE_ORDER[b]);
+  // 고른 대상이 모두 같은 항목으로 이미 설정돼 있으면 "이미 설치됨"이다(대상 단위). 도구 전체 설치 여부(Recommendation)로 판단하지 않는다.
+  const installed = writable.length > 0 && writeTargets.length === 0;
+  if (usesToolConfig && !installed) {
+    // 실제로 쓸 대상의 scope만(변경 없는 대상의 tool config는 건드리지 않는다).
+    const scopes = [...new Set(writeTargets.map((t) => t.scope))].sort((a, b) => SCOPE_ORDER[a] - SCOPE_ORDER[b]);
     for (const scope of scopes) {
       const found = input.toolConfigs?.find((c) => c.scope === scope);
       if (found === undefined) blockers.push({ code: "TOOL_CONFIG_UNKNOWN", message: scope + " 범위 tool config 상태를 확인하지 못했습니다" });
@@ -382,7 +419,6 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
     }
   }
 
-  const installed = installationStatus === "installed";
   const status: InstallPlanV1["status"] = installed
     ? "already-installed"
     : blockers.some((b) => b.code === "UNSUPPORTED_BACKEND")
@@ -395,8 +431,7 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
   if (!installed && input.launch !== null) {
     steps.push(...input.preparation.map((s) => ({ ...s, args: [...s.args] })));
     steps.push(...toolConfigSteps);
-    for (const t of targets) {
-      if (t.envReference === "manual") continue;
+    for (const t of writeTargets) {
       steps.push({
         id: `config-${t.client}-${t.scope}`,
         kind: "config-patch",
@@ -413,10 +448,10 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
   if (!installed) {
     if (installationStatus === "unknown") approvalRequirements.add("installation-unknown");
     if (installationStatus === "unidentified-present") approvalRequirements.add("unidentified-present");
-    if (targets.some((t) => t.scope === "user" && t.envReference !== "manual")) approvalRequirements.add("user-scope-config");
+    if (writeTargets.some((t) => t.scope === "user")) approvalRequirements.add("user-scope-config");
     if (input.backend?.selection === "fallback") approvalRequirements.add("fallback-backend");
     if (input.artifact !== null && !input.artifact.pinned) approvalRequirements.add("floating-artifact");
-    if (requiredNames.length > 0 && targets.some((t) => t.client === "claude-code" && t.envReference !== "manual")) approvalRequirements.add("client-env-parse-risk");
+    if (requiredNames.length > 0 && writeTargets.some((t) => t.client === "claude-code")) approvalRequirements.add("client-env-parse-risk");
     if (toolConfigSteps.length > 0) approvalRequirements.add("tool-config");
   }
 
@@ -429,7 +464,7 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
     if (manifest.category.includes("database") && requiredNames.length > 0) warnings.push({ code: "database-credential-scope", message: DATABASE_CREDENTIAL_NOTICE });
     if (toolConfigSteps.length > 0 && reviewed !== undefined) {
       warnings.push({ code: "tool-config", message: reviewed.notice });
-      warnings.push(...toolConfigVerificationNotices(manifest.name, targets.filter((t) => t.envReference !== "manual").map((t) => t.client), input.launch!.platform));
+      warnings.push(...toolConfigVerificationNotices(manifest.name, writeTargets.map((t) => t.client), input.launch!.platform));
     }
     if (approvalRequirements.has("client-env-parse-risk")) warnings.push({ code: "client-env-parse-risk", message: clientEnvParseRiskNotice(requiredNames) });
     for (const t of targets.filter((x) => x.envReference === "manual")) {
