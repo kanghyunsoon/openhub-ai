@@ -66,6 +66,16 @@ export function formatLifecyclePlanPreview(planned: PlannedLifecycle): string[] 
     const where = CLIENT_LABEL[t.client] + ", " + SCOPE_LABEL[t.scope] + " 범위";
     const action = plan.operation === "health" ? "확인만 합니다(설정 변경 없음)" : (t.client === "codex" ? "mcp_servers." : "mcpServers.") + t.serverName + " 항목 교체";
     lines.push("  - " + t.file + " (" + where + ") " + action + (t.stateRevision === null ? " · Version State 없음" : " · revision " + t.stateRevision));
+    if (t.launcher !== undefined) {
+      const recorded = t.launcher.recorded === "invalid" ? "기록된 Node.js 실행 경로가 유효하지 않음(client-launcher-invalid)" : "기록된 Node.js 실행 경로 유효";
+      const next =
+        plan.operation === "health"
+          ? "Client 설정은 바꾸지 않습니다"
+          : t.launcher.replacementDigest === null
+            ? "실행 직전에 찾은 Node.js 설치를 검증한 뒤 씁니다"
+            : "지금 검증한 Node.js 설치(node.exe·npx-cli.js, " + t.launcher.replacementDigest.slice(0, 19) + "…)로 실행 경로만 다시 씁니다. 승인 뒤 바뀌면 실행하지 않습니다";
+      lines.push("      " + recorded + " → " + next);
+    }
   }
 
   lines.push("", "Health Check");
@@ -121,6 +131,7 @@ const STATE_LABEL: Readonly<Record<LifecycleToolStatus["state"], string>> = {
   "tool-config-missing": "tool-config-missing(OpenHub 관리 tool config 없음 — openhub lifecycle repair)",
   "tool-config-drift": "tool-config-drift(tool config가 기록과 다름 — openhub lifecycle repair)",
   "tool-config-relocated": "tool-config-relocated(옮기거나 복사한 프로젝트 — openhub lifecycle repair)",
+  "client-launcher-invalid": "client-launcher-invalid(Client 설정의 Node.js 실행 경로가 유효하지 않음 — openhub lifecycle repair)",
   "untracked-adoptable": "untracked-adoptable(표준 항목, Version State 없음)",
   "untracked-foreign": "untracked-foreign(OpenHub가 관리하지 않는 설정)",
   "not-inspected": "not-inspected(사용자 범위 미검사)",
@@ -130,6 +141,8 @@ const STATE_LABEL: Readonly<Record<LifecycleToolStatus["state"], string>> = {
 export function formatLifecycleStatusItem(item: LifecycleToolStatus): string[] {
   const head = item.serverName + " · " + CLIENT_LABEL[item.client as keyof typeof CLIENT_LABEL] + " · " + SCOPE_LABEL[item.scope] + " (" + item.file + ")";
   const lines = [head, "  Tool       " + (item.toolId ?? "(식별 안 됨)"), "  상태       " + STATE_LABEL[item.state]];
+  if (item.diagnostics !== undefined) lines.push("  함께 감지   " + item.diagnostics.slice(1).join(", "));
+  if (item.launcher !== undefined) lines.push("  실행 경로   유효하지 않음: " + item.launcher.reason + " (자동으로 고치지 않습니다)");
   if (item.artifact !== null) {
     lines.push("  artifact   " + (item.artifact.resolved ?? item.artifact.requested) + " · " + (item.artifact.lock === "artifact-locked" ? "locked" : "unlocked(버전 고정 안 됨)") + (item.artifact.presence === "artifact-unknown" ? " · 로컬 image 존재 여부 알 수 없음" : ""));
   }

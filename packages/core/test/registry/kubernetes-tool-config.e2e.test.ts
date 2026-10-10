@@ -1,19 +1,23 @@
 import http from "node:http";
 import os from "node:os";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { describe, expect, it } from "vitest";
 import {
   KUBERNETES_TOOL_CONFIG,
   REVIEWED_TOOL_CONFIGS,
+  clientLauncherDigest,
+  containsAbsolutePath,
   createTreeKiller,
   lifecycleStatus,
   locateWindowsNpxLauncher,
   nodeExecSpawner,
   npmChildEnv,
   planLifecycle,
+  planLifecycleRequest,
   recordInstallInState,
   requestLifecycleApproval,
   runInstallTransaction,
@@ -117,6 +121,104 @@ const CALLS = [
 ];
 const BANNED = ["configuration_view", "pods_delete", "pods_exec", "pods_run", "resources_create_or_update", "resources_delete", "resources_scale"];
 
+/** codex.cmd를 shell로 띄우지 않도록 npm 전역 설치의 @openai/codex/bin/codex.js를 찾는다(node로 shell 없이 실행). */
+function findCodexJs(): string | null {
+  const override = process.env["OPENHUB_E2E_CODEX_JS"];
+  if (override !== undefined && override !== "") return override;
+  for (const dir of (process.env["PATH"] ?? "").split(path.delimiter)) {
+    if (dir === "") continue;
+    const js = path.join(dir, "node_modules", "@openai", "codex", "bin", "codex.js");
+    if (existsSync(js)) return js;
+  }
+  return null;
+}
+
+type CodexItem = { type?: string; server?: string; tool?: string; arguments?: unknown; result?: unknown; error?: unknown; status?: string };
+
+/**
+ * Codex 실제 MCP 연결·호출(OPENHUB_E2E_CODEX_EXEC=1). OpenHub가 프로젝트 .codex/config.toml에 쓴 kubernetes 항목(command·args)을
+ * 그대로 읽어 명령줄 -c override로 codex exec에 넘기고, 모델이 ConfigMap·Secret 조회를 tools/call로 시도하게 한다.
+ * 프로젝트 파일 자체를 읽게 하지 않는 이유: Codex CLI 0.147.0에서 --ignore-user-config + -c projects.<root>.trust_level 조합으로는
+ * 프로젝트 .codex/config.toml의 서버가 로드되지 않았다(2026-10-10 실측: tool 없음, MCP 오류 없음. 원인은 확인하지 못했다).
+ * 사용자 설정을 쓰지 않고 trust를 주는 다른 방법이 없어서, 이 검사는 "OpenHub가 쓴 실행 명세로 Codex가 서버를 띄우고 호출한다"까지이고,
+ * "프로젝트 파일 인식"은 codex mcp list가 따로 확인한다. 두 근거를 합쳐도 Codex의 프로젝트 파일 → 실행 경로 자체는 직접 확인한 것이 아니다.
+ * 격리:
+ * - --ignore-user-config: 사용자 ~/.codex/config.toml을 읽지 않는다(로그인 정보만 CODEX_HOME에서 읽는다). --ephemeral: 세션 파일 없음.
+ * - -s read-only, approval_policy never. 사용자 설정 파일·로그인 파일을 쓰거나 복사하지 않는다.
+ * - HOME·USERPROFILE은 가짜 ~/.kube/config만 있는 임시 디렉터리다(KUBECONFIG가 전달되지 않아도 실제 kubeconfig에 닿지 않는다).
+ */
+async function codexExecCheck(o: { scratch: string; projectRoot: string; kubeconfig: string; requests: string[] }) {
+  const codexJs = findCodexJs();
+  expect(codexJs, "codex.js(npm 전역 @openai/codex)").not.toBeNull();
+  const codexHome = process.env["CODEX_HOME"] ?? path.join(os.homedir(), ".codex");
+  const isoHome = path.join(o.scratch, "codex exec home");
+  await mkdir(path.join(isoHome, ".kube"), { recursive: true });
+  await writeFile(path.join(isoHome, ".kube", "config"), await readFile(o.kubeconfig, "utf8"));
+  const before = o.requests.filter((r) => r.includes("/secrets")).length;
+  const written = (parseToml(await readFile(path.join(o.projectRoot, ".codex", "config.toml"), "utf8")) as { mcp_servers: Record<string, { command: string; args: string[] }> }).mcp_servers["kubernetes"]!;
+  // JSON 문자열 표기는 TOML basic string과 같다(\\, \", \uXXXX). 값은 OpenHub가 쓴 항목 그대로다.
+  const overrides = ["mcp_servers.kubernetes.command=" + JSON.stringify(written.command), "mcp_servers.kubernetes.args=[" + written.args.map((a) => JSON.stringify(a)).join(",") + "]"];
+  const prompt = [
+    "Use only the MCP server named kubernetes. Do not run shell commands and do not read files.",
+    "Step 1: call the tool resources_get with apiVersion v1, kind ConfigMap, namespace default, name app-config, and report the value of LOG_LEVEL.",
+    "Step 2: call the tool resources_get with apiVersion v1, kind Secret, namespace default, name demo, and report only whether the call succeeded or was refused. Do not print secret data.",
+  ].join(" ");
+  const args = [codexJs!, "exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "-s", "read-only", "-C", o.projectRoot,
+    ...overrides.flatMap((v) => ["-c", v]), "-c", 'approval_policy="never"', prompt];
+  const env = { ...process.env, HOME: isoHome, USERPROFILE: isoHome, CODEX_HOME: codexHome, KUBECONFIG: o.kubeconfig };
+  const out = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+    const child = spawn(process.execPath, args, { cwd: o.projectRoot, env, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => child.kill(), 300_000);
+    child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
+    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+    child.on("close", (code) => (clearTimeout(timer), resolve({ code, stdout, stderr })));
+    child.on("error", () => (clearTimeout(timer), resolve({ code: -1, stdout, stderr })));
+  });
+  const events = out.stdout.split("\n").flatMap((l) => {
+    try {
+      return [JSON.parse(l) as { type?: string; item?: CodexItem }];
+    } catch {
+      return [];
+    }
+  });
+  const calls = events.filter((e) => e.type === "item.completed" && e.item?.type === "mcp_tool_call").map((e) => e.item!);
+  const summary = calls.map((c) => ({ server: c.server, tool: c.tool, kind: (c.arguments as { kind?: string } | undefined)?.kind, status: c.status, refused: /resource not allowed/u.test(JSON.stringify(c.result ?? c.error ?? "")), logLevel: JSON.stringify(c.result ?? "").includes("LOG_LEVEL") }));
+  const scrub = (s: string) => s.replace(/[A-Za-z]:\\[^\s"]*/gu, "<abs>").replace(/\s+/gu, " ");
+  console.log("k8s codex exec: " + JSON.stringify({ exit: out.code, types: [...new Set(events.map((e) => e.type))], calls: summary }));
+  if (calls.length === 0) console.log("k8s codex exec tail: " + scrub(out.stdout.slice(-800) + " | " + out.stderr.slice(-800)));
+  const mcpLines = out.stderr.split("\n").filter((l) => /mcp|kubernetes|trust|project/iu.test(l)).slice(0, 20);
+  if (calls.length === 0) console.log("k8s codex exec mcp stderr: " + JSON.stringify(mcpLines.map(scrub)));
+  expect(calls.length, "Codex가 kubernetes MCP tool을 실제로 호출해야 한다").toBeGreaterThan(0);
+  expect(calls.every((c) => c.server === "kubernetes")).toBe(true);
+  expect(summary.some((c) => c.kind === "ConfigMap" && c.logLevel)).toBe(true);
+  expect(summary.some((c) => c.kind === "Secret" && c.refused)).toBe(true);
+  for (const s of [out.stdout, out.stderr]) {
+    expect(s).not.toContain(TOKEN);
+    expect(s).not.toContain(SECRET_B64);
+    expect(s).not.toContain(SECRET_PLAIN);
+  }
+  expect(o.requests.filter((r) => r.includes("/secrets")).length).toBe(before);
+}
+
+/** 127.0.0.1 합성 Kubernetes API(ROUTES만 응답, 요청 경로 기록). */
+async function startFakeApi(): Promise<{ port: number; requests: string[]; close: () => void }> {
+  const requests: string[] = [];
+  const api = http.createServer((req, res) => {
+    const p = (req.url ?? "").split("?")[0]!;
+    requests.push(p);
+    const body = ROUTES[p];
+    res.writeHead(body === undefined ? 404 : 200, { "content-type": "application/json" });
+    res.end(JSON.stringify(body ?? { kind: "Status", apiVersion: "v1", status: "Failure", code: 404, reason: "NotFound" }));
+  });
+  await new Promise<void>((r) => api.listen(0, "127.0.0.1", () => r()));
+  return { port: (api.address() as { port: number }).port, requests, close: () => api.close() };
+}
+const kubeconfigText = (port: number) =>
+  "apiVersion: v1\nkind: Config\nclusters:\n- name: fake\n  cluster: { server: 'http://127.0.0.1:" + String(port) + "' }\ncontexts:\n- name: fake\n  context: { cluster: fake, user: fake, namespace: default }\ncurrent-context: fake\nusers:\n- name: fake\n  user: { token: " + TOKEN + " }\n";
+
+
 describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 Kubernetes tool config 실제 E2E(승인된 설치·Health·drift·repair)", () => {
   it("승인된 Plan으로 설치한 Client 설정 그대로 실행하면 Secret get·list가 거부되고 ConfigMap은 읽히며, drift를 repair 뒤에도 같다", async () => {
     const requests: string[] = [];
@@ -175,7 +277,8 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 Kubernetes tool conf
       const lifecycleEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), spawner: nodeExecSpawner, windowsNpx: async () => windowsNpx, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env) };
       const runOp = async (operation: LifecycleRequest["operation"]) => {
         const req: LifecycleRequest = { operation, toolId: "kubernetes-mcp-server", projectRoot: h.projectRoot, homeDir: h.homeDir, platform, includeUser: false };
-        const built = await planLifecycle({ ...req, entries });
+        // CLI·Desktop과 같은 경로(planLifecycleRequest: Windows 실행 경로 검증 포함). 실행 직전 재생성도 같은 함수다.
+        const built = await planLifecycleRequest(req, lifecycleEnv);
         if (!built.ok) throw new Error(built.code);
         const outcome = await requestLifecycleApproval(built.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
         if (outcome.status !== "approved") throw new Error(outcome.status);
@@ -214,6 +317,9 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 Kubernetes tool conf
         console.log("k8s real codex: " + codexList.out.replace(/[A-Za-z]:\\[^\s"]*/gu, "<abs>").replace(/\s+/gu, " ").slice(0, 400));
         expect(codexList.out).toContain("kubernetes");
       }
+      // (선택) Codex 실제 MCP 연결·호출: OPENHUB_E2E_CODEX_EXEC=1일 때만. codex exec가 OpenHub가 쓴 프로젝트 .codex/config.toml로
+      // 서버를 띄우고 모델이 tools/call을 하게 한다(로그인된 Codex 계정·모델 호출을 쓴다).
+      if (process.env["OPENHUB_E2E_CODEX_EXEC"] === "1") await codexExecCheck({ scratch, projectRoot: h.projectRoot, kubeconfig, requests });
 
 
       const check = async (label: string) => {
@@ -260,6 +366,105 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 Kubernetes tool conf
       else process.env["KUBECONFIG"] = saved.kube;
       api.close();
       await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
+      await rm(npmCache, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }, 900_000);
+});
+
+/**
+ * v0.2.0 client-launcher-invalid 실제 E2E(Windows, OPENHUB_E2E=1). 실제 node.exe·npm을 임시 위치(공백·괄호·&·한글)에 복사해
+ * 그 경로로 설치한 뒤 복사본을 지워 "Node.js 이동·재설치"를 만든다. status가 잡고 Health는 막히며, 승인한 repair가 지금 Node.js로
+ * 실행 경로만 바꾸고 실제 Health·실제 MCP 호출(Secret 거부·ConfigMap 성공)을 확인한다. 실제 Kubernetes·자격증명은 쓰지 않는다.
+ */
+describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || process.platform !== "win32")("v0.2.0 Windows client launcher 실제 E2E(Node.js 이동 → client-launcher-invalid → 승인 repair)", () => {
+  it("옮겨진 Node.js 경로를 status가 잡고, 승인한 repair가 실행 경로만 바꾼 뒤 실제 Health·MCP 호출이 통과한다", async () => {
+    const api = await startFakeApi();
+    const scratch = await mkdtemp(path.join(os.tmpdir(), "openhub e2e (launcher) & 한글-"));
+    const npmCache = await mkdtemp(path.join(os.tmpdir(), "openhub-e2e-npmcache-"));
+    const saved = { cache: process.env["npm_config_cache"], kube: process.env["KUBECONFIG"] };
+    try {
+      const kubeconfig = path.join(scratch, "kubeconfig.yaml");
+      await writeFile(kubeconfig, kubeconfigText(api.port));
+      process.env["npm_config_cache"] = npmCache;
+      process.env["KUBECONFIG"] = kubeconfig;
+      const system = await locateWindowsNpxLauncher({ pathEnv: process.env["PATH"] ?? "", fs: { stat } });
+      expect(system).not.toBeNull();
+      const oldDir = path.join(scratch, "Old Node (x86) & 한글", "nodejs");
+      await mkdir(path.join(oldDir, "node_modules"), { recursive: true });
+      await cp(system!.node, path.join(oldDir, "node.exe"));
+      await cp(path.join(path.win32.dirname(system!.node), "node_modules", "npm"), path.join(oldDir, "node_modules", "npm"), { recursive: true });
+      const old = { node: path.join(oldDir, "node.exe"), npxCli: path.join(oldDir, "node_modules", "npm", "bin", "npx-cli.js") };
+      let current: { node: string; npxCli: string } = old;
+
+      const entries: RegistryEntry[] = await seedEntries();
+      const h = await createHarness(scratch, { entries });
+      const { spawner: _fake, ...rest } = h.env;
+      const env: InstallEnvironment = { ...rest, spawner: nodeExecSpawner, windowsNpx: async () => current, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env) };
+      const request = { ...h.request("kubernetes-mcp-server", (["claude-code", "codex", "cursor"] as const).map((client) => ({ client, scope: "project" as const }))), platform: "windows" as const };
+      const planned = await plannedOf({ ...h, env }, request);
+      const installed = await runInstallTransaction(planned, await approveAll(planned), request, env);
+      expect(installed.status, JSON.stringify(installed.steps)).toBe("succeeded");
+      expect(await recordInstallInState(planned, installed, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() })).toMatchObject({ ok: true, recorded: 3 });
+      const entryOf = async () => JSON.parse(await readFile(path.join(h.projectRoot, ".mcp.json"), "utf8")).mcpServers.kubernetes as { command: string; args: string[] };
+      const before = await entryOf();
+      expect(before.command).toBe(old.node);
+
+      const lifecycleEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), spawner: nodeExecSpawner, windowsNpx: async () => current, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env) };
+      const statusOf = async () => {
+        const s = await lifecycleStatus({ projectRoot: h.projectRoot, homeDir: h.homeDir, entries, platform: "windows", includeUser: false });
+        if (!s.ok) throw new Error(s.code);
+        return s.items.filter((i) => i.serverName === "kubernetes");
+      };
+      const req = (operation: LifecycleRequest["operation"]): LifecycleRequest => ({ operation, toolId: "kubernetes-mcp-server", projectRoot: h.projectRoot, homeDir: h.homeDir, platform: "windows", includeUser: false });
+      expect((await statusOf()).map((i) => i.state)).toEqual(["state-consistent", "state-consistent", "state-consistent"]);
+
+      // Node.js 이동·재설치: 옛 설치가 사라진다. Client 설정 byte는 그대로다.
+      await rm(oldDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      const invalid = await statusOf();
+      console.log("launcher status after move: " + JSON.stringify(invalid.map((i) => ({ client: i.client, state: i.state, launcher: i.launcher }))));
+      expect(invalid.map((i) => i.state)).toEqual(["client-launcher-invalid", "client-launcher-invalid", "client-launcher-invalid"]);
+      expect(containsAbsolutePath(JSON.stringify(invalid))).toBe(false);
+      expect(await entryOf()).toEqual(before);
+      const health = await planLifecycleRequest(req("health"), lifecycleEnv);
+      expect(health.ok && health.planned.plan.warnings.map((w) => w.code)).toContain("CLIENT_LAUNCHER_INVALID");
+
+      // 지금 PATH의 Node.js로 repair(승인 필수).
+      current = system!;
+      const built = await planLifecycleRequest(req("repair"), lifecycleEnv);
+      if (!built.ok) throw new Error(built.code);
+      expect(built.planned.plan.status).toBe("ready");
+      expect(built.planned.plan.targets.map((t) => t.launcher)).toEqual(Array(3).fill({ recorded: "invalid", replacementDigest: clientLauncherDigest(system!) }));
+      const outcome = await requestLifecycleApproval(built.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
+      if (outcome.status !== "approved") throw new Error(outcome.status);
+      const t0 = Date.now();
+      const repaired = await runLifecycleTransaction(built.planned, outcome.approval, req("repair"), lifecycleEnv);
+      console.log("launcher repair ms " + String(Date.now() - t0) + " " + JSON.stringify({ status: repaired.status, health: repaired.health?.status, toolCount: repaired.health?.toolCount, steps: repaired.steps.map((s) => s.id + ":" + s.status) }));
+      expect(repaired).toMatchObject({ status: "repaired", stateCommitted: true, health: { status: "healthy" } });
+      expect((await statusOf()).map((i) => i.state)).toEqual(["state-consistent", "state-consistent", "state-consistent"]);
+      const after = await entryOf();
+      expect(after.command).toBe(system!.node);
+      expect(after.args[0]).toBe(system!.npxCli);
+      expect(after.args.slice(1)).toEqual(before.args.slice(1));
+
+      // 고친 Client 설정 그대로 실제 MCP 호출.
+      const secrets = api.requests.filter((r) => r.includes("/secrets")).length;
+      const s = await session(after.command, after.args, h.projectRoot, CALLS);
+      const names = s.tools.map((t) => t.name).sort();
+      console.log("launcher repaired tools: " + names.join(","));
+      expect(names).toHaveLength(13);
+      for (const banned of BANNED) expect(names).not.toContain(banned);
+      for (const r of s.replies.slice(0, 2)) expect(JSON.stringify(r)).toMatch(/resource not allowed/u);
+      expect(JSON.stringify(s.replies[2])).toContain("LOG_LEVEL");
+      expect(s.transcript).not.toContain(TOKEN);
+      expect(s.transcript).not.toContain(SECRET_B64);
+      expect(api.requests.filter((r) => r.includes("/secrets")).length).toBe(secrets);
+    } finally {
+      if (saved.cache === undefined) delete process.env["npm_config_cache"];
+      else process.env["npm_config_cache"] = saved.cache;
+      if (saved.kube === undefined) delete process.env["KUBECONFIG"];
+      else process.env["KUBECONFIG"] = saved.kube;
+      api.close();
+      await rm(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(() => undefined);
       await rm(npmCache, { recursive: true, force: true }).catch(() => undefined);
     }
   }, 900_000);

@@ -37,9 +37,11 @@ export interface ReviewedToolConfig {
   notice: string;
   /**
    * Client별 검증 수준(v0.2.0). launch-verified: 실제 Client가 OpenHub가 쓴 설정으로 서버를 띄움을 확인,
+   * spec-launch-verified: OpenHub가 쓴 실행 명령(command·args)으로 실제 Client가 서버를 띄우고 tools/call까지 됨을 확인했지만
+   * 그 Client가 프로젝트 설정 파일에서 직접 띄우는 경로는 확인하지 못함(설정 인식은 따로 확인),
    * config-recognized: 설정 인식만 확인(실제 MCP 연결·호출 미검증), not-verified: 확인하지 않음. 설치 계획에 그대로 드러낸다.
    */
-  clientVerification: Readonly<Record<"claude-code" | "codex" | "cursor", "launch-verified" | "config-recognized" | "not-verified">>;
+  clientVerification: Readonly<Record<"claude-code" | "codex" | "cursor", "launch-verified" | "spec-launch-verified" | "config-recognized" | "not-verified">>;
   /** 플랫폼별 실제 E2E 검증 여부. false인 플랫폼은 설치 계획에 미검증으로 드러낸다. */
   platformVerified: Readonly<Record<"windows" | "macos" | "linux", boolean>>;
 }
@@ -53,8 +55,9 @@ export const REVIEWED_TOOL_CONFIGS: Readonly<Record<string, ReviewedToolConfig>>
     content: KUBERNETES_TOOL_CONFIG,
     notice:
       "OpenHub가 ~/.openhub/tool-config 아래에 서버 정책 파일(read_only, core toolset, Secret 조회 거부)을 만들고 Client 설정의 --config로 넘깁니다. 서버는 kubeconfig의 current context 사용자 권한으로 동작하며 OpenHub는 kubeconfig를 읽지 않습니다. Pod·Node 로그에 비밀정보가 있으면 막지 못합니다. 읽기 전용 RBAC 사용자를 쓰세요.",
-    // 2026-10-10 기록: Claude Code 2.1.258 실제 연결, Codex CLI 0.147.0 설정 인식만, Cursor 미설치. Windows·Linux E2E, macOS 미검증.
-    clientVerification: Object.freeze({ "claude-code": "launch-verified", codex: "config-recognized", cursor: "not-verified" } as const),
+    // 2026-10-10 기록: Claude Code 2.1.258 실제 연결. Codex CLI 0.147.0은 프로젝트 설정 인식(codex mcp list) + 같은 command·args로
+    // codex exec 실제 시작·tools/call(ConfigMap 성공, Secret 거부)까지. Cursor 미설치. Windows·Linux E2E, macOS 미검증.
+    clientVerification: Object.freeze({ "claude-code": "launch-verified", codex: "spec-launch-verified", cursor: "not-verified" } as const),
     platformVerified: Object.freeze({ windows: true, linux: true, macos: false }),
   }),
 });
@@ -68,6 +71,7 @@ export function toolConfigVerificationNotices(toolId: string, clients: readonly 
   const out: { code: string; message: string }[] = [];
   for (const client of [...new Set(clients)]) {
     const level = reviewed.clientVerification[client];
+    if (level === "spec-launch-verified") out.push({ code: "client-launch-unverified", message: CLIENT_LABEL[client] + ": OpenHub가 쓰는 실행 명령으로 서버 시작·도구 호출은 확인했지만, 이 Client가 프로젝트 설정 파일에서 직접 시작하는 경로는 OpenHub가 검증하지 않았습니다." });
     if (level === "config-recognized") out.push({ code: "client-launch-unverified", message: CLIENT_LABEL[client] + ": 설정 인식만 확인했습니다. 이 Client에서 실제 MCP 연결·호출은 OpenHub가 검증하지 않았습니다." });
     if (level === "not-verified") out.push({ code: "client-launch-unverified", message: CLIENT_LABEL[client] + ": 이 Client에서의 실제 실행은 OpenHub가 검증하지 않았습니다." });
   }
@@ -409,6 +413,23 @@ export async function verifyClientLauncher(launcher: ClientLauncher, fs: Launche
     return { ok: false, reason: "node.exe·npm을 확인하지 못했습니다" };
   }
   return { ok: true };
+}
+
+/**
+ * Client 설정에 이미 기록된 Windows 직접 실행 항목(node.exe + npx-cli.js)의 경로를 다시 검증한다(v0.2.0, client-launcher-invalid).
+ * 아무것도 실행하지 않고 쓰지 않는다. 결과의 reason에는 경로를 넣지 않는다(status·Plan에 그대로 나갈 수 있다).
+ */
+export async function inspectRecordedLauncher(entry: { command: string; args: readonly string[] }, fs: LauncherCheckFs = nodeLauncherCheckFs): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const npxCli = entry.args[0];
+  if (!/(^|[\\/])node\.exe$/iu.test(entry.command) || npxCli === undefined || !/(^|[\\/])npx-cli\.js$/iu.test(npxCli)) {
+    return { ok: false, reason: "Client 설정이 Node.js 직접 실행 형식이 아닙니다" };
+  }
+  return verifyClientLauncher({ node: entry.command, npxCli }, fs);
+}
+
+/** 실행 경로 쌍의 sha256(Plan에는 경로 대신 이 값만 넣는다. 승인 뒤 Node.js 설치가 바뀌면 PLAN_STALE). */
+export function clientLauncherDigest(launcher: ClientLauncher): string {
+  return "sha256:" + createHash("sha256").update(JSON.stringify([launcher.node, launcher.npxCli]), "utf8").digest("hex");
 }
 
 /** Client 항목(placeholder 형태) → 실제로 쓸 값. command "node"는 검증된 node.exe, {npxCli}·{toolConfig}는 각 절대 경로. */

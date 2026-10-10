@@ -21,7 +21,7 @@ Labels: **Fact**, **Decision**, **Proposal**, **Open Question**. All facts measu
 ### Install plan notices (Decision)
 
 - `tool-config` (fixed text): OpenHub writes the server policy file and passes it with `--config`; the server acts with the kubeconfig user's permissions; OpenHub does not read the kubeconfig; secrets printed in pod or node logs are not blocked; use a read-only RBAC user.
-- `client-launch-unverified` (new): one warning per selected client that has not been verified to start the server from an OpenHub-written entry. Codex: configuration recognized only, MCP connection and tool calls not verified. Cursor: not verified. Claude Code has no warning.
+- `client-launch-unverified` (new): one warning per selected client that has not been verified to start the server from an OpenHub-written entry. Codex: start and tool calls verified with the same command and arguments, start from the project file itself not verified. Cursor: not verified. Claude Code has no warning.
 - `platform-unverified` (new): shown on macOS, where no real install or run was done.
 - The warning `code` is free text in InstallPlan v1, so the schema does not change. Existing tools get none of these warnings (their goldens change only because the Registry digest changed).
 
@@ -56,6 +56,7 @@ Measured with the real Registry Manifest (`kubernetes-tool-config.e2e.test.ts`, 
 | Windows, real npm and npx | approval → npx Prepare → tool config → Claude Code, Codex and Cursor project configs: 2.3 s (warm cache). Client entries use direct launch `node.exe <npx-cli.js> -y kubernetes-mcp-server@0.0.67 --read-only --toolsets core --config <tool config>` (no `cmd`). Health `healthy`, 13 tools. |
 | Drift and repair | Changed tool config → `tool-config-drift`, Health and update blocked; approved repair → `repaired`, Health `healthy`, same 13 tools. |
 | Real clients (`OPENHUB_E2E_REAL_CLIENTS=1`, isolated client homes) | Claude Code 2.1.258 `claude mcp list`: started the server from the OpenHub-written entry, "Connected". Codex CLI 0.147.0 `codex mcp list`: read the same command and arguments (it does not start servers). |
+| Codex real MCP calls (`OPENHUB_E2E_CODEX_EXEC=1`, 2026-10-10) | `codex exec` started the server from the command and arguments OpenHub wrote (passed as command-line overrides, user config not loaded) and the model's `resources_get` calls returned the ConfigMap and a refusal for the Secret; no token or Secret data in output, no Secret API request. Details and limitation: [client-launcher-status.md](client-launcher-status.md). |
 | Linux (`registry-remote.yml` run 38039508261 on this branch, sandbox job; test-level log checked because the job uses `continue-on-error`) | Same E2E case: install 2.5 s; client entries `npx -y kubernetes-mcp-server@0.0.67 --read-only --toolsets core --config <tool config>`; Health `healthy`, 13 tools; Secret refused, ConfigMap works; drift → repair → healthy. Existing sandbox cases (memory-mcp, mongodb-mcp-server, npx Prepare x3, docker pull) also pass. Remote validation: `ok`, Apache-2.0, npm 0.0.67. |
 | Failure and compensation (flow tests on the Registry Manifest) | A client config write failure restores only what this run wrote (existing bytes kept); a tool config that cannot be written (junction in the path) writes no client config; an external change during compensation is not overwritten (`COMPENSATION_INCOMPLETE` / `CONFIG_RESTORE_FAILED`). Same-project path-only repair for Codex, Claude Code and Cursor; changed arguments or security flags refused; change after approval `PLAN_STALE`. |
 
@@ -64,7 +65,7 @@ Measured with the real Registry Manifest (`kubernetes-tool-config.e2e.test.ts`, 
 | Client or platform | Level | Shown in install plan |
 | --- | --- | --- |
 | Claude Code | launch verified (server started, "Connected") | no warning |
-| Codex | configuration recognized; MCP connection and tool calls not verified | `client-launch-unverified` |
+| Codex | `spec-launch-verified`: project file recognized (`codex mcp list`); start and tool calls verified with the same command and arguments (`codex exec`); start from the project file itself not verified | `client-launch-unverified` (wording states what was verified) |
 | Cursor | not verified (not installed on the test machine) | `client-launch-unverified` |
 | Windows, Linux | install, Health, drift and repair verified | no warning |
 | macOS | not verified | `platform-unverified` |

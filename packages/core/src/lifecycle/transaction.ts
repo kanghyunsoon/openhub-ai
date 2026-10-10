@@ -5,6 +5,7 @@ import type { ConfigScope, InstallClient, ServerEntry, ToolConfigStep } from "..
 import { toolConfigLocationFor } from "../installer/transaction";
 import {
   TOOL_CONFIG_PLACEHOLDER,
+  clientLauncherDigest,
   inspectToolConfig,
   materializeClientArgs,
   restoreToolConfig,
@@ -112,6 +113,8 @@ export async function planLifecycleRequest(request: LifecycleRequest, env: Lifec
     ...(env.timeoutMs === undefined ? {} : { timeoutMs: env.timeoutMs }),
     ...(env.configFs === undefined ? {} : { fs: env.configFs }),
     ...(env.toolConfigFs === undefined ? {} : { toolConfigFs: env.toolConfigFs }),
+    ...(env.windowsNpx === undefined ? {} : { clientLauncher: env.windowsNpx }),
+    ...(env.launcherCheckFs === undefined ? {} : { launcherCheckFs: env.launcherCheckFs }),
   });
 }
 
@@ -263,6 +266,12 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
       if (!checked.ok) {
         skipRest(0);
         return finalize({ planned: verified, status: "config-failed", code: "MANUAL_SETUP_REQUIRED", steps, retryable: false, nextActions: ["Client 설정에 쓸 Node.js 실행 경로를 검증하지 못해 아무것도 바꾸지 않았습니다: " + checked.reason] });
+      }
+      // 승인한 Plan이 본 실행 경로(digest)와 지금 쓸 실행 경로가 다르면(그 사이 Node.js 설치가 바뀜) 아무것도 쓰지 않는다.
+      const launcherDigest = clientLauncherDigest(clientLauncher!);
+      if (plan.targets.some((t) => t.launcher !== undefined && t.launcher.replacementDigest !== null && t.launcher.replacementDigest !== launcherDigest)) {
+        skipRest(0);
+        return finalize({ planned: verified, status: "stale", code: "PLAN_STALE", changed: ["config-precondition"], steps, retryable: true, nextActions: ["승인 후 Node.js 실행 경로가 바뀌었습니다. 새 계획을 확인하고 다시 승인하세요"] });
       }
     }
   }

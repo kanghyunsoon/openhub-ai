@@ -11,7 +11,7 @@ import type { RecommendPlatform } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
 import { entryKeyOf, type ArtifactIdentity, type LastHealth, type ToolState } from "./state";
 import { commitLifecycleState, projectKeyFor, readLifecycleState, type StateErrorCode } from "./store";
-import { inspectToolConfig, planFormOfEntry, toolConfigLocation, type ToolConfigFs } from "../tool-config/index";
+import { inspectRecordedLauncher, inspectToolConfig, planFormOfEntry, toolConfigLocation, type LauncherCheckFs, type ToolConfigFs } from "../tool-config/index";
 
 /**
  * Install 연계·Lifecycle Status·Drift(TASK-038, D-017).
@@ -24,6 +24,12 @@ import { inspectToolConfig, planFormOfEntry, toolConfigLocation, type ToolConfig
 /**
  * tool-config-*(v0.2.0, tool config Tool만): missing은 OpenHub 관리 파일이 없음, drift는 내용이 기록과 다름(또는 확인 불가),
  * relocated는 옮기거나 복사한 프로젝트에 다른 프로젝트 기록과 같은 항목이 있음. 셋 다 openhub lifecycle repair(승인 필요)로 고친다.
+ * client-launcher-invalid(v0.2.0, Windows 직접 실행 항목만): Client 설정은 기록과 같지만 그 안의 node.exe·npx-cli.js 경로가
+ * 지금은 유효하지 않음(Node.js 재설치·이동 등). 실행하지 않고 파일만 검사한다. openhub lifecycle repair(승인 필요)로 고친다.
+ *
+ * 한 항목에 문제가 여러 개면 state는 가장 중대한 것 하나다:
+ * missing-config > config-drift > tool-config-missing > tool-config-drift > client-launcher-invalid.
+ * 실행 경로 문제가 설정·보안 정책 변경을 가리지 않는다. 둘 이상이면 diagnostics에 전부(같은 순서로) 남긴다.
  */
 export const LIFECYCLE_ENTRY_STATES = [
   "state-consistent",
@@ -32,6 +38,7 @@ export const LIFECYCLE_ENTRY_STATES = [
   "tool-config-missing",
   "tool-config-drift",
   "tool-config-relocated",
+  "client-launcher-invalid",
   "untracked-adoptable",
   "untracked-foreign",
   "not-inspected",
@@ -54,6 +61,10 @@ export interface LifecycleToolStatus {
   environmentUnverified: boolean;
   /** 미추적 항목의 Identity Fingerprint 등급(D-026). 추적 항목은 없다. weak는 편입·adoptable이 되지 않는다. */
   identity?: FingerprintGrade;
+  /** 감지한 문제가 둘 이상일 때만: 중대한 순서의 전체 목록(첫 항목이 state). v0.2.0 추가 필드. */
+  diagnostics?: LifecycleEntryState[];
+  /** Windows 직접 실행 경로가 유효하지 않을 때만: 이유(경로 없음). v0.2.0 추가 필드. */
+  launcher?: { status: "invalid"; reason: string };
 }
 
 /** config 항목의 canonical sha256. */
@@ -176,6 +187,8 @@ export interface LifecycleStatusOptions {
   fs?: ConfigFs;
   /** OpenHub 관리 tool config 파일 접근(v0.2.0, 테스트 주입용). */
   toolConfigFs?: ToolConfigFs;
+  /** Windows Client 직접 실행 경로 검사용 fs(v0.2.0, 테스트 주입용). 읽기(lstat·readFile)만 한다. */
+  launcherCheckFs?: LauncherCheckFs;
 }
 
 export type LifecycleStatusResult = { ok: true; items: LifecycleToolStatus[] } | { ok: false; code: StateErrorCode; message: string };
@@ -200,15 +213,29 @@ export async function lifecycleStatus(options: LifecycleStatusOptions): Promise<
     const lock: ArtifactLockStatus = state.artifact.resolved === null ? "artifact-unlocked" : "artifact-locked";
     const presence: ArtifactPresence = state.backend === "docker" ? "artifact-unknown" : "launch-on-demand";
     let entryState: LifecycleEntryState = "not-inspected";
+    const issues: LifecycleEntryState[] = [];
+    let launcherIssue: string | undefined;
     if (t.scope === "project" || options.includeUser) {
       const entry = await readConfiguredEntry(t.client, t.scope, t.serverName, roots).catch(() => undefined);
-      entryState = entry === undefined ? "missing-config" : configEntryDigest(entry) === state.config.entryDigest ? "state-consistent" : "config-drift";
-    }
-    if (entryState === "state-consistent" && state.toolConfig !== undefined) {
-      const loc = toolConfigLocation({ homeDir: options.homeDir, scope: t.scope, toolId: state.toolId, ...(t.scope === "project" ? { projectKey } : {}) });
-      const now = loc === null ? null : await inspectToolConfig(loc, options.toolConfigFs).catch(() => null);
-      if (now !== null && now.state === "absent") entryState = "tool-config-missing";
-      else if (now === null || now.digest !== state.toolConfig.digest) entryState = "tool-config-drift";
+      if (entry === undefined) issues.push("missing-config");
+      else {
+        if (configEntryDigest(entry) !== state.config.entryDigest) issues.push("config-drift");
+        if (state.toolConfig !== undefined) {
+          const loc = toolConfigLocation({ homeDir: options.homeDir, scope: t.scope, toolId: state.toolId, ...(t.scope === "project" ? { projectKey } : {}) });
+          const now = loc === null ? null : await inspectToolConfig(loc, options.toolConfigFs).catch(() => null);
+          if (now !== null && now.state === "absent") issues.push("tool-config-missing");
+          else if (now === null || now.digest !== state.toolConfig.digest) issues.push("tool-config-drift");
+        }
+        // Windows 직접 실행(node.exe + npx-cli.js) 항목: byte가 같아도 Node.js가 옮겨지면 실행할 수 없다. 실행 없이 파일만 본다.
+        if (options.platform === "windows" && state.launch.platform === "windows" && state.launch.clientSpec.command === "node") {
+          const checked = await inspectRecordedLauncher(entry as { command: string; args: string[] }, options.launcherCheckFs).catch(() => ({ ok: false as const, reason: "실행 경로를 확인하지 못했습니다" }));
+          if (!checked.ok) {
+            issues.push("client-launcher-invalid");
+            launcherIssue = checked.reason;
+          }
+        }
+      }
+      entryState = issues[0] ?? "state-consistent";
     }
     items.push({
       toolId: state.toolId,
@@ -221,6 +248,8 @@ export async function lifecycleStatus(options: LifecycleStatusOptions): Promise<
       revision: state.revision,
       health: healthLabel(state.lastHealth),
       environmentUnverified: state.lastHealth?.environmentUnverified ?? false,
+      ...(issues.length > 1 ? { diagnostics: [...issues] } : {}),
+      ...(launcherIssue === undefined ? {} : { launcher: { status: "invalid" as const, reason: launcherIssue } }),
     });
   }
 

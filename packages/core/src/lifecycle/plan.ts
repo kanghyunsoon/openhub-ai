@@ -41,7 +41,21 @@ import {
   type ToolConfigStateInput,
 } from "../installer/plan";
 import { installCandidates } from "../installer/router";
-import { NPX_CLI_PLACEHOLDER, REVIEWED_TOOL_CONFIGS, TOOL_CONFIG_PLACEHOLDER, inspectToolConfig, planFormOfEntry, toolConfigDigest, toolConfigLocation, type ToolConfigFs } from "../tool-config/index";
+import {
+  NPX_CLI_PLACEHOLDER,
+  REVIEWED_TOOL_CONFIGS,
+  TOOL_CONFIG_PLACEHOLDER,
+  clientLauncherDigest,
+  inspectRecordedLauncher,
+  inspectToolConfig,
+  planFormOfEntry,
+  toolConfigDigest,
+  toolConfigLocation,
+  verifyClientLauncher,
+  type ClientLauncher,
+  type LauncherCheckFs,
+  type ToolConfigFs,
+} from "../tool-config/index";
 import { PLAN_CHANGE_KINDS } from "../installer/stale";
 import type { Manifest } from "../manifest/index";
 import { TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, type RecommendPlatform } from "../recommendation/index";
@@ -138,6 +152,11 @@ const lifecycleTargetSchema = z.strictObject({
   precondition: z.strictObject({ fileDigest: sha256.nullable(), entryDigest: sha256.nullable() }),
   /** repair: 옮기거나 복사한 프로젝트에서 이 기록(EntryKey)을 새 위치로 가져온다(v0.2.0). */
   relocatedFrom: text.optional(),
+  /**
+   * Windows 직접 실행 항목(v0.2.0, tool config Tool): 지금 Client 설정에 있는 node.exe·npx-cli.js가 유효한지(recorded)와
+   * 이번 실행이 새로 쓸 검증된 실행 경로의 digest(replacementDigest, 경로 없음). 승인 뒤 어느 쪽이든 바뀌면 PLAN_STALE이다.
+   */
+  launcher: z.strictObject({ recorded: z.enum(["valid", "invalid"]), replacementDigest: sha256.nullable() }).optional(),
 });
 export type LifecyclePlanTarget = z.output<typeof lifecycleTargetSchema>;
 
@@ -219,6 +238,7 @@ export interface LifecycleTargetInput {
   stateRevision: number | null;
   precondition: { fileDigest: string | null; entryDigest: string | null };
   relocatedFrom?: string;
+  launcher?: { recorded: "valid" | "invalid"; replacementDigest: string | null };
 }
 
 export interface LifecyclePlanAssemblyInput {
@@ -251,7 +271,7 @@ export function assembleLifecyclePlan(input: LifecyclePlanAssemblyInput): Planne
   const requiredNames = requiredEnv.filter((e) => e.required).map((e) => e.name);
   const targets = [...input.targets]
     .sort((a, b) => CLIENT_ORDER[a.client] - CLIENT_ORDER[b.client] || SCOPE_ORDER[a.scope] - SCOPE_ORDER[b.scope])
-    .map((t) => ({ ...t, precondition: { ...t.precondition } }));
+    .map((t) => ({ ...t, precondition: { ...t.precondition }, ...(t.launcher === undefined ? {} : { launcher: { ...t.launcher } }) }));
   const clientSpec = clientLaunchSpec(input.platform, backend, input.target.launchArgs);
   const blockers = [...input.blockers].sort((a, b) => cmp(a.code, b.code) || cmp(a.message, b.message));
   const sameIdentity = input.current.identity !== null && input.target.identity !== null && input.current.identity.spec === input.target.identity.spec;
@@ -396,6 +416,13 @@ export interface LifecyclePlanOptions {
   fetch?: FetchLike;
   timeoutMs?: number;
   fs?: ConfigFs;
+  /**
+   * Windows 직접 실행 항목에 새로 쓸 Node.js 실행 경로(v0.2.0). 보통 CLI·Desktop의 windowsNpx(PATH 탐색, 실행 없음).
+   * 주면 update·rollback·repair Plan이 검증된 경로의 digest를 갖고, 검증에 실패하면 Plan을 막는다(CLIENT_LAUNCHER_UNAVAILABLE).
+   */
+  clientLauncher?: () => Promise<ClientLauncher | null>;
+  /** 실행 경로 검사용 fs(v0.2.0, 테스트 주입용). */
+  launcherCheckFs?: LauncherCheckFs;
 }
 
 export type LifecyclePlanErrorCode =
@@ -512,6 +539,16 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
 
   const requiredSorted = [...requiredNames].sort(cmp);
   let repairNeeded = relocatedFrom.size > 0;
+  // Windows 직접 실행(v0.2.0, tool config Tool): Client 설정의 node.exe·npx-cli.js 절대 경로. byte가 같아도 Node.js가 옮겨지면 무효다.
+  // update·rollback·repair는 이번에 새로 쓸 실행 경로를 지금 검증하고 그 digest만 Plan에 넣는다(Health는 Client 설정을 쓰지 않는다).
+  const directWindows = (s: ToolState) => options.platform === "windows" && s.launch.platform === "windows" && s.launch.clientSpec.command === "node";
+  let replacementDigest: string | null = null;
+  if (options.operation !== "health" && options.clientLauncher !== undefined && selected.some(directWindows)) {
+    const located = await options.clientLauncher().catch(() => null);
+    const checked = located === null ? null : await verifyClientLauncher(located, options.launcherCheckFs).catch(() => null);
+    if (located !== null && checked?.ok === true) replacementDigest = clientLauncherDigest(located);
+    else blockers.push({ code: "CLIENT_LAUNCHER_UNAVAILABLE", message: "지금 Node.js 설치(node.exe·npm의 npx-cli.js)를 검증하지 못해 Client 설정을 바꾸지 않습니다" + (checked?.ok === false ? ": " + checked.reason : "") + ". Node.js 설치를 확인한 뒤 다시 계획하세요" });
+  }
   for (const s of selected) {
     const t = s.target;
     const found = await inspect(t.client, t.scope, t.serverName);
@@ -525,6 +562,15 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
     else if (entryDigest === null) blockers.push({ code: "MISSING_CONFIG", message: t.file + "에 " + t.serverName + " 항목이 없습니다(Version State와 다릅니다)" });
     else if (entryDigest !== s.config.entryDigest && !repairable) blockers.push({ code: "CONFIG_DRIFT", message: t.file + "의 " + t.serverName + " 항목이 OpenHub가 기록한 내용과 다릅니다(config-drift)" });
     else if (entryDigest !== s.config.entryDigest) repairNeeded = true;
+    let launcher: LifecycleTargetInput["launcher"];
+    if (directWindows(s) && found.value !== undefined) {
+      const checked = await inspectRecordedLauncher(found.value as { command: string; args: string[] }, options.launcherCheckFs).catch(() => ({ ok: false as const, reason: "실행 경로를 확인하지 못했습니다" }));
+      launcher = { recorded: checked.ok ? "valid" : "invalid", replacementDigest };
+      if (!checked.ok && options.operation === "repair") repairNeeded = true;
+      if (!checked.ok && options.operation === "health") {
+        blockers.push({ code: "CLIENT_LAUNCHER_INVALID", message: t.file + "의 " + t.serverName + " 항목에 기록된 Node.js 실행 경로가 유효하지 않습니다(client-launcher-invalid: " + checked.reason + "). openhub lifecycle repair로 고치세요" });
+      }
+    }
     const from = relocatedFrom.get(entryKeyOf(t));
     targets.push({
       client: t.client,
@@ -535,6 +581,7 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
       stateRevision: from === undefined ? s.revision : null,
       precondition: { fileDigest: found.fileDigest, entryDigest },
       ...(from === undefined ? {} : { relocatedFrom: from }),
+      ...(launcher === undefined ? {} : { launcher }),
     });
   }
 
