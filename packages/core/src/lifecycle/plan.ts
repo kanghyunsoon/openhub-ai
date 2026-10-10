@@ -418,7 +418,8 @@ export interface LifecyclePlanOptions {
   fs?: ConfigFs;
   /**
    * Windows 직접 실행 항목에 새로 쓸 Node.js 실행 경로(v0.2.0). 보통 CLI·Desktop의 windowsNpx(PATH 탐색, 실행 없음).
-   * 주면 update·rollback·repair Plan이 검증된 경로의 digest를 갖고, 검증에 실패하면 Plan을 막는다(CLIENT_LAUNCHER_UNAVAILABLE).
+   * update·rollback·repair Plan이 검증된 경로의 digest를 갖는다. Windows 직접 실행 대상에서 이 함수가 없거나 검증에 실패하면
+   * Plan을 막는다(CLIENT_LAUNCHER_UNAVAILABLE): 승인하지 않은 실행 경로로 Client 설정을 바꾸지 않는다. Health는 설정을 쓰지 않아 필요 없다.
    */
   clientLauncher?: () => Promise<ClientLauncher | null>;
   /** 실행 경로 검사용 fs(v0.2.0, 테스트 주입용). */
@@ -543,8 +544,9 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
   // update·rollback·repair는 이번에 새로 쓸 실행 경로를 지금 검증하고 그 digest만 Plan에 넣는다(Health는 Client 설정을 쓰지 않는다).
   const directWindows = (s: ToolState) => options.platform === "windows" && s.launch.platform === "windows" && s.launch.clientSpec.command === "node";
   let replacementDigest: string | null = null;
-  if (options.operation !== "health" && options.clientLauncher !== undefined && selected.some(directWindows)) {
-    const located = await options.clientLauncher().catch(() => null);
+  if (options.operation !== "health" && selected.some(directWindows)) {
+    // 실행 경로 탐색기가 없으면 승인할 경로가 없다. digest 없는 Plan은 실행 단계의 일치 검사를 건너뛸 수 있으므로 막는다.
+    const located = options.clientLauncher === undefined ? null : await options.clientLauncher().catch(() => null);
     const checked = located === null ? null : await verifyClientLauncher(located, options.launcherCheckFs).catch(() => null);
     if (located !== null && checked?.ok === true) replacementDigest = clientLauncherDigest(located);
     else blockers.push({ code: "CLIENT_LAUNCHER_UNAVAILABLE", message: "지금 Node.js 설치(node.exe·npm의 npx-cli.js)를 검증하지 못해 Client 설정을 바꾸지 않습니다" + (checked?.ok === false ? ": " + checked.reason : "") + ". Node.js 설치를 확인한 뒤 다시 계획하세요" });

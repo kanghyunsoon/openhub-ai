@@ -9,6 +9,8 @@ import {
   formatLifecycleStatusItem,
   inspectRecordedLauncher,
   lifecycleStatus,
+  lifecyclePlanDigest,
+  lifecyclePlanSchema,
   planLifecycleRequest,
   recordInstallInState,
   requestLifecycleApproval,
@@ -386,4 +388,76 @@ describe("v0.2.0 launcher repair(승인 필수)", () => {
     expect(r.planned.plan.targets.map((t) => t.launcher?.recorded)).toEqual(["valid", "valid", "valid"]);
   });
 });
+
+describe("v0.2.0 launcher 승인 경계: 검증된 실행 경로 없이는 Client 설정을 바꾸지 않는다", () => {
+  const without = (c: Ctx, over: Partial<LifecycleEnvironment> = {}) => {
+    const env = lifecycleEnv(c, over);
+    delete (env as { windowsNpx?: unknown }).windowsNpx;
+    return env;
+  };
+  const planWith = async (c: Ctx, operation: LifecycleRequest["operation"], env: LifecycleEnvironment) => {
+    const request: LifecycleRequest = { operation, toolId: K8S, projectRoot: c.h.projectRoot, homeDir: c.h.homeDir, platform: "windows", includeUser: false };
+    const built = await planLifecycleRequest(request, env);
+    if (!built.ok) throw new Error(built.code);
+    return { request, planned: built.planned };
+  };
+
+  it("A: 실행 경로 탐색기가 없으면 Windows 직접 실행 Tool의 repair·update Plan을 막는다(resolver 호출 0)", async () => {
+    const c = await installedOnWindows();
+    c.win.remove(NODE_A);
+    let fetched = 0;
+    const env = without(c, { fetch: async () => (fetched++, Promise.reject(new Error("network 금지"))) });
+    for (const op of ["repair", "update"] as const) {
+      const { planned } = await planWith(c, op, env);
+      expect(planned.plan.status, op).toBe("blocked");
+      expect(planned.plan.warnings.map((w) => w.code), op).toContain("CLIENT_LAUNCHER_UNAVAILABLE");
+      expect(planned.plan.targets.every((t) => t.launcher?.replacementDigest === null), op).toBe(true);
+    }
+    expect(fetched).toBe(0);
+  });
+
+  it("B: 탐색한 실행 경로가 검증에 실패하면(node.exe와 다른 설치의 npm) 막는다", async () => {
+    const c = await installedOnWindows();
+    c.win.remove(NODE_A);
+    const b = c.win.install(NODE_B);
+    const other = c.win.install("D:\\npm-global");
+    c.current.launcher = { node: b.node, npxCli: other.npxCli };
+    const { planned } = await planWith(c, "repair", lifecycleEnv(c));
+    expect(planned.plan.status).toBe("blocked");
+    expect(planned.plan.warnings.find((w) => w.code === "CLIENT_LAUNCHER_UNAVAILABLE")?.message).toContain("같은 설치의 npm이 아닙니다");
+  });
+
+  it("실행 단계: 승인된 Plan이라도 승인한 실행 경로(digest)가 없으면 아무것도 쓰지 않는다", async () => {
+    const c = await installedOnWindows();
+    c.win.remove(NODE_A);
+    c.current.launcher = c.win.install(NODE_B);
+    const before = await clientBytes(c);
+    const ready = (await planWith(c, "repair", lifecycleEnv(c))).planned;
+    expect(ready.plan.status).toBe("ready");
+    const tampered = lifecyclePlanSchema.parse({ ...ready.plan, targets: ready.plan.targets.map((t) => ({ ...t, launcher: { ...t.launcher!, replacementDigest: null } })) });
+    const planned = { plan: tampered, planDigest: lifecyclePlanDigest(tampered) };
+    const env = lifecycleEnv(c, { planners: { repair: async () => ({ ok: true as const, planned }) } });
+    const request: LifecycleRequest = { operation: "repair", toolId: K8S, projectRoot: c.h.projectRoot, homeDir: c.h.homeDir, platform: "windows", includeUser: false };
+    const result = await runLifecycleTransaction(planned, await approve(planned), request, env);
+    expect(result).toMatchObject({ status: "config-failed", code: "CLIENT_LAUNCHER_UNAVAILABLE", stateCommitted: false });
+    expect(await clientBytes(c)).toEqual(before);
+  });
+
+  it("F: Health(설정 쓰기 없음)와 일반 npx Tool(cmd 래퍼)은 실행 경로 탐색기가 없어도 그대로다", async () => {
+    const c = await installedOnWindows();
+    const health = await planWith(c, "health", without(c));
+    expect(health.planned.plan.status).toBe("ready");
+    expect(health.planned.plan.targets.map((t) => t.launcher)).toEqual(Array(3).fill({ recorded: "valid", replacementDigest: null }));
+    const h = await createHarness(scratch, { entries });
+    const request = { ...h.request("memory-mcp", CLIENTS), platform: "windows" as const };
+    const planned = await plannedOf(h, request);
+    await recordInstallInState(planned, await runInstallTransaction(planned, await approveAll(planned), request, h.env), { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() });
+    const memEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), runHealth: async () => healthy };
+    const mem = await planLifecycleRequest({ operation: "health", toolId: "memory-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, platform: "windows", includeUser: false }, memEnv);
+    expect(mem.ok && mem.planned.plan.status).toBe("ready");
+    expect(mem.ok && mem.planned.plan.targets.every((t) => t.launcher === undefined)).toBe(true);
+    expect(mem.ok && mem.planned.plan.target.clientSpec.command).toBe("cmd");
+  });
+});
+
 

@@ -267,9 +267,15 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
         skipRest(0);
         return finalize({ planned: verified, status: "config-failed", code: "MANUAL_SETUP_REQUIRED", steps, retryable: false, nextActions: ["Client 설정에 쓸 Node.js 실행 경로를 검증하지 못해 아무것도 바꾸지 않았습니다: " + checked.reason] });
       }
-      // 승인한 Plan이 본 실행 경로(digest)와 지금 쓸 실행 경로가 다르면(그 사이 Node.js 설치가 바뀜) 아무것도 쓰지 않는다.
+      // 설정을 쓰는 작업: 승인한 Plan이 본 실행 경로(digest)와 지금 쓸 실행 경로가 같아야 한다. digest가 없는 Plan(승인한 경로 없음)도
+      // 실행하지 않는다(Plan 단계에서 막히지만 실행 단계에서 한 번 더 확인한다). Health는 Client 설정을 쓰지 않는다.
       const launcherDigest = clientLauncherDigest(clientLauncher!);
-      if (plan.targets.some((t) => t.launcher !== undefined && t.launcher.replacementDigest !== null && t.launcher.replacementDigest !== launcherDigest)) {
+      const writes = plan.operation !== "health";
+      if (writes && plan.targets.some((t) => t.launcher !== undefined && t.launcher.replacementDigest === null)) {
+        skipRest(0);
+        return finalize({ planned: verified, status: "config-failed", code: "CLIENT_LAUNCHER_UNAVAILABLE", steps, retryable: true, nextActions: ["승인한 계획에 검증된 Node.js 실행 경로가 없어 아무것도 바꾸지 않았습니다. 새 계획을 만들어 다시 승인하세요"] });
+      }
+      if (writes && plan.targets.some((t) => t.launcher !== undefined && t.launcher.replacementDigest !== launcherDigest)) {
         skipRest(0);
         return finalize({ planned: verified, status: "stale", code: "PLAN_STALE", changed: ["config-precondition"], steps, retryable: true, nextActions: ["승인 후 Node.js 실행 경로가 바뀌었습니다. 새 계획을 확인하고 다시 승인하세요"] });
       }
