@@ -10,6 +10,7 @@ import {
   buildInstallPlan,
   configTargetFor,
   executeVerifiedPlan,
+  entryPlanDigest,
   fileSha256,
   inspectConfigTarget,
   installPlanDigest,
@@ -161,13 +162,14 @@ describe("REQ-036 Agent Client Config Writer", () => {
     await mkdir(path.join(r.projectRoot, ".codex"));
     const toml = path.join(r.projectRoot, ".codex", "config.toml");
     await writeFile(toml, '[mcp_servers.memory]\ncommand = "mine"\n');
-    // Plan 단계에서 이미 막힌다(precondition.keyAbsent=false).
+    // Plan 단계에서 이미 막힌다(precondition.keyAbsent=false). v0.2.0: 있는 항목의 Plan 형태 digest(entryDigest)가 표준 항목과 달라 충돌이다.
     const plan = await planWith("memory-mcp", [["claude-code", "project"], ["codex", "project"]], r);
     expect(plan.status).toBe("blocked");
     expect(plan.warnings.filter((w) => w.code === "CONFIG_KEY_EXISTS")).toHaveLength(2);
+    const mine = entryPlanDigest({ command: "mine" });
     expect(plan.targets.map((t) => t.precondition)).toEqual([
-      { exists: true, fileDigest: fileSha256(await readFile(json)), keyAbsent: false },
-      { exists: true, fileDigest: fileSha256(await readFile(toml)), keyAbsent: false },
+      { exists: true, fileDigest: fileSha256(await readFile(json)), keyAbsent: false, entryDigest: mine },
+      { exists: true, fileDigest: fileSha256(await readFile(toml)), keyAbsent: false, entryDigest: mine },
     ]);
     // 쓰기 직전 다시 확인해도 같은 key면 거부한다.
     const empty = await roots();

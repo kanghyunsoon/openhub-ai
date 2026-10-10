@@ -1,5 +1,5 @@
 import { APPROVAL_REQUIREMENT_MESSAGES } from "./approval-v1";
-import { requiredEnvNotice, type InstallPlanV1, type PlannedInstall } from "./plan";
+import { installTargetChange, requiredEnvNotice, type InstallPlanV1, type PlannedInstall } from "./plan";
 
 /**
  * Plan Preview 공통 문장(TASK-035·036). CLI와 Desktop이 같은 문장을 쓴다(Desktop은 textContent로만 렌더링).
@@ -17,7 +17,8 @@ export const WINDOWS_NPX_WRAPPER_NOTICE =
 /** 설치 상태 표시. host 미검사 상태의 not-installed는 "프로젝트 범위 기준 미설치"로만 표시한다(AC-035-09). */
 export function installationStatusLabel(plan: InstallPlanV1): string {
   const { installationStatus, inspectedScopes } = plan.source.recommendation;
-  if (installationStatus === "installed") return "이미 설정됨";
+  // v0.2.0: 설치 판정은 대상별이다. 도구가 다른 Client·범위에 있어도 고른 대상에 없으면 추가할 수 있다.
+  if (installationStatus === "installed") return plan.status === "already-installed" ? "이미 설정됨" : "다른 Client·범위에 이미 설정됨(고른 대상별 변경은 아래 변경 파일 참고)";
   if (installationStatus === "unknown") return "설치 여부를 확인하지 못함";
   if (installationStatus === "unidentified-present") return "식별되지 않은 MCP 서버가 이미 있음";
   return inspectedScopes.includes("user") ? "미설치(프로젝트 + 사용자 범위 확인)" : "프로젝트 범위 기준 미설치(사용자 범위 미검사)";
@@ -56,8 +57,12 @@ export function formatInstallPlanPreview(planned: PlannedInstall): string[] {
   if (plan.targets.length === 0) lines.push("  (없음)");
   for (const t of plan.targets) {
     const where = CLIENT_LABEL[t.client] + ", " + SCOPE_LABEL[t.scope] + " 범위";
-    if (t.envReference === "manual") lines.push("  - " + t.file + " (" + where + ") 쓰지 않음 — 직접 설정해야 합니다");
-    else lines.push("  - " + t.file + " (" + where + ") " + (t.client === "codex" ? "mcp_servers." : "mcpServers.") + t.serverName + " 항목 추가 · " + (t.precondition.exists ? "기존 파일" : "새 파일"));
+    const key = (t.client === "codex" ? "mcp_servers." : "mcpServers.") + t.serverName;
+    const change = installTargetChange(plan, t);
+    if (change === "manual") lines.push("  - " + t.file + " (" + where + ") 쓰지 않음 — 직접 설정해야 합니다");
+    else if (change === "unchanged") lines.push("  - " + t.file + " (" + where + ") " + key + " 변경 없음 — 같은 항목이 이미 있습니다");
+    else if (change === "conflict") lines.push("  - " + t.file + " (" + where + ") " + key + " 쓰지 않음 — 다른 내용의 같은 이름 항목이 있습니다(충돌, 덮어쓰지 않음)");
+    else lines.push("  - " + t.file + " (" + where + ") " + key + " 항목 추가 · " + (t.precondition.exists ? "기존 파일" : "새 파일"));
   }
 
   lines.push("", "환경변수");

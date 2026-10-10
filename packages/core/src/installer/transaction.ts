@@ -7,7 +7,7 @@ import { createTreeKiller, type TreeKiller, type WindowsNpxLauncher } from "../p
 import { recommend, type MetadataSnapshot, type RecommendPlatform, type RecommendationReport } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
 import { verifyApprovedPlan, type InstallApproval, type VerifiedPlan } from "./approval-v1";
-import { ConfigWriteError, applyConfigPatch, inspectConfigTarget, nodeConfigFs, readConfiguredEntry, restoreConfig, type ConfigFs, type ConfigWriteReceipt } from "./config-writer";
+import { ConfigWriteError, applyConfigPatch, defaultEntryPlanForm, inspectConfigTarget, nodeConfigFs, readConfiguredEntry, restoreConfig, type ConfigFs, type ConfigWriteReceipt, type EntryPlanForm } from "./config-writer";
 import { canonicalize, type ConfigPatchStep, type ConfigScope, type InstallClient, type PlannedInstall } from "./plan";
 import { buildInstallPlan, type PlanBuildResult } from "./plan-builder";
 import { installResultSchema, preparedStateOf, type InstallResultV1, type InstallVerification } from "./result";
@@ -101,10 +101,38 @@ export async function planInstall(request: InstallRequest, env: InstallEnvironme
   const entry = entries.find((e) => e.manifest.name === request.toolId);
   const alias = entry?.manifest.recommendation?.identity?.mcpServerNames?.[0] ?? request.toolId;
   const roots = { projectRoot: request.projectRoot, homeDir: request.homeDir, ...(env.configFs === undefined ? {} : { fs: env.configFs }) };
-  const targets = await Promise.all(request.targets.map((t) => inspectConfigTarget(t.client, t.scope, alias, roots)));
+  const planForms = entry?.manifest.toolConfig === undefined ? undefined : await toolConfigPlanForms(request, env);
+  const targets = await Promise.all(request.targets.map((t) => inspectConfigTarget(t.client, t.scope, alias, roots, planForms?.get(t.scope) ?? defaultEntryPlanForm)));
   const toolConfigs = entry?.manifest.toolConfig === undefined ? undefined : await inspectToolConfigs(request, [...new Set(request.targets.map((t) => t.scope))], env);
   const result = buildInstallPlan({ toolId: request.toolId, entries, report, probes, targets, platform: request.platform, ...(toolConfigs === undefined ? {} : { toolConfigs }) });
   return { result, report, profile };
+}
+
+const samePath = (a: string, b: string) => {
+  const norm = (p: string) => (process.platform === "win32" ? path.resolve(p).toLowerCase() : path.resolve(p));
+  return norm(a) === norm(b);
+};
+
+/**
+ * (v0.2.0 범위별 설치 판정) tool config Tool의 이미 있는 Client 항목을 Plan 형태로 되돌리는 규칙(scope별).
+ * "--config" 다음 경로가 이 프로젝트·이 scope의 OpenHub 관리 파일일 때만 {toolConfig}로 되돌린다.
+ * 다른 프로젝트의 tool config를 가리키는 항목(복사한 설정 등)은 "같은 항목"으로 보지 않는다(충돌로 막는다).
+ */
+async function toolConfigPlanForms(request: InstallRequest, env: InstallEnvironment): Promise<Map<Scope, EntryPlanForm>> {
+  const out = new Map<Scope, EntryPlanForm>();
+  for (const scope of [...new Set(request.targets.map((t) => t.scope))]) {
+    const loc = await toolConfigLocationFor(request, scope, env);
+    out.set(scope, (value) => {
+      const args = typeof value === "object" && value !== null && Array.isArray((value as { args?: unknown }).args) ? ((value as { args: unknown[] }).args) : [];
+      const at = args.indexOf("--config");
+      if (at >= 0) {
+        const file = args[at + 1];
+        if (loc === null || typeof file !== "string" || !samePath(file, loc.file)) return undefined;
+      }
+      return defaultEntryPlanForm(value);
+    });
+  }
+  return out;
 }
 
 /** tool config 위치(scope별). project는 Version State와 같은 projectKey를 쓴다. 절대 경로는 이 함수 밖으로 결과에 남기지 않는다. */

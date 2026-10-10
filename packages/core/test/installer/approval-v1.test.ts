@@ -96,7 +96,10 @@ describe("REQ-034 Approval과 PLAN_STALE", () => {
     const { planned } = scenario("memory-mcp");
     expect(await requestApproval(planned, human("rejected"))).toEqual({ status: "rejected" });
     expect(await requestApproval(planned, human(["floating-artifact"]))).toEqual({ status: "rejected" });
-    const installed = planFor(seed, reportFor(clientProfile({ aiTools: [tool("memory")] }), seed), "memory-mcp");
+    // (v0.2.0 대상별 판정) 고른 대상에 같은 항목이 이미 있는 Plan은 승인할 것이 없다.
+    const memoryLaunch = launchSpec("npx", ["-y", "memory-mcp@latest"]);
+    const sameEntry = { exists: true, fileDigest: "sha256:" + "b".repeat(64), keyAbsent: false, entryDigest: core.entryPlanDigest(core.serverEntry("claude-code", memoryLaunch, [])) };
+    const installed = planFor(seed, reportFor(clientProfile({ aiTools: [tool("memory")] }), seed), "memory-mcp", { launch: memoryLaunch, targets: [target("claude-code", "project", { precondition: sameEntry })] });
     expect(installed.plan.status).toBe("already-installed");
     const prompter = human();
     expect(await requestApproval(installed, prompter)).toMatchObject({ status: "not-approvable", code: "PLAN_NOT_EXECUTABLE" });
