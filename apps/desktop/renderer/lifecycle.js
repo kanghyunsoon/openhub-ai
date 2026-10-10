@@ -276,20 +276,17 @@
   // 결과를 기다린다. 사용자 범위면 먼저 [사용자 범위 보기]가 켜질 때까지 기다린다(사용자 범위 설치를 마치면 자동으로 켜진다, 직접 누르지 않는다).
   // timer 없음(AC-046-02): 끝나지 않으면 E2E 테스트의 제한 시간이 멈춘다.
   window.__openhubLifecycleOp = async (toolId, scope, op) => {
-    const guard = (promise) => promise;
-    if (scope === "user" && !(await guard(waitFor(userToggle, () => (userToggle.getAttribute("aria-pressed") === "true" ? true : null))))) return { status: "user-scope-not-shown" };
+    if (scope === "user" && !(await waitFor(userToggle, () => (userToggle.getAttribute("aria-pressed") === "true" ? true : null)))) return { status: "user-scope-not-shown" };
     await refresh();
-    const find = () => [...list.querySelectorAll("li.entry")].find((x) => x.dataset.toolId === toolId && x.dataset.scope === scope && x.querySelector(".lifecycle-" + op));
-    const li = find();
+    const li = [...list.querySelectorAll("li.entry")].find((x) => x.dataset.toolId === toolId && x.dataset.scope === scope && x.querySelector(".lifecycle-" + op));
     if (!li) return { status: "no-" + op + "-button", entries: [...list.querySelectorAll("li.entry")].map((x) => x.dataset.entryId + "=" + (x.querySelector(".entry-warning")?.textContent || "")) };
     li.querySelector(".lifecycle-" + op).click();
-    const ready = await guard(waitFor(panel, () => panel.querySelector(".lifecycle-confirm") || panel.querySelector(".install-warning")));
-    if (!ready || !ready.classList.contains("lifecycle-confirm")) return { status: "not-executable", message: ready ? ready.textContent : "timeout" };
+    const ready = await waitFor(panel, () => panel.querySelector(".lifecycle-confirm") || panel.querySelector(".install-warning"));
+    if (!ready.classList.contains("lifecycle-confirm")) return { status: "not-executable", message: ready.textContent };
     const requirements = [...panel.querySelectorAll('input[type="checkbox"]')].map((b) => b.dataset.requirement);
     for (const box of panel.querySelectorAll('input[type="checkbox"]')) box.click();
     ready.click();
-    const done = await guard(waitFor(panel, () => panel.querySelector(".lifecycle-outcome") || panel.querySelector('[data-run-done="1"]')));
-    if (!done) return { status: "timeout", requirements };
+    const done = await waitFor(panel, () => panel.querySelector(".lifecycle-outcome") || panel.querySelector('[data-run-done="1"]'));
     const heading = panel.querySelector("h3");
     const after = await refresh();
     return {
@@ -297,6 +294,31 @@
       outcome: done.classList.contains("lifecycle-outcome") ? [...done.classList].find((c) => c.startsWith("outcome-")).slice("outcome-".length) : done.textContent,
       requirements,
       after: after.items ? after.items.filter((i) => i.toolId === toolId).map((i) => i.scope + ":" + i.state) : [],
+    };
+  };
+
+  // 스모크(--smoke + OPENHUB_SMOKE_ROLLBACK): toolId 항목의 op 버튼(rollback·health 등) click → 승인 항목 checkbox click → 확인 click →
+  // 결과를 기다린다(사람과 같은 DOM 조작, timer 없음).
+  window.__openhubLifecycleRun = async (toolId, op) => {
+    await refresh();
+    const li = [...list.querySelectorAll("li.entry")].find((x) => x.dataset.toolId === toolId && x.querySelector(".lifecycle-" + op));
+    if (!li) return { status: "no-" + op + "-button" };
+    li.querySelector(".lifecycle-" + op).click();
+    const ready = await waitFor(panel, () => panel.querySelector(".lifecycle-confirm") || panel.querySelector(".install-warning"));
+    if (!ready.classList.contains("lifecycle-confirm")) return { status: "not-executable", message: ready.textContent };
+    const requirements = [...panel.querySelectorAll('input[type="checkbox"]')].map((b) => b.dataset.requirement);
+    for (const box of panel.querySelectorAll('input[type="checkbox"]')) box.click();
+    ready.click();
+    const done = await waitFor(panel, () => panel.querySelector(".lifecycle-outcome") || panel.querySelector('[data-run-done="1"]'));
+    const heading = panel.querySelector("h3");
+    const lines = [...panel.querySelectorAll(".install-change, .install-warning")].map((p) => p.textContent.trim());
+    const after = await refresh();
+    return {
+      status: done.classList.contains("lifecycle-outcome") && heading ? heading.dataset.status || "unknown" : "not-run",
+      outcome: done.classList.contains("lifecycle-outcome") ? [...done.classList].find((c) => c.startsWith("outcome-")).slice("outcome-".length) : done.textContent,
+      requirements,
+      lines,
+      after: after.items ? after.items.filter((i) => i.toolId === toolId).map((i) => i.state) : [],
     };
   };
 })();
