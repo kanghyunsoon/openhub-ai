@@ -122,6 +122,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("REQ-051 Registry sandbox in
   it("P0-2 sandbox: mongodb-mcp-server를 npx Prepare로 설치하고 Health·read-only 거부·자격증명 비노출을 실제로 확인한다", async () => {
     const platform = process.platform === "win32" ? "windows" : "linux";
     const USER = ["openhub", "e2e", "mongo"].join("_");
+    const DISABLED = ["export", "connect", "search-knowledge", "list-knowledge-sources", "atlas-local-connect-deployment", "atlas-local-list-deployments", "mongodb-logs"];
     const PASSWORD = ["OpenHub", "E2E", "fake", "pw", "5521"].join("-");
     const PORT = String(27100 + Math.floor(Math.random() * 800));
     const container = "openhub-e2e-mongo-" + String(process.pid);
@@ -163,7 +164,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("REQ-051 Registry sandbox in
       expect(result.verification?.prepared).toBe("cached");
       for (const file of [".mcp.json", ".cursor/mcp.json", ".codex/config.toml"]) {
         const written = await readFile(path.join(h.projectRoot, file), "utf8");
-        for (const flag of ["mongodb-mcp-server@3.0.5", "--readOnly", "--telemetry", "disabled", "MDB_MCP_CONNECTION_STRING"]) expect(written, file).toContain(flag);
+        for (const flag of ["mongodb-mcp-server@3.0.5", "--readOnly", "--telemetry", "disabled", "--disabledTools", DISABLED.join(","), "MDB_MCP_CONNECTION_STRING"]) expect(written, file).toContain(flag);
         expect(written, file).not.toContain(PASSWORD);
         expect(written, file).not.toContain(USER);
       }
@@ -208,10 +209,22 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("REQ-051 Registry sandbox in
         { name: "count", arguments: D },
         { name: "explain", arguments: { ...D, method: [{ name: "find", arguments: { filter: {} } }] } },
       ];
-      const session = await mcpSession(argv, scratch, [...writes, ...pipelines, ...reads]);
+      // --disabledTools로 뺀 도구는 등록되지 않는다. 직접 호출해도 실행되지 않아야 한다.
+      const disabledCalls: McpCall[] = [
+        { name: "export", arguments: { ...D, exportTitle: "x", exportTarget: [{ name: "find", arguments: { filter: {} } }] } },
+        { name: "connect", arguments: { connectionString: "mongodb://127.0.0.1:1/other" } },
+        { name: "search-knowledge", arguments: { query: "index" } },
+        { name: "list-knowledge-sources", arguments: {} },
+        { name: "atlas-local-connect-deployment", arguments: { deploymentName: "x" } },
+        { name: "atlas-local-list-deployments", arguments: {} },
+        { name: "mongodb-logs", arguments: C },
+        { name: "disconnect", arguments: {} },
+      ];
+      const session = await mcpSession(argv, scratch, [...writes, ...pipelines, ...reads, ...disabledCalls]);
       const names = session.tools.map((t) => t.name).sort();
       console.log("mongodb tools: " + names.join(","));
-      expect(names.length).toBe(20);
+      // 공백 구분 --disabledTools는 첫 값만 적용된다(v3.0.5 실측). 정확한 목록으로 잡는다.
+      expect(names).toEqual(["aggregate", "aggregate-db", "collection-indexes", "collection-schema", "collection-storage-size", "count", "db-stats", "explain", "find", "list-collections", "list-connections", "list-databases"]);
       for (const t of session.tools) {
         expect(t.annotations?.readOnlyHint, t.name).toBe(true);
         expect(t.annotations?.destructiveHint ?? false, t.name).toBe(false);
@@ -226,15 +239,19 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("REQ-051 Registry sandbox in
       });
       reads.forEach((rd, i) => expect(replies[writes.length + pipelines.length + i]?.result?.isError ?? false, rd.name).toBe(false));
       expect(JSON.stringify(replies[writes.length + pipelines.length + 1]?.result)).toContain("Found 3 documents");
+      disabledCalls.forEach((dc, i) => expect(replies[writes.length + pipelines.length + reads.length + i]?.error?.message ?? "", dc.name).toMatch(/not found/u));
       expect(snapshot()).toBe(before);
       expect(session.transcript).not.toContain(PASSWORD);
       expect(JSON.stringify(replies)).not.toContain(PASSWORD);
       const logs = (await readdir(logDir, { recursive: true })) as string[];
       console.log("mongodb server log files: " + String(logs.length));
+      let telemetryDisabled = false;
       for (const f of logs) {
         const body = await readFile(path.join(logDir, f), "utf8").catch(() => "");
         expect(body, f).not.toContain(PASSWORD);
+        if (body.includes("Telemetry is disabled")) telemetryDisabled = true;
       }
+      expect(telemetryDisabled).toBe(true);
     } finally {
       if (saved.conn === undefined) delete process.env["MDB_MCP_CONNECTION_STRING"];
       else process.env["MDB_MCP_CONNECTION_STRING"] = saved.conn;

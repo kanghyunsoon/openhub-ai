@@ -92,7 +92,9 @@
           "mongodb-mcp-server@3.0.5",
           "--readOnly",
           "--telemetry",
-          "disabled"
+          "disabled",
+          "--disabledTools",
+          "export,connect,search-knowledge,list-knowledge-sources,atlas-local-connect-deployment,atlas-local-list-deployments,mongodb-logs"
         ],
         "clientSpec": {
           "args": [
@@ -100,7 +102,9 @@
             "mongodb-mcp-server@3.0.5",
             "--readOnly",
             "--telemetry",
-            "disabled"
+            "disabled",
+            "--disabledTools",
+            "export,connect,search-knowledge,list-knowledge-sources,atlas-local-connect-deployment,atlas-local-list-deployments,mongodb-logs"
           ],
           "command": "npx"
         },
@@ -275,7 +279,9 @@
           "mongodb-mcp-server@3.0.5",
           "--readOnly",
           "--telemetry",
-          "disabled"
+          "disabled",
+          "--disabledTools",
+          "export,connect,search-knowledge,list-knowledge-sources,atlas-local-connect-deployment,atlas-local-list-deployments,mongodb-logs"
         ],
         "clientSpec": {
           "args": [
@@ -286,7 +292,9 @@
             "mongodb-mcp-server@3.0.5",
             "--readOnly",
             "--telemetry",
-            "disabled"
+            "disabled",
+            "--disabledTools",
+            "export,connect,search-knowledge,list-knowledge-sources,atlas-local-connect-deployment,atlas-local-list-deployments,mongodb-logs"
           ],
           "command": "cmd"
         },

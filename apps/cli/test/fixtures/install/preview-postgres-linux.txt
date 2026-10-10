@@ -17,6 +17,7 @@ Client 실행 명령  uvx postgres-mcp --access-mode=restricted
 
 Warnings
   - [client-env-parse-risk] Claude Code가 실행되는 환경에 DATABASE_URI 환경변수를 준비해야 합니다. OpenHub는 값이나 존재 여부를 확인하지 않으며, 준비되지 않으면 .mcp.json 해석에 영향을 줄 수 있습니다.
+  - [database-credential-scope] 이 도구는 환경변수의 DB 접속 정보가 가진 권한으로 동작합니다. MCP 서버의 읽기 전용 설정은 DB 권한을 줄이지 않으므로 읽기 권한만 가진 DB 계정을 쓰세요.
   - [floating-artifact] 이 설치 계획은 실행 명령과 설정을 고정하지만, 원격 패키지 내용 자체는 고정하지 않습니다. 동일한 계획을 나중에 실행하면 다른 artifact가 내려올 수 있습니다.
 
 승인 항목
@@ -24,4 +25,4 @@ Warnings
   - [floating-artifact] 원격 패키지 버전이 고정되어 있지 않습니다. 나중에 실행하면 다른 artifact가 내려올 수 있습니다.
   - [client-env-parse-risk] Claude Code가 실행되는 환경에 필요한 환경변수를 직접 준비해야 합니다. OpenHub는 값이나 존재 여부를 확인하지 않습니다.
 
-Plan digest  sha256:43c6d690260e102f10b7972c8f3168e71d78134b0acc256770c8382136ebb398
+Plan digest  sha256:dec252017cd533c41acc0ef7f25574e8bd39a1596c31421f166feedd919a4309

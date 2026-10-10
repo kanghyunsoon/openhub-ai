@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildInstallPlan,
   canonicalize,
+  DATABASE_CREDENTIAL_NOTICE,
   installPlanSchema,
   isPinnedArtifact,
   isPinnedNpmSpec,
@@ -266,5 +267,13 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     }
     expect(tokenizeManifestCommand("npx -y pkg%x", "npx", { windowsCmdWrapper: true })).toMatchObject({ ok: false });
     expect(tokenizeManifestCommand("npx -y @scope/pkg@1.2.3 --port=3000", "npx", { windowsCmdWrapper: true })).toEqual({ ok: true, tokens: ["npx", "-y", "@scope/pkg@1.2.3", "--port=3000"] });
+  });
+
+  it("v0.2.0 database 카테고리 + 필수 env 도구에만 읽기 권한 DB 계정 고지(고정 문구)가 붙고 Manifest 설명은 Plan에 없다", () => {
+    const withNotice = SEED_IDS.filter((id) => planned(build(id)).plan.warnings.some((w) => w.code === "database-credential-scope"));
+    expect(withNotice).toEqual(["mongodb-mcp-server", "postgres-mcp"]);
+    const { plan } = planned(build("mongodb-mcp-server"));
+    expect(plan.warnings.find((w) => w.code === "database-credential-scope")?.message).toBe(DATABASE_CREDENTIAL_NOTICE);
+    expect(JSON.stringify(plan)).not.toContain("read 역할");
   });
 });
