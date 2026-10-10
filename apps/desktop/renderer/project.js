@@ -71,4 +71,15 @@
   });
   // 스모크 실행(OPENHUB_SMOKE_PROJECT)이 버튼과 같은 경로를 쓰도록 노출한다.
   window.__openhubScanProject = scan;
+  // 스모크(사용자 범위 프로젝트 이동): 실제 [프로젝트 선택] 버튼을 누르고 분석 결과가 다시 그려질 때까지 기다린다(timer 없음).
+  window.__openhubReselectProject = () =>
+    new Promise((resolve) => {
+      const body = document.getElementById("project-body");
+      const observer = new MutationObserver(() => {
+        observer.disconnect();
+        resolve(body.querySelectorAll("*").length);
+      });
+      observer.observe(body, { childList: true });
+      document.getElementById("project-select").click();
+    });
 })();

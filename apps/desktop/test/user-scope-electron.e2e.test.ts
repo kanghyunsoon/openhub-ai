@@ -33,22 +33,37 @@ const PROJECT_FILES: Record<string, string> = {
 };
 
 type LifeOp = { status: string; outcome?: string; requirements?: string[]; after?: string[] };
-type UserScopeSmoke = { install: { status: string; targets?: string[]; configChanges?: string[] }; health1: LifeOp; corrupted: boolean; repair: LifeOp; health2: LifeOp; dialogs: { title: string; detail: string }[]; healthRuns: number };
+type UserScopeSmoke = {
+  install: { status: string; targets?: string[]; configChanges?: string[] };
+  health1: LifeOp;
+  corrupted: boolean;
+  repairFailed: LifeOp;
+  compensated: boolean;
+  repair: LifeOp;
+  health2: LifeOp;
+  moved?: { project: number; health: LifeOp };
+  hidden: { pressed: string; entries: { state: string; buttons: number; warning: string }[] };
+  dialogs: { title: string; detail: string }[];
+  healthRuns: number;
+};
 
 async function run(locale: string) {
   const base = path.join(scratch, locale);
   const project = path.join(base, "project");
+  const projectB = path.join(base, "project-b");
   const home = path.join(base, "home");
-  for (const [rel, text] of Object.entries(PROJECT_FILES)) {
-    await mkdir(path.dirname(path.join(project, rel)), { recursive: true });
-    await writeFile(path.join(project, rel), text);
+  for (const dir of [project, projectB]) {
+    for (const [rel, text] of Object.entries(PROJECT_FILES)) {
+      await mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+      await writeFile(path.join(dir, rel), text);
+    }
   }
   await mkdir(path.join(home, ".codex"), { recursive: true });
   await writeFile(path.join(home, ".codex", "config.toml"), CODEX_USER);
   const out = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
     const env: Record<string, string> = { ...(process.env as Record<string, string>) };
     for (const k of Object.keys(env)) if (k.startsWith("OPENHUB_SMOKE_") || k === "ELECTRON_RUN_AS_NODE" || k === "OPENHUB_SCREENSHOT") delete env[k];
-    Object.assign(env, { OPENHUB_SMOKE_USER_DATA: path.join(base, "user-data"), OPENHUB_SMOKE_SYSTEM_LOCALE: locale, OPENHUB_SMOKE_PROJECT: project, OPENHUB_SMOKE_USER_SCOPE: K8S, OPENHUB_SMOKE_HOME: home, OPENHUB_SMOKE_INSTALL_CLIENTS: "codex" });
+    Object.assign(env, { OPENHUB_SMOKE_USER_DATA: path.join(base, "user-data"), OPENHUB_SMOKE_SYSTEM_LOCALE: locale, OPENHUB_SMOKE_PROJECT: project, OPENHUB_SMOKE_PROJECT_B: projectB, OPENHUB_SMOKE_USER_SCOPE: K8S, OPENHUB_SMOKE_HOME: home, OPENHUB_SMOKE_INSTALL_CLIENTS: "codex" });
     const child = spawn(electronBin!, [".", "--smoke"], { cwd: DESKTOP, env, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
@@ -59,7 +74,7 @@ async function run(locale: string) {
   const line = out.stdout.split("\n").find((l) => l.startsWith("OPENHUB_SMOKE "));
   if (line === undefined) throw new Error("smoke 결과 없음: " + out.stderr.slice(-1500));
   const smoke = (JSON.parse(line.slice("OPENHUB_SMOKE ".length)) as { userScope?: UserScopeSmoke }).userScope!;
-  return { code: out.code, smoke, project, home };
+  return { code: out.code, smoke, project, projectB, home };
 }
 
 describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || electronBin === null)("v0.2.0 P0-3 C2 Desktop 사용자 범위 실제 Electron E2E", () => {
@@ -71,7 +86,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || electronBin === null)("v0.
   afterAll(() => rm(scratch, { recursive: true, force: true }));
 
   for (const locale of ["en-US", "ko-KR"]) {
-    it("사용자 범위 설치 → INSTALLED 사용자 범위 → Health → 손상 → Repair → Health (" + locale + ")", async () => {
+    it("사용자 범위 설치 → Health → 손상 → Repair(Health 실패·보상) → Repair → Health → 프로젝트 이동 → Health → 보기 끄기 (" + locale + ")", async () => {
       const r = await run(locale);
       expect(r.code, JSON.stringify(r.smoke)).toBe(0);
       expect(r.smoke.install.status).toBe("succeeded");
@@ -79,13 +94,23 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || electronBin === null)("v0.
       expect(r.smoke.install.targets![0]).toContain("~/.codex/config.toml");
       expect(r.smoke.health1).toMatchObject({ status: "health-checked", outcome: "succeeded" });
       expect(r.smoke.corrupted).toBe(true);
+      // 가짜 Health 실패(실제 MCP Health 아님): Repair는 실패로 끝나고 이번 변경(tool config)을 되돌린다.
+      expect(r.smoke.repairFailed).toMatchObject({ outcome: "failed" });
+      expect(r.smoke.compensated).toBe(true);
       expect(r.smoke.repair).toMatchObject({ status: "repaired", outcome: "succeeded" });
       expect(r.smoke.repair.requirements).toContain("user-scope-config");
       expect(r.smoke.health2).toMatchObject({ status: "health-checked", outcome: "succeeded" });
       expect(r.smoke.health2.after).toEqual(["user:state-consistent"]);
-      expect(r.smoke.healthRuns).toBe(3);
-      // 대화상자: 설치(사용자 범위 경고 포함) → Health → Repair(사용자 범위) → Health.
-      expect(r.smoke.dialogs).toHaveLength(4);
+      // 다른 프로젝트로 옮겨도(실제 [프로젝트 선택] 클릭) 같은 사용자 항목을 Health할 수 있다.
+      expect(r.smoke.moved?.project).toBeGreaterThan(0);
+      expect(r.smoke.moved?.health).toMatchObject({ status: "health-checked", after: ["user:state-consistent"] });
+      // [사용자 범위 숨기기]를 누르면 사용자 항목은 읽지 않은 상태(not-inspected)이고 버튼이 없다.
+      expect(r.smoke.hidden.pressed).toBe("false");
+      expect(r.smoke.hidden.entries).toHaveLength(1);
+      expect(r.smoke.hidden.entries[0]).toMatchObject({ state: "not-inspected", buttons: 0 });
+      expect(r.smoke.healthRuns).toBe(5);
+      // 대화상자: 설치(사용자 범위 경고 포함) → Health → Repair(실패) → Repair → Health → Health(이동 뒤).
+      expect(r.smoke.dialogs).toHaveLength(6);
       const installDialog = r.smoke.dialogs[0]!.detail;
       expect(installDialog).toContain("~/.codex/config.toml");
       expect(installDialog).toContain(locale === "en-US" ? "This affects every project that uses these clients" : "이 Client를 쓰는 모든 프로젝트에 영향을 줍니다");

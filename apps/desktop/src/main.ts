@@ -1,6 +1,6 @@
 import path from "node:path";
 import { cpSync, mkdtempSync } from "node:fs";
-import { unlink, writeFile } from "node:fs/promises";
+import { stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import {
@@ -98,6 +98,7 @@ const smokeUserScopeTool = smoke && smokeInstall === undefined ? process.env["OP
 const smokeUserScopeHome = smokeUserScopeTool === undefined ? undefined : process.env["OPENHUB_SMOKE_HOME"] || undefined;
 const smokeUserScopeClients = (process.env["OPENHUB_SMOKE_INSTALL_CLIENTS"] || "codex").split(",").map((s) => s.trim()).filter((s) => s !== "");
 const smokeUserScopeDialogs: { title: string; detail: string }[] = [];
+let smokeUserScopeFailNext = 0;
 const smokeUserScope =
   smokeUserScopeHome === undefined
     ? undefined
@@ -109,7 +110,11 @@ const smokeUserScope =
           },
         },
       });
-registerProjectScan(recommendSession.observe(ipcMain), installSession.trackPicker(smokeProject === undefined ? electronDirectoryPicker(dialog) : fixedDirectory(smokeProject)));
+/** 스모크 사용자 범위의 프로젝트 이동: OPENHUB_SMOKE_PROJECT_B가 있으면 두 번째 [프로젝트 선택]부터 그 폴더를 고른다. */
+const smokeProjectB = smokeUserScopeTool === undefined ? undefined : process.env["OPENHUB_SMOKE_PROJECT_B"] || undefined;
+let smokePicks = 0;
+const smokePicker = smokeProject === undefined ? undefined : smokeProjectB === undefined ? fixedDirectory(smokeProject) : async () => (smokePicks++ === 0 ? smokeProject : smokeProjectB);
+registerProjectScan(recommendSession.observe(ipcMain), installSession.trackPicker(smokePicker ?? electronDirectoryPicker(dialog)));
 registerProjectRecommend(ipcMain, recommendSession, { registryDir, metadataFile, platform: process.platform });
 registerInstall(ipcMain, installSession, {
   registryDir,
@@ -155,7 +160,19 @@ registerLifecycle(ipcMain, new LifecycleSession(() => installSession.projectDir)
   // 스모크 사용자 범위(--smoke + OPENHUB_SMOKE_USER_SCOPE + OPENHUB_SMOKE_HOME일 때만): 같은 임시 home·가짜 npm·가짜 Health·기록하는 대화상자.
   ...(smokeUserScope === undefined || smokeUserScopeHome === undefined
     ? {}
-    : { homeDir: smokeUserScopeHome, dialog: smokeUserScope.recordingDialog, runHealth: smokeUserScope.runHealth, spawner: smokeUserScope.spawner, probe: smokeInstallDeps().probe }),
+    : {
+        homeDir: smokeUserScopeHome,
+        dialog: smokeUserScope.recordingDialog,
+        // 스모크 Health 실패 주입(가짜 Health): smokeUserScopeFailNext만큼 unhealthy를 돌려준다(실제 MCP Health가 아니다).
+        runHealth: (async (verified, ...rest) => {
+          if (smokeUserScopeFailNext <= 0) return smokeUserScope.runHealth!(verified, ...rest);
+          smokeUserScopeFailNext -= 1;
+          smokeUserScope.healthRuns += 1;
+          return { ok: true, result: { status: "unhealthy", reason: null, toolCount: null, environmentUnverified: false, terminated: true, excerpt: null } };
+        }) as typeof smokeUserScope.runHealth,
+        spawner: smokeUserScope.spawner,
+        probe: smokeInstallDeps().probe,
+      }),
 });
 
 /**
@@ -269,7 +286,8 @@ async function createWindow(): Promise<void> {
         smokeAdopt === undefined || project === undefined
           ? undefined
           : ((await win.webContents.executeJavaScript("window.__openhubAdopt()")) as { status: string; preview: string; adoptResult: string; benchmarkResult: string });
-      // 스모크 사용자 범위(v0.2.0 P0-3 C2): 설치(사용자 범위) → Health → 손상(main이 사용자 tool config 삭제) → Repair → Health.
+      // 스모크 사용자 범위(v0.2.0 P0-3 C2): 설치(사용자 범위) → Health → 손상(main이 사용자 tool config 삭제) → Repair(가짜 Health 실패 → 보상)
+      // → Repair → Health → [프로젝트 선택] 다시 클릭(프로젝트 이동) → 같은 사용자 항목 Health → [사용자 범위 숨기기] 클릭.
       type LifeOp = { status: string; outcome?: string; requirements?: string[]; after?: string[] };
       const userScope =
         smokeUserScopeTool === undefined || smokeUserScopeHome === undefined || project === undefined
@@ -280,9 +298,18 @@ async function createWindow(): Promise<void> {
               const health1 = (await js("window.__openhubLifecycleOp(" + JSON.stringify(smokeUserScopeTool) + ", \"user\", \"health\")")) as LifeOp;
               const loc = toolConfigLocation({ homeDir: smokeUserScopeHome, scope: "user", toolId: smokeUserScopeTool });
               const corrupted = loc === null ? false : await unlink(loc.file).then(() => true, () => false);
+              smokeUserScopeFailNext = 1;
+              const repairFailed = (await js("window.__openhubLifecycleOp(" + JSON.stringify(smokeUserScopeTool) + ", \"user\", \"repair\")")) as LifeOp;
+              const compensated = loc === null ? false : await stat(loc.file).then(() => false, () => true);
               const repair = (await js("window.__openhubLifecycleOp(" + JSON.stringify(smokeUserScopeTool) + ", \"user\", \"repair\")")) as LifeOp;
               const health2 = (await js("window.__openhubLifecycleOp(" + JSON.stringify(smokeUserScopeTool) + ", \"user\", \"health\")")) as LifeOp;
-              return { install, health1, corrupted, repair, health2, dialogs: smokeUserScopeDialogs, healthRuns: smokeUserScope?.healthRuns ?? 0 };
+              let moved: { project: number; health: LifeOp } | undefined;
+              if (smokeProjectB !== undefined) {
+                const project2 = (await js("window.__openhubReselectProject()")) as number;
+                moved = { project: project2, health: (await js("window.__openhubLifecycleOp(" + JSON.stringify(smokeUserScopeTool) + ", \"user\", \"health\")")) as LifeOp };
+              }
+              const hidden = (await js("window.__openhubUserScopeOff(" + JSON.stringify(smokeUserScopeTool) + ")")) as { pressed: string; entries: { state: string; buttons: number; warning: string }[] };
+              return { install, health1, corrupted, repairFailed, compensated, repair, health2, moved, hidden, dialogs: smokeUserScopeDialogs, healthRuns: smokeUserScope?.healthRuns ?? 0 };
             })();
       const release =
         smokeReleaseTool === undefined || update === undefined
@@ -315,7 +342,16 @@ async function createWindow(): Promise<void> {
       const adoptOk = adopt === undefined || (adopt.status === "ok" && (smokeAdopt?.dialogs.length ?? 0) === 2 && (smokeAdopt?.spawns ?? 0) === 6);
       const userScopeOk =
         userScope === undefined ||
-        (userScope.install.status === "succeeded" && userScope.health1.status === "health-checked" && userScope.corrupted && userScope.repair.status === "repaired" && userScope.health2.status === "health-checked");
+        (userScope.install.status === "succeeded" &&
+          userScope.health1.status === "health-checked" &&
+          userScope.corrupted &&
+          userScope.repairFailed.outcome === "failed" &&
+          userScope.compensated &&
+          userScope.repair.status === "repaired" &&
+          userScope.health2.status === "health-checked" &&
+          (userScope.moved === undefined || userScope.moved.health.status === "health-checked") &&
+          userScope.hidden.pressed === "false" &&
+          userScope.hidden.entries.every((e) => e.state === "not-inspected" && e.buttons === 0));
       const i18nOk = i18n.before.missingKeys.length === 0 && (i18n.after === undefined || (i18n.after.locale === smokeI18nSwitch && i18n.after.missingKeys.length === 0));
       const releaseOk = release === undefined || (release.status === "ok" && release.notesText && release.innerHtml === 0 && (smokeRelease?.authorized ?? 0) === 0);
       const onboardingOk = onboarding.visible && onboarding.steps === 7;

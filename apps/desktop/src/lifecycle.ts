@@ -128,7 +128,8 @@ export interface LifecyclePlanView {
   executable: boolean;
   upToDate: boolean;
 }
-export type LifecyclePlanResponse = { status: "ok"; view: LifecyclePlanView } | { status: "no-project" | "not-managed" } | { status: "error"; code: string; message: string };
+/** superseded: 계획하는 동안 더 새 계획 요청·사용자 범위 보기 변경·프로젝트 변경이 있어 이 계획은 기억하지 않았다(실행 불가). */
+export type LifecyclePlanResponse = { status: "ok"; view: LifecyclePlanView } | { status: "no-project" | "not-managed" | "superseded" } | { status: "error"; code: string; message: string };
 
 export interface LifecycleResultView {
   status: LifecycleResultV1["status"];
@@ -147,7 +148,7 @@ export interface LifecycleResultView {
 export type LifecycleRunResponse =
   | { status: "done"; result: LifecycleResultView }
   | { status: "rejected" | "no-plan" }
-  | { status: "project-changed"; message: string }
+  | { status: "project-changed" | "plan-changed"; message: string }
   | { status: "error"; code: string; message: string };
 /** project-changed 안내(현재 Desktop 언어). */
 export const projectChangedMessage = (): string => tr("life.projectChanged");
@@ -224,26 +225,63 @@ export function nativeLifecycleDialogPrompter(dialog: NativeDialogLike): Lifecyc
   };
 }
 
-/** 화면에 보여 준 Plan을 entry id로 기억한다. 프로젝트 폴더는 설치 흐름과 같은 선택 결과를 쓴다. */
+/** 계획 요청 하나의 표. 이 표가 지금도 유효할 때만 Plan을 기억·승인·실행한다. */
+export interface LifecycleTicket {
+  /** 계획 요청 세대(새 계획 요청마다 증가). */
+  readonly generation: number;
+  /** 사용자 범위 보기 세대(보기를 켜고 끌 때마다 증가). user 항목만 본다. */
+  readonly userGeneration: number;
+  readonly user: boolean;
+  readonly projectDir: string | undefined;
+}
+
+/**
+ * 화면에 보여 준 Plan을 entry id로 기억한다. 프로젝트 폴더는 설치 흐름과 같은 선택 결과를 쓴다.
+ * (v0.2.0 P0-3 C2 보완) 계획 일관성:
+ * - 계획 요청마다 세대를 올린다. 늦게 끝난 이전 요청은 기억하지 않는다.
+ * - 사용자 범위 보기를 바꾸면 사용자 세대를 올리고 사용자 항목 Pending Plan만 버린다(프로젝트 항목 Plan은 그대로).
+ * - 사용자 항목 Plan은 보기가 켜져 있고 사용자 세대가 같을 때만 유효하다. 모든 Plan은 같은 프로젝트일 때만 유효하다.
+ * - 승인 대화상자 직전·직후에 다시 확인한다(Health·Repair·Update·Rollback 공통).
+ */
 export class LifecycleSession {
-  readonly #pending = new Map<string, { planned: PlannedLifecycle; request: LifecycleRequest }>();
+  readonly #pending = new Map<string, { planned: PlannedLifecycle; request: LifecycleRequest; ticket: LifecycleTicket }>();
   #includeUser = false;
+  #generation = 0;
+  #userGeneration = 0;
   constructor(readonly projectDir: () => string | undefined) {}
   /** 사용자가 [사용자 범위 보기]를 켰는가(lifecycle:status { includeUser }로만 바뀐다). */
   get includeUser(): boolean {
     return this.#includeUser;
   }
   setIncludeUser(on: boolean): void {
-    if (this.#includeUser !== on) this.#pending.clear();
+    if (this.#includeUser === on) return;
     this.#includeUser = on;
+    this.#userGeneration += 1;
+    for (const id of [...this.#pending.keys()]) if (id.startsWith("user:")) this.#pending.delete(id);
   }
-  remember(id: string, planned: PlannedLifecycle, request: LifecycleRequest): void {
+  /** 새 계획 요청의 표. */
+  begin(id: string): LifecycleTicket {
+    this.#generation += 1;
+    return { generation: this.#generation, userGeneration: this.#userGeneration, user: id.startsWith("user:"), projectDir: this.projectDir() };
+  }
+  /** 이 표가 아직 유효한가(더 새 계획 요청 없음·같은 프로젝트·사용자 항목이면 보기 켜짐 + 같은 사용자 세대). */
+  isCurrent(ticket: LifecycleTicket, checkGeneration = true): boolean {
+    if (checkGeneration && ticket.generation !== this.#generation) return false;
+    if (ticket.projectDir !== this.projectDir()) return false;
+    if (ticket.user && (!this.#includeUser || ticket.userGeneration !== this.#userGeneration)) return false;
+    return true;
+  }
+  /** 유효한 표일 때만 기억한다. 아니면 false(이전 요청의 늦은 응답). */
+  remember(id: string, ticket: LifecycleTicket, planned: PlannedLifecycle, request: LifecycleRequest): boolean {
+    if (!this.isCurrent(ticket)) return false;
     this.#pending.clear();
-    this.#pending.set(id, { planned, request });
+    this.#pending.set(id, { planned, request, ticket });
+    return true;
   }
-  take(id: string): { planned: PlannedLifecycle; request: LifecycleRequest } | undefined {
+  take(id: string): { planned: PlannedLifecycle; request: LifecycleRequest; ticket: LifecycleTicket } | undefined {
     const found = this.#pending.get(id);
     this.#pending.delete(id);
+    // 유효성(프로젝트·사용자 범위 보기)은 runForRenderer가 이유별로 확인한다(project-changed·plan-changed).
     return found;
   }
 }
@@ -382,11 +420,14 @@ export async function checkForRenderer(session: LifecycleSession, deps: Lifecycl
 /** lifecycle:plan-* — entry id 하나. Plan을 만들어 기억하고 Core Preview 문장을 돌려준다. */
 export async function planForRenderer(operation: LifecycleOperation, session: LifecycleSession, deps: LifecycleDeps, id: unknown): Promise<LifecyclePlanResponse> {
   try {
+    const ticket = session.begin(typeof id === "string" ? id : "");
     const r = await requestFor(operation, session, deps, id);
     if ("error" in r) return r.error;
     const built = await planLifecycleRequest(r.request, r.env);
+    // 계획하는 동안 더 새 요청·사용자 범위 보기 변경·프로젝트 변경이 있었으면 이 계획은 기억하지 않는다.
+    if (!session.isCurrent(ticket)) return { status: "superseded" };
     if (!built.ok) return { status: "error", code: built.code, message: built.message };
-    session.remember(id as string, built.planned, r.request);
+    if (!session.remember(id as string, ticket, built.planned, r.request)) return { status: "superseded" };
     const plan = built.planned.plan;
     return {
       status: "ok",
@@ -446,6 +487,9 @@ export async function runForRenderer(session: LifecycleSession, deps: LifecycleD
   // 계획을 만든 뒤 다른 프로젝트를 선택했으면 이전 계획을 실행하지 않는다(계획은 이미 버렸다). 대화상자도 열지 않는다.
   const sameProject = () => session.projectDir() === pending.request.projectRoot;
   if (!sameProject()) return { status: "project-changed", message: projectChangedMessage() };
+  // 계획을 만든 뒤 바뀐 것(사용자 범위 보기·프로젝트)이 있으면 대화상자를 열지 않는다.
+  const planChanged = { status: "plan-changed" as const, message: tr("life.planChanged") };
+  if (!session.isCurrent(pending.ticket, false)) return planChanged;
   try {
     const { entries } = await loadRegistry(deps.registryDir);
     const env = environment(deps, entries);
@@ -454,6 +498,8 @@ export async function runForRenderer(session: LifecycleSession, deps: LifecycleD
     if (outcome.status !== "approved") return { status: "rejected" };
     // 대화상자가 열린 동안 다른 프로젝트를 골랐으면 방금 받은 승인도 쓰지 않는다(승인·계획 폐기, 실행·쓰기 0).
     if (!sameProject()) return { status: "project-changed", message: projectChangedMessage() };
+    // 대화상자가 열린 동안 사용자 범위 보기를 바꿨으면(사용자 항목) 방금 받은 승인도 쓰지 않는다(실행·쓰기·Health 0).
+    if (!session.isCurrent(pending.ticket, false)) return planChanged;
     return { status: "done", result: buildLifecycleResultView(await runLifecycleTransaction(pending.planned, outcome.approval, pending.request, env)) };
   } catch {
     return { status: "error", code: "run-failed", message: tr("life.runFailed") };

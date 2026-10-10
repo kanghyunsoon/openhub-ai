@@ -476,6 +476,110 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 Kubernetes tool conf
   }, 900_000);
 });
 
+
+/**
+ * v0.2.0 P0-3 C2 사용자 범위 실제 E2E(OPENHUB_E2E=1). 실제 npm·실제 kubernetes-mcp-server@0.0.67을 사용자 범위(Cursor·Codex 사용자 설정)로
+ * 설치하고, 실제 Health(MCP handshake)와 실제 MCP 호출(Secret 거부·ConfigMap 성공)을 확인한다. 사용자 tool config drift → includeUser
+ * 상태 → 승인한 repair(user-scope-config) → 실제 Health·MCP 호출. 127.0.0.1 합성 Kubernetes API와 가짜 token kubeconfig만 쓴다.
+ */
+describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 Kubernetes 사용자 범위 실제 E2E(설치·Health·drift·repair)", () => {
+  it("사용자 범위 설치 → 실제 Health·MCP 호출 → drift → 승인 repair → 실제 Health. 기존 사용자 설정 항목은 그대로다", async () => {
+    const api = await startFakeApi();
+    const scratch = await mkdtemp(path.join(os.tmpdir(), "openhub e2e (user) & 한글-"));
+    const npmCache = await mkdtemp(path.join(os.tmpdir(), "openhub-e2e-npmcache-"));
+    const saved = { cache: process.env["npm_config_cache"], kube: process.env["KUBECONFIG"] };
+    try {
+      const kubeconfig = path.join(scratch, "kubeconfig.yaml");
+      await writeFile(kubeconfig, kubeconfigText(api.port));
+      process.env["npm_config_cache"] = npmCache;
+      process.env["KUBECONFIG"] = kubeconfig;
+      const entries: RegistryEntry[] = await seedEntries();
+      const h = await createHarness(scratch, { entries });
+      // 사용자가 이미 가진 사용자 설정(다른 서버·다른 키). OpenHub 항목만 추가되어야 한다.
+      const cursorUser = '{\n  "theme": "dark",\n  "mcpServers": {\n    "notes": { "command": "uvx", "args": ["notes-mcp==1.0.0"] }\n  }\n}\n';
+      const codexUser = '# mine\nmodel = "o4"\n\n[mcp_servers.notes]\ncommand = "uvx"\nargs = ["notes-mcp==1.0.0"]\n';
+      await mkdir(path.join(h.homeDir, ".cursor"), { recursive: true });
+      await mkdir(path.join(h.homeDir, ".codex"), { recursive: true });
+      await writeFile(path.join(h.homeDir, ".cursor", "mcp.json"), cursorUser);
+      await writeFile(path.join(h.homeDir, ".codex", "config.toml"), codexUser);
+      const windowsNpx = platform === "windows" ? await locateWindowsNpxLauncher({ pathEnv: process.env["PATH"] ?? "", fs: { stat } }) : null;
+      const { spawner: _fake, ...rest } = h.env;
+      const env: InstallEnvironment = { ...rest, spawner: nodeExecSpawner, windowsNpx: async () => windowsNpx, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env) };
+      const request = { ...h.request("kubernetes-mcp-server", (["codex", "cursor"] as const).map((client) => ({ client, scope: "user" as const }))), platform } as const;
+      const planned = await plannedOf({ ...h, env }, request);
+      expect(planned.plan.approvalRequirements).toContain("user-scope-config");
+      expect(planned.plan.targets.map((t) => [t.client, t.scope, t.file])).toEqual([
+        ["codex", "user", "~/.codex/config.toml"],
+        ["cursor", "user", "~/.cursor/mcp.json"],
+      ]);
+      const result = await runInstallTransaction(planned, await approveAll(planned), request, env);
+      console.log("k8s user install " + JSON.stringify({ status: result.status, steps: result.steps.map((s) => s.id + ":" + s.status) }));
+      expect(result.status).toBe("succeeded");
+      expect(await recordInstallInState(planned, result, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() })).toMatchObject({ ok: true, recorded: 2 });
+      // 프로젝트 설정은 만들지 않았다. 사용자 설정의 기존 항목·키는 그대로다.
+      for (const f of [".mcp.json", ".cursor", ".codex"]) expect(existsSync(path.join(h.projectRoot, f)), f).toBe(false);
+      const cursorAfter = JSON.parse(await readFile(path.join(h.homeDir, ".cursor", "mcp.json"), "utf8")) as { theme: string; mcpServers: Record<string, { command: string; args: string[] }> };
+      expect(cursorAfter.theme).toBe("dark");
+      expect(cursorAfter.mcpServers["notes"]).toEqual({ command: "uvx", args: ["notes-mcp==1.0.0"] });
+      expect((await readFile(path.join(h.homeDir, ".codex", "config.toml"), "utf8")).startsWith(codexUser)).toBe(true);
+      const entry = cursorAfter.mcpServers["kubernetes"]!;
+      const configPath = entry.args[entry.args.indexOf("--config") + 1]!;
+      expect(configPath.startsWith(path.join(h.homeDir, ".openhub", "tool-config", "user"))).toBe(true);
+
+      // 실제 MCP 서버: 사용자 설정에 쓴 command·args 그대로(shell 없이).
+      const mcpCheck = async (label: string) => {
+        const before = api.requests.filter((r) => r.includes("/secrets")).length;
+        const s = await session(entry.command, entry.args, os.tmpdir(), CALLS);
+        const [getSecret, listSecret, getConfigMap] = s.replies;
+        for (const r of [getSecret, listSecret]) expect(JSON.stringify(r), label).toMatch(/resource not allowed/u);
+        expect(JSON.stringify(getConfigMap), label).toContain("LOG_LEVEL");
+        for (const banned of BANNED) expect(s.tools.map((t) => t.name), label).not.toContain(banned);
+        expect(s.transcript).not.toContain(TOKEN);
+        expect(s.transcript).not.toContain(SECRET_PLAIN);
+        expect(api.requests.filter((r) => r.includes("/secrets")).length, label).toBe(before);
+        return s.tools.length;
+      };
+      expect(await mcpCheck("user installed")).toBe(13);
+
+      const lifecycleEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), spawner: nodeExecSpawner, windowsNpx: async () => windowsNpx, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env) };
+      const runOp = async (operation: LifecycleRequest["operation"]) => {
+        const req: LifecycleRequest = { operation, toolId: "kubernetes-mcp-server", projectRoot: h.projectRoot, homeDir: h.homeDir, platform, includeUser: true, targets: [{ client: "cursor", scope: "user" }] };
+        const built = await planLifecycleRequest(req, lifecycleEnv);
+        if (!built.ok) throw new Error(built.code);
+        const outcome = await requestLifecycleApproval(built.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
+        if (outcome.status !== "approved") throw new Error(outcome.status);
+        return { requirements: built.planned.plan.approvalRequirements, result: await runLifecycleTransaction(built.planned, outcome.approval, req, lifecycleEnv) };
+      };
+      const health = await runOp("health");
+      console.log("k8s user health " + JSON.stringify(health.result.health));
+      expect(health.result).toMatchObject({ status: "health-checked", health: { status: "healthy", toolCount: 13 } });
+
+      // drift: 사용자 tool config에서 Secret 거부를 지운다. 사용자 범위를 볼 때만 잡히고, 보지 않으면 읽지 않는다(not-inspected).
+      await writeFile(configPath, 'read_only = true\ntoolsets = ["core"]\n');
+      const hidden = await lifecycleStatus({ projectRoot: h.projectRoot, homeDir: h.homeDir, entries, platform, includeUser: false });
+      expect(hidden.ok && hidden.items.map((i) => i.state)).toEqual(["not-inspected", "not-inspected"]);
+      const shown = await lifecycleStatus({ projectRoot: h.projectRoot, homeDir: h.homeDir, entries, platform, includeUser: true });
+      expect(shown.ok && shown.items.map((i) => i.state)).toEqual(["tool-config-drift", "tool-config-drift"]);
+      const repaired = await runOp("repair");
+      console.log("k8s user repair " + JSON.stringify({ status: repaired.result.status, health: repaired.result.health?.status, requirements: repaired.requirements }));
+      expect(repaired.requirements).toContain("user-scope-config");
+      expect(repaired.result).toMatchObject({ status: "repaired", health: { status: "healthy" } });
+      expect(await readFile(configPath, "utf8")).toBe(KUBERNETES_TOOL_CONFIG);
+      expect(await mcpCheck("user repaired")).toBe(13);
+      const after = await lifecycleStatus({ projectRoot: h.projectRoot, homeDir: h.homeDir, entries, platform, includeUser: true });
+      expect(after.ok && after.items.map((i) => i.state)).toEqual(["state-consistent", "state-consistent"]);
+    } finally {
+      if (saved.cache === undefined) delete process.env["npm_config_cache"];
+      else process.env["npm_config_cache"] = saved.cache;
+      if (saved.kube === undefined) delete process.env["KUBECONFIG"];
+      else process.env["KUBECONFIG"] = saved.kube;
+      api.close();
+      await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
+      await rm(npmCache, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }, 900_000);
+});
+
 /**
  * v0.2.0 client-launcher-invalid 실제 E2E(Windows, OPENHUB_E2E=1). 실제 node.exe·npm을 임시 위치(공백·괄호·&·한글)에 복사해
  * 그 경로로 설치한 뒤 복사본을 지워 "Node.js 이동·재설치"를 만든다. status가 잡고 Health는 막히며, 승인한 repair가 지금 Node.js로

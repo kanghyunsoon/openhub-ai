@@ -34,6 +34,9 @@
   let showUser = false;
   const userToggle = button("lifecycle-user-toggle", t("lifecycle.userToggle.show"), () => {
     showUser = !showUser;
+    // 보이던 계획(특히 사용자 항목 계획)은 이전 보기 상태의 것이다. 화면에서 지우고 늦게 온 응답도 버린다(main도 버린다).
+    current = null;
+    show([]);
     void refresh({ includeUser: showUser });
   });
   userToggle.setAttribute("aria-pressed", "false");
@@ -70,8 +73,12 @@
   }
 
   /** options: { includeUser }(토글을 바꿀 때만). 없으면 main의 지금 설정 그대로 다시 읽는다. */
+  // 새로고침 요청 번호: 늦게 돌아온 이전 응답(예: 사용자 범위 보기를 끄기 전 응답)이 최신 화면을 덮지 않게 마지막 요청만 그린다.
+  let refreshSeq = 0;
   async function refresh(options) {
+    const my = ++refreshSeq;
     const response = await window.openhub.lifecycleStatus(options);
+    if (my !== refreshSeq) return response;
     if (response.status === "no-project") {
       statusEl.textContent = t("lifecycle.prompt");
       list.replaceChildren();
@@ -320,6 +327,19 @@
       lines,
       after: after.items ? after.items.filter((i) => i.toolId === toolId).map((i) => i.state) : [],
     };
+  };
+
+  // 스모크(사용자 범위): 실제 [사용자 범위 숨기기]를 누르고, 보기가 꺼진 뒤 toolId의 사용자 항목 상태·버튼 수를 돌려준다(timer 없음).
+  window.__openhubUserScopeOff = async (toolId) => {
+    if (userToggle.getAttribute("aria-pressed") === "true") {
+      userToggle.click();
+      await waitFor(userToggle, () => (userToggle.getAttribute("aria-pressed") === "false" ? true : null));
+    }
+    const response = await window.openhub.lifecycleStatus();
+    const entries = [...list.querySelectorAll("li.entry")]
+      .filter((x) => x.dataset.toolId === toolId && x.dataset.scope === "user")
+      .map((x) => ({ state: (response.items || []).find((i) => i.id === x.dataset.entryId)?.state || "", buttons: x.querySelectorAll("button").length, warning: x.querySelector(".entry-warning")?.textContent || "" }));
+    return { pressed: userToggle.getAttribute("aria-pressed"), entries };
   };
 })();
 

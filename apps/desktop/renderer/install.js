@@ -85,7 +85,8 @@
     }
     nodes.push(targets);
     if (view.alreadyInstalled) {
-      nodes.push(el("p", "todo", t("install.noChanges")));
+      // 사용자 범위 요청이 프로젝트 설치 때문에 already-installed가 된 경우: 성공이 아니라 "변경 없음"이며 사용자 설정을 쓰지 않았다.
+      nodes.push(el("p", view.userScope ? "install-warning" : "todo", t(view.userScope ? "install.noChangesUserScope" : "install.noChanges")));
       show(nodes);
       panel.dataset.planState = "already-installed";
       return;

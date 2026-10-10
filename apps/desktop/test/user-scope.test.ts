@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { readLifecycleState, toolConfigLocation, type BackendProbeReport, type HealthRunReport } from "@openhub/core";
+import { nodeConfigFs, readLifecycleState, toolConfigLocation, type BackendProbeReport, type ConfigFs, type HealthRunReport } from "@openhub/core";
 import { setDesktopLocale } from "../src/i18n/index";
 import {
   INSTALL_OPTIONS_CHANNEL,
@@ -96,11 +96,25 @@ async function wired(o: Opts = {}) {
     },
   });
   const ls = new LifecycleSession(() => is.projectDir);
+  // Lifecycle 쪽 설정 파일 읽기를 멈췄다 풀 수 있는 문(응답 순서 제어용). 먼저 도착한 읽기 하나가 하나씩 가져간다.
+  const holds: { wait: Promise<void>; reached: () => void }[] = [];
+  const gatedFs: ConfigFs = {
+    ...nodeConfigFs,
+    readFile: async (file) => {
+      const hold = holds.shift();
+      if (hold !== undefined) {
+        hold.reached();
+        await hold.wait;
+      }
+      return nodeConfigFs.readFile(file);
+    },
+  };
   registerLifecycle(ipc, ls, {
     registryDir: REGISTRY,
     platform: "linux",
     homeDir: home,
     dialog,
+    configFs: gatedFs,
     probe: async () => PROBES,
     spawner: npm.spawner as never,
     tempBase: base,
@@ -119,6 +133,14 @@ async function wired(o: Opts = {}) {
     healthRuns,
     npm,
     recommended,
+    /** 다음 Lifecycle 설정 읽기를 멈춘다. arrived: 실제로 멈췄을 때, release: 풀 때. */
+    hold: () => {
+      let release!: () => void;
+      let reached!: () => void;
+      const arrived = new Promise<void>((r) => (reached = r));
+      holds.push({ wait: new Promise<void>((r) => (release = r)), reached });
+      return { arrived, release };
+    },
     switchProject: async (dir: string) => {
       pick = dir;
       await call(PROJECT_SCAN_CHANNEL);
@@ -240,6 +262,105 @@ describe("v0.2.0 P0-3 C2 사용자 범위 설치", () => {
   });
 });
 
+
+describe("v0.2.0 P0-3 C2 사용자 범위 계획 일관성(main IPC 직접 호출)", () => {
+  it("A. 사용자 항목 계획 중 보기를 끄면 계획이 끝나도 기억하지 않는다(superseded, 실행 불가)", async () => {
+    const w = await wired();
+    await installUser(w, "postgres-mcp", ["cursor"]);
+    await w.status({ includeUser: true });
+    const hold = w.hold();
+    const pending = w.lifePlan("health", "user:cursor:postgres");
+    await hold.arrived;
+    await w.status({ includeUser: false });
+    hold.release();
+    // 보기를 끈 시점에 따라 superseded(계획 뒤 확인) 또는 not-managed(사용자 항목 확인)다. 어느 쪽이든 기억하지 않는다.
+    expect(["superseded", "not-managed"]).toContain((await pending).status);
+    expect(await w.lifeRun("user:cursor:postgres")).toEqual({ status: "no-plan" });
+    expect(w.healthRuns).toEqual([]);
+    expect(w.dialogs).toHaveLength(1);
+  });
+
+  it("B. 사용자 항목 계획을 만든 뒤 보기를 끄면 실행 요청은 no-plan이다(다시 켜도 이전 계획은 없다)", async () => {
+    const w = await wired();
+    await installUser(w, "postgres-mcp", ["cursor"]);
+    await w.status({ includeUser: true });
+    expect((await w.lifePlan("health", "user:cursor:postgres")).status).toBe("ok");
+    await w.status({ includeUser: false });
+    await w.status({ includeUser: true });
+    expect(await w.lifeRun("user:cursor:postgres")).toEqual({ status: "no-plan" });
+    expect(w.healthRuns).toEqual([]);
+  });
+
+  it("C. 사용자 Repair 승인 대화상자가 열린 동안 보기를 끄면 승인해도 실행·쓰기·Health가 0이다", async () => {
+    let armed = false;
+    let w: Awaited<ReturnType<typeof wired>>;
+    w = await wired({ dialog: async () => (armed ? void (await w.status({ includeUser: false })) : undefined, 1) });
+    await installUser(w, K8S, ["codex"]);
+    const toolConfig = w.userToolConfig();
+    await unlink(toolConfig);
+    await w.status({ includeUser: true });
+    expect((await w.lifePlan("repair", "user:codex:kubernetes")).status).toBe("ok");
+    const before = JSON.stringify(await readLifecycleState({ homeDir: w.home }));
+    const toml = await w.read(".codex/config.toml");
+    armed = true;
+    const r = await w.lifeRun("user:codex:kubernetes");
+    expect(r).toMatchObject({ status: "plan-changed" });
+    expect(await exists(toolConfig)).toBe(false);
+    expect(await w.read(".codex/config.toml")).toBe(toml);
+    expect(JSON.stringify(await readLifecycleState({ homeDir: w.home }))).toBe(before);
+    expect(w.healthRuns).toEqual([]);
+    expect(w.npm.calls.filter((c) => c.some((a) => a.startsWith("--package=")))).toHaveLength(1);
+  });
+
+  it("D. 프로젝트 항목 계획은 사용자 범위 보기를 켜고 꺼도 그대로 실행된다", async () => {
+    const w = await wired();
+    expect((await w.plan("postgres-mcp", { clients: ["cursor"], scope: "project" })).status).toBe("ok");
+    expect((await w.install("postgres-mcp")).status).toBe("done");
+    expect((await w.lifePlan("health", "project:cursor:postgres")).status).toBe("ok");
+    await w.status({ includeUser: true });
+    await w.status({ includeUser: false });
+    const run = await w.lifeRun("project:cursor:postgres");
+    expect(run.status === "done" && run.result.status).toBe("health-checked");
+    expect(w.healthRuns).toEqual(["project:cursor"]);
+    // 프로젝트 계획 중 보기를 바꿔도 그 계획은 기억된다.
+    const hold = w.hold();
+    const pending = w.lifePlan("health", "project:cursor:postgres");
+    await hold.arrived;
+    await w.status({ includeUser: true });
+    hold.release();
+    expect((await pending).status).toBe("ok");
+    const again = await w.lifeRun("project:cursor:postgres");
+    expect(again.status === "done" && again.result.status).toBe("health-checked");
+  });
+
+  it("E. 보기를 유지하면 사용자 항목 Health가 정상 실행된다(같은 규칙: 대화상자 전후 재검사 통과)", async () => {
+    const w = await wired();
+    await installUser(w, "postgres-mcp", ["cursor"]);
+    await w.status({ includeUser: true });
+    expect((await w.lifePlan("health", "user:cursor:postgres")).status).toBe("ok");
+    const r = await w.lifeRun("user:cursor:postgres");
+    expect(r.status === "done" && r.result.status).toBe("health-checked");
+  });
+
+  it("F. 계획을 만든 뒤 프로젝트를 바꾸면 사용자·프로젝트 항목 모두 이전 계획을 실행할 수 없다", async () => {
+    const w = await wired();
+    await installUser(w, "postgres-mcp", ["cursor"]);
+    await w.status({ includeUser: true });
+    expect((await w.lifePlan("health", "user:cursor:postgres")).status).toBe("ok");
+    await w.switchProject(w.projectB);
+    expect((await w.lifeRun("user:cursor:postgres")).status).toBe("project-changed");
+    expect(w.healthRuns).toEqual([]);
+    // 계획 중 프로젝트가 바뀌면 그 계획은 기억하지 않는다.
+    const hold = w.hold();
+    const pending = w.lifePlan("health", "user:cursor:postgres");
+    await hold.arrived;
+    await w.switchProject(w.projectA);
+    hold.release();
+    expect(await pending).toEqual({ status: "superseded" });
+    expect(await w.lifeRun("user:cursor:postgres")).toEqual({ status: "no-plan" });
+  });
+});
+
 describe("v0.2.0 P0-3 C2 사용자 범위 Lifecycle(INSTALLED)", () => {
   it("기본 상태 조회는 사용자 설정을 읽지 않는다(not-inspected, 실행 버튼 없음). user 항목 계획은 사용자 범위 보기를 켜야만 된다", async () => {
     const w = await wired();
@@ -297,6 +418,13 @@ describe("v0.2.0 P0-3 C2 사용자 범위 Lifecycle(INSTALLED)", () => {
     expect(w.healthRuns).toEqual(["user:cursor"]);
     const again = await w.plan("postgres-mcp", { clients: ["codex"], scope: "user" });
     expect(again.status === "ok" && [again.view.alreadyInstalled, again.view.executable]).toEqual([true, false]);
+    // 성공이 아니라 변경 없음(no-op)이고 사용자 Codex 설정·Version State에 아무것도 기록하지 않는다.
+    const stateBefore = JSON.stringify(await readLifecycleState({ homeDir: w.home }));
+    const noop = await w.install("postgres-mcp");
+    expect(noop.status === "done" && noop.result.status).toBe("no-op");
+    expect(await w.read(".codex/config.toml")).toBe(CODEX_USER);
+    expect(JSON.stringify(await readLifecycleState({ homeDir: w.home }))).toBe(stateBefore);
+    expect(await readFile(path.join(ROOT, "apps/desktop/renderer/install.js"), "utf8")).toContain('t(view.userScope ? "install.noChangesUserScope" : "install.noChanges")');
   });
 
   it("사용자 범위 tool config 손상 → Repair Plan(user-scope-config 승인) → 승인 → 복구 → Health. 거절·Health 실패는 Version State·설정을 바꾸지 않는다", async () => {
