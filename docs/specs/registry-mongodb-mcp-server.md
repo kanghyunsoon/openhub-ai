@@ -57,7 +57,7 @@ This is enforcement inside the MCP server, not a database permission. A read-onl
 | Interrupted Prepare (20 s) | only this attempt's entry cleaned, retry installs, reuse passes file checks, a damaged entry is kept (`NPX_CACHE_DAMAGED`) and installs after manual removal. |
 | Two concurrent Prepares plus an external `npx` | all finish; the final entry passes the file checks. |
 | Windows E2E (`npx-prepare.e2e.test.ts` with the MongoDB command, 3 tests) | 3/3 pass, 958 s in total (several full downloads). |
-| Linux | `registry-remote.yml` sandbox job runs the same `sandbox.e2e.test.ts` case (result in the pull request). |
+| Linux (`registry-remote.yml` sandbox job, run 38026299875, same `sandbox.e2e.test.ts` case) | Prepare + three client configs 33 s; Health `healthy` in 1.6 s, 20 tools; read-only refusals, unchanged database and credential checks pass. The job uses `continue-on-error`; the test-level log was checked. |
 
 ## Risks kept (not blocked by OpenHub)
 
