@@ -57,6 +57,8 @@ export interface InstallEnvironment {
   windowsNpx?: () => Promise<WindowsNpxLauncher | null>;
   /** npx Prepare timeout 때 process tree를 끝낸다. 기본 createTreeKiller. */
   killTree?: TreeKiller;
+  /** npx Prepare의 npm 자식 process 환경(보통 npmChildEnv(process.env), CLI·Desktop이 넘긴다). 없으면 OS 기본 상속. */
+  npmChildEnv?: () => Record<string, string>;
   /** 확인 단계(TASK-034). 없으면 Prepared·Configured만 확인하고 Detected는 skipped다. */
   verify?: InstallVerifier;
   trace?: (phase: TransactionPhase) => void;
@@ -97,7 +99,7 @@ async function npxContextFor(plan: VerifiedPlan["plan"], request: InstallRequest
   if (!plan.steps.some((s) => s.kind === "run" && s.executable === "npx") || plan.launch === null) return {};
   const platform = plan.launch.platform;
   const windowsNpx = platform === "windows" && env.windowsNpx !== undefined ? await env.windowsNpx() : null;
-  return { npx: { platform, windowsNpx, killTree: env.killTree ?? createTreeKiller({ cwd: request.projectRoot }) } };
+  return { npx: { platform, windowsNpx, killTree: env.killTree ?? createTreeKiller({ cwd: request.projectRoot }), ...(env.npmChildEnv === undefined ? {} : { childEnv: env.npmChildEnv() }) } };
 }
 
 function finalize(result: InstallResultV1): InstallResultV1 {

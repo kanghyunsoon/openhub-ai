@@ -8,6 +8,7 @@ import {
   installationStatusLabel,
   loadRegistry,
   locateWindowsNpxLauncher,
+  npmChildEnv,
   planInstall,
   probeBackends,
   recordInstallInState,
@@ -210,6 +211,8 @@ function environment(deps: InstallDeps, entries: Awaited<ReturnType<typeof loadR
     probe: deps.probe ?? (() => probeBackends()),
     verify: verifyInstallation,
     // npx Prepare(정확한 버전 npx 패키지)는 Windows에서 cmd 없이 node.exe + npx-cli.js로 실행한다.
+    // npx Prepare의 npm 자식 process에는 허용 목록 환경만 넘긴다(API key·token·클라우드 자격증명 제외).
+    npmChildEnv: () => npmChildEnv(process.env),
     windowsNpx: async () => {
       const host = defaultHostEnvironment();
       return locateWindowsNpxLauncher({ pathEnv: host.pathEnv, fs: host.fs });

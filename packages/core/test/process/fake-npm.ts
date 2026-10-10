@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { npxCacheKey, parseNpmSpec, type ExecSpawner } from "../../src/index";
+import { npxCacheKey, parseNpmSpec, type NpxSpawner } from "../../src/index";
 
 /**
  * npm을 흉내 내는 테스트용 spawner(npx Prepare 단위·트랜잭션 테스트). 실제 npm·네트워크를 쓰지 않는다.
@@ -14,16 +14,20 @@ import { npxCacheKey, parseNpmSpec, type ExecSpawner } from "../../src/index";
 export interface FakeNpmOptions {
   cacheRoot: string;
   exitCode?: number;
-  prepare?: "ok" | "fail" | "incomplete" | "hang" | "wrong-version";
+  /** hang-unkillable: kill해도 끝나지 않는다(종료 확인 실패 경로). */
+  prepare?: "ok" | "fail" | "incomplete" | "hang" | "hang-unkillable" | "wrong-version";
   configStdout?: string;
 }
 
-export function fakeNpmSpawner(o: FakeNpmOptions): { spawner: ExecSpawner; calls: string[][] } {
+export function fakeNpmSpawner(o: FakeNpmOptions): { spawner: NpxSpawner; calls: string[][]; envs: (Record<string, string> | undefined)[] } {
   const calls: string[][] = [];
-  const spawner: ExecSpawner = (exe, args) => {
+  const envs: (Record<string, string> | undefined)[] = [];
+  const spawner: NpxSpawner = (exe, args, options) => {
     calls.push([exe, ...args]);
+    envs.push(options?.env);
     const stdout = new EventEmitter();
-    const child = Object.assign(new EventEmitter(), { stdout, stderr: new EventEmitter(), pid: 4242, kill: () => (queueMicrotask(() => child.emit("close", null, "SIGKILL")), true) });
+    const unkillable = o.prepare === "hang-unkillable";
+    const child = Object.assign(new EventEmitter(), { stdout, stderr: new EventEmitter(), pid: 4242, kill: () => (unkillable ? undefined : queueMicrotask(() => child.emit("close", null, "SIGKILL")), true) });
     const tail = args.slice(-3).join(" ");
     const pkgFlag = args.find((a) => a.startsWith("--package="));
     queueMicrotask(() => {
@@ -41,7 +45,7 @@ export function fakeNpmSpawner(o: FakeNpmOptions): { spawner: ExecSpawner; calls
         mkdirSync(path.join(dir, "node_modules", ...parsed.name.split("/")), { recursive: true });
         writeFileSync(path.join(dir, "package.json"), JSON.stringify({ dependencies: { [parsed.name]: parsed.version }, _npx: { packages: [spec] } }));
         writeFileSync(path.join(dir, "node_modules", ...parsed.name.split("/"), "package.json"), JSON.stringify({ name: parsed.name, version: mode === "wrong-version" ? "0.0.0" : parsed.version }));
-        if (mode === "hang") return; // 닫히지 않는다(timeout 경로). kill()이 닫는다.
+        if (mode === "hang" || mode === "hang-unkillable") return; // 닫히지 않는다(timeout 경로). hang은 kill()이 닫는다.
         if (mode !== "incomplete") writeFileSync(path.join(dir, "node_modules", ".package-lock.json"), "{}");
         child.emit("close", 0, null);
         return;
@@ -50,7 +54,7 @@ export function fakeNpmSpawner(o: FakeNpmOptions): { spawner: ExecSpawner; calls
     });
     return child as never;
   };
-  return { spawner, calls };
+  return { spawner, calls, envs };
 }
 
 /** npx Prepare 명령 두 개(cache 위치 확인, 내려받기)인지 판별한다. */

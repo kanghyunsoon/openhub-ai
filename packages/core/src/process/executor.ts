@@ -7,7 +7,7 @@ import { isVerifiedPlan, type VerifiedPlan } from "../installer/approval-v1";
 import type { ConfigPatchStep, RunStep } from "../installer/plan";
 import { isVerifiedLifecyclePlan, type VerifiedLifecyclePlan } from "../lifecycle/plan";
 import { redactSensitive } from "../recommendation/index";
-import { prepareNpxPackage, type NpxPrepareContext } from "./npx-prepare";
+import { nodeNpxSpawner, prepareNpxPackage, type NpxPrepareContext } from "./npx-prepare";
 
 /**
  * 공통 Process Executor(TASK-031, D-012). 프로세스를 실행하는 곳은 여기(와 read-only probe)뿐이다.
@@ -33,6 +33,7 @@ export interface ExecChild {
   readonly stdout: DataStream | null;
   readonly stderr: DataStream | null;
   on(event: "close", listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
+  on(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
   on(event: "error", listener: (error: Error) => void): unknown;
   kill(signal?: NodeJS.Signals): boolean;
 }
@@ -153,7 +154,8 @@ async function resolveCwd(kind: RunStep["cwd"], options: ExecutorOptions): Promi
 async function runAnyStep(step: RunStep, cwd: string, spawner: ExecSpawner, options: ExecutorOptions): Promise<StepOutcome> {
   if (step.executable !== "npx") return runStep(step, cwd, spawner);
   if (options.npx === undefined) return { id: step.id, status: "failed", code: "NPX_PREPARE_UNAVAILABLE", excerpt: "npx 준비 단계를 실행할 문맥(플랫폼·실행 경로)이 없습니다" };
-  const outcome = await prepareNpxPackage(step.args, cwd, { ...options.npx, spawner, timeoutMs: step.timeoutMs });
+  // 기본 spawner이면 npx Prepare 전용 spawner(npm 자식 환경 허용 목록 적용)를 쓴다. 주입된 spawner(테스트·smoke)는 그대로 쓴다.
+  const outcome = await prepareNpxPackage(step.args, cwd, { ...options.npx, spawner: spawner === nodeExecSpawner ? nodeNpxSpawner : spawner, timeoutMs: step.timeoutMs });
   return { ...outcome, id: step.id, ...(outcome.excerpt === undefined ? {} : { excerpt: redactExcerpt(outcome.excerpt) }) };
 }
 

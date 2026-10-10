@@ -66,6 +66,8 @@ export interface LifecycleEnvironment {
   killTree?: TreeKiller;
   /** Windows npx Health 실행 경로(probe 단계에서 찾는다). */
   windowsNpx?: () => Promise<WindowsNpxLauncher | null>;
+  /** npx Prepare의 npm 자식 process 환경(보통 npmChildEnv(process.env), CLI·Desktop이 넘긴다). 없으면 OS 기본 상속. */
+  npmChildEnv?: () => Record<string, string>;
   /** Health 실행기(테스트 주입용). 기본 runHealthCheck. */
   runHealth?: (verified: VerifiedLifecyclePlan, options: HealthRunOptions) => Promise<HealthRunReport>;
   /** operation별 Plan 생성기 교체(테스트 주입용). 기본은 planLifecycle(update·rollback·health). */
@@ -211,7 +213,9 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
     projectRoot: request.projectRoot,
     ...(env.spawner === undefined ? {} : { spawner: env.spawner }),
     ...(env.isolatedDir === undefined ? {} : { isolatedDir: env.isolatedDir }),
-    ...(hasNpxPrepare ? { npx: { platform: plan.platform, windowsNpx, killTree: env.killTree ?? createTreeKiller({ cwd: env.tempBase }) } } : {}),
+    ...(hasNpxPrepare
+      ? { npx: { platform: plan.platform, windowsNpx, killTree: env.killTree ?? createTreeKiller({ cwd: env.tempBase }), ...(env.npmChildEnv === undefined ? {} : { childEnv: env.npmChildEnv() }) } }
+      : {}),
   });
   if (!prep.ok) return finalize({ planned: verified, status: "approval-required", code: prep.code, retryable: true });
   steps.push(...prep.steps);
