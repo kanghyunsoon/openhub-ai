@@ -5,6 +5,9 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   KUBERNETES_TOOL_CONFIG,
   REVIEWED_TOOL_CONFIGS,
+  TOOL_CONFIG_CLIENTS,
+  TOOL_CONFIG_PLATFORMS,
+  clientVerificationLevel,
   commitLifecycleState,
   containsAbsolutePath,
   fastManifestIssues,
@@ -17,6 +20,8 @@ import {
   runLifecycleTransaction,
   toolConfigDigest,
   toolConfigLocation,
+  toolConfigVerificationGaps,
+  toolConfigVerificationNotices,
   projectKeyFromRealpath,
   type LifecycleEnvironment,
   type LifecycleRequest,
@@ -44,18 +49,55 @@ describe("Registry Kubernetes Manifest", () => {
     expect(fastManifestIssues(k8s)).toEqual([]);
   });
 
-  it("설치 계획은 Client·플랫폼 검증 수준을 구분하고 RBAC·로그 위험 고지를 유지한다", async () => {
+  it("설치 계획은 OS × Client 검증 수준을 구분하고(Windows 근거를 다른 OS에 적용하지 않음) RBAC·로그 위험 고지를 유지한다", async () => {
     const h = await createHarness(scratch, { entries });
+    const expected = {
+      // Windows: Claude Code·Codex 실제 실행 확인(launch-verified) → 경고 없음. Cursor 미검증.
+      windows: ["Cursor (Windows): 이 OS에서 이 Client의 실제 실행은 OpenHub가 검증하지 않았습니다."],
+      // Linux: 같은 실제 Client 검사를 Linux runner에서 확인(Claude Code·Codex) → Cursor만 경고.
+      linux: ["Cursor (Linux): 이 OS에서 이 Client의 실제 실행은 OpenHub가 검증하지 않았습니다."],
+      // macOS: 플랫폼 미검증 → 세 Client 경고 + 플랫폼 경고.
+      macos: [
+        ...["Claude Code (macOS)", "Codex (macOS)", "Cursor (macOS)"].map((who) => who + ": 이 OS에서 이 Client의 실제 실행은 OpenHub가 검증하지 않았습니다."),
+        "macOS에서는 OpenHub가 이 도구의 설치·실행을 실제로 검증하지 않았습니다.",
+      ],
+    };
     for (const platform of ["linux", "windows", "macos"] as const) {
       const { plan } = await plannedOf(h, { ...h.request("kubernetes-mcp-server", CLIENTS), platform });
       const notices = plan.warnings.filter((w) => w.code === "client-launch-unverified" || w.code === "platform-unverified").map((w) => w.message);
-      // Codex: 같은 실행 명령으로 시작·호출은 확인(spec-launch-verified), 프로젝트 파일에서 직접 시작은 미검증 → 경고는 남는다.
-      expect(notices.some((m) => m.startsWith("Codex: OpenHub가 쓰는 실행 명령으로") && m.includes("검증하지 않았습니다"))).toBe(true);
-      expect(notices.some((m) => m.startsWith("Cursor:"))).toBe(true);
-      expect(notices.some((m) => m.startsWith("Claude Code"))).toBe(false);
-      expect(notices.some((m) => m.startsWith("macos"))).toBe(platform === "macos");
+      expect(notices, platform).toEqual(expected[platform]);
+      expect(plan.warnings.filter((w) => w.code === "platform-unverified").length, platform).toBe(platform === "macos" ? 1 : 0);
       expect(plan.warnings.find((w) => w.code === "tool-config")?.message).toMatch(/Pod·Node 로그.*RBAC/u);
     }
+    // 선택하지 않은 Client는 경고가 없다(Windows Claude Code만 → 경고 0).
+    const { plan: one } = await plannedOf(h, { ...h.request("kubernetes-mcp-server", [{ client: "claude-code", scope: "project" }]), platform: "windows" });
+    expect(one.warnings.filter((w) => w.code === "client-launch-unverified")).toEqual([]);
+  });
+
+  it("검증 수준 표: 검증하지 않은 OS에는 검증된 Client가 없고, Client × OS 수준과 경고가 같은 구조에서 나온다", () => {
+    const reviewed = REVIEWED_TOOL_CONFIGS["kubernetes-mcp-server"]!;
+    for (const platform of TOOL_CONFIG_PLATFORMS) {
+      for (const client of TOOL_CONFIG_CLIENTS) {
+        if (!reviewed.platformVerified[platform]) expect(reviewed.clientVerification[platform][client], platform + " " + client).toBe("not-verified");
+      }
+    }
+    const matrix = Object.fromEntries(TOOL_CONFIG_PLATFORMS.map((p) => [p, Object.fromEntries(TOOL_CONFIG_CLIENTS.map((c) => [c, clientVerificationLevel("kubernetes-mcp-server", c, p)]))]));
+    expect(matrix).toEqual({
+      windows: { "claude-code": "launch-verified", codex: "launch-verified", cursor: "not-verified" },
+      linux: { "claude-code": "launch-verified", codex: "launch-verified", cursor: "not-verified" },
+      macos: { "claude-code": "platform-unverified", codex: "platform-unverified", cursor: "platform-unverified" },
+    });
+    expect(clientVerificationLevel("not-reviewed", "codex", "windows")).toBeNull();
+    for (const platform of TOOL_CONFIG_PLATFORMS) {
+      const gaps = toolConfigVerificationGaps("kubernetes-mcp-server", TOOL_CONFIG_CLIENTS, platform);
+      const notices = toolConfigVerificationNotices("kubernetes-mcp-server", TOOL_CONFIG_CLIENTS, platform);
+      expect(notices.map((n) => n.code)).toEqual(gaps.map((g) => g.code));
+      // 경고가 없는 Client는 그 OS에서 launch-verified인 Client뿐이다.
+      const warned = new Set(gaps.flatMap((g) => (g.client === null ? [] : [g.client])));
+      for (const client of TOOL_CONFIG_CLIENTS) expect(warned.has(client), platform + " " + client).toBe(clientVerificationLevel("kubernetes-mcp-server", client, platform) !== "launch-verified");
+    }
+    // 같은 Client를 두 번 골라도 경고는 한 번이다.
+    expect(toolConfigVerificationGaps("kubernetes-mcp-server", ["cursor", "cursor"], "windows")).toHaveLength(1);
   });
 });
 const CLIENTS = (["claude-code", "codex", "cursor"] as const).map((client) => ({ client, scope: "project" as const }));
