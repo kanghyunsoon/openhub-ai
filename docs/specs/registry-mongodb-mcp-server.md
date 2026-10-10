@@ -67,7 +67,7 @@ This is enforcement inside the MCP server, not a database permission. A read-onl
 | --- | --- |
 | Client-style first start from an empty npm cache, no Prepare | 153 s until `initialize` answered (OpenHub Health limit is 20 s: `timeout`, and an interrupted install leaves a broken entry; see [npx-prepare.md](npx-prepare.md)). |
 | With npx Prepare, real Registry Manifest (Windows, real npm, isolated npm cache; `sandbox.e2e.test.ts`) | approval → Prepare + three client configs 384 s (this run; 155 s in an earlier run, download time varies; Prepare limit 600 s) → Version State → approved Health `healthy` in 6.7 s, 12 tools (Health limit 20 s unchanged). The same test then runs the read-only, disabled-tool, credential and telemetry checks above against the disposable database. |
-| Linux (`registry-remote.yml` sandbox job, same `sandbox.e2e.test.ts` case) | LINUX_RESULT |
+| Linux (`registry-remote.yml` sandbox job, run 38031942692, same `sandbox.e2e.test.ts` case) | Prepare + three client configs 26 s; Health `healthy` in 0.9 s, 12 tools; disabled-tool, read-only, unchanged-data, credential and telemetry checks pass. The job uses `continue-on-error`; the test-level log was checked. |
 | npx Prepare E2E with this package (`npx-prepare.e2e.test.ts`, Windows, earlier command without `--disabledTools`; Prepare only uses the package spec, so the added flag does not change it) | empty cache, interrupted Prepare (20 s) + retry, damaged entry kept (`NPX_CACHE_DAMAGED`) + manual removal, two concurrent Prepares plus an external `npx`: 3/3 pass, 958 s in total. |
 
 ## Risks kept (not blocked by OpenHub)
