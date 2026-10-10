@@ -439,6 +439,8 @@ function substituteArtifact(backend: InstallBackend, args: readonly string[], fr
 }
 
 const argsOfClientSpec = (spec: { command: string; args: readonly string[] }) => (spec.command === "cmd" ? spec.args.slice(3) : spec.command === "node" ? spec.args.slice(1) : [...spec.args]);
+/** tool config Tool의 launch 인자가 검토된 명령(버전·플래그) 중 하나인가. */
+const reviewedLaunch = (toolId: string, args: readonly string[]) => REVIEWED_TOOL_CONFIGS[toolId]?.commands.includes(["npx", ...args].join(" ")) === true;
 /** launch 인자 검사. {toolConfig} token은 검토된 placeholder로 보고, 그 Tool은 Windows cmd 래퍼 규칙을 쓰지 않는다(직접 실행). */
 const launchTokensOk = (backend: "npx" | "uvx", args: readonly string[], platform: RecommendPlatform) => {
   const usesToolConfig = args.includes(TOOL_CONFIG_PLACEHOLDER);
@@ -608,6 +610,9 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
           return { ok: false, code: "MANIFEST_COMMAND_REJECTED", message: "resolved artifact를 launch 인자로 안전하게 표현할 수 없습니다" };
         }
         target = { requested, identity: resolved.identity, launchArgs: args };
+        if (usesToolConfig && !reviewedLaunch(options.toolId, args)) {
+          blockers.push({ code: "TOOL_CONFIG_VERSION_UNREVIEWED", message: resolved.identity.spec + "은(는) OpenHub가 tool config 정책을 검토한 버전이 아닙니다. 검토된 버전으로만 바꿀 수 있습니다" });
+        }
       }
     }
   } else if (options.operation === "rollback") {
@@ -627,6 +632,7 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
     if (usesToolConfig && prev.toolConfig !== undefined && toolConfigDigest(manifest.toolConfig!.content) !== prev.toolConfig.digest) {
       blockers.push({ code: "ROLLBACK_TARGET_INVALID", message: "직전 버전의 tool config 내용을 현재 검토된 정책으로 복원할 수 없습니다" });
     }
+    if (usesToolConfig && !reviewedLaunch(options.toolId, args)) blockers.push({ code: "TOOL_CONFIG_VERSION_UNREVIEWED", message: "직전 버전은 OpenHub가 tool config 정책을 검토한 실행 명령이 아닙니다" });
     target = { requested: prev.artifact.requested, identity: prev.artifact.resolved, launchArgs: args };
   }
 

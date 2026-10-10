@@ -319,10 +319,11 @@ async function restoreBytes(loc: ToolConfigLocation, original: Buffer, fs: ToolC
  * 직접 실행(shell 없음) 인자로 넣을 수 있는 절대 경로인가. tool config Tool은 Windows에서도 cmd 래퍼를 쓰지 않으므로
  * 공백·괄호·&·%·한글 등은 그대로 전달된다(재해석 없음). 따옴표·제어 문자·상위 경로·상대 경로·UNC는 거부한다.
  */
-export function isDirectExecPath(file: string, platform: "windows" | "macos" | "linux"): boolean {
+export function isDirectExecPath(file: string, _platform: "windows" | "macos" | "linux"): boolean {
   if (/["\u0000-\u001f\u007f]/u.test(file) || file.split(/[\\/]/u).includes("..")) return false;
-  if (platform !== "windows") return file.startsWith("/") && !file.startsWith("//");
-  return /^[A-Za-z]:\\/u.test(file) && !/[*?<>|]/u.test(file) && !file.slice(2).includes(":");
+  // 경로 자체의 형식으로 판단한다(드라이브 문자 절대 경로 또는 POSIX 절대 경로). UNC·상대 경로는 거부한다.
+  if (/^[A-Za-z]:\\/u.test(file)) return !/[*?<>|]/u.test(file) && !file.slice(2).includes(":");
+  return file.startsWith("/") && !file.startsWith("//");
 }
 
 /**

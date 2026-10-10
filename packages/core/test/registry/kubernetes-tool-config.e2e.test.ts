@@ -1,33 +1,43 @@
 import http from "node:http";
 import os from "node:os";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { parse as parseToml } from "smol-toml";
 import { describe, expect, it } from "vitest";
 import {
-  TOOL_CONFIG_PLACEHOLDER,
+  KUBERNETES_TOOL_CONFIG,
+  REVIEWED_TOOL_CONFIGS,
   createTreeKiller,
-  inspectToolConfig,
+  lifecycleStatus,
   locateWindowsNpxLauncher,
-  npmToolArgv,
-  substituteToolConfig,
-  toolConfigDigest,
-  toolConfigLocation,
-  writeToolConfig,
+  manifestSchema,
+  nodeExecSpawner,
+  npmChildEnv,
+  planLifecycle,
+  recordInstallInState,
+  requestLifecycleApproval,
+  runInstallTransaction,
+  runLifecycleTransaction,
+  type InstallEnvironment,
+  type LifecycleEnvironment,
+  type LifecycleRequest,
+  type RegistryEntry,
 } from "../../src/index";
+import { approveAll, createHarness, plannedOf } from "../installer/harness";
+import { seedEntries } from "../recommendation/helpers";
 
 /**
- * v0.2.0 Kubernetes tool config 실제 E2E(OPENHUB_E2E=1에서만). 실제 kubernetes-mcp-server(고정 버전)를 npx로 실행한다.
- * 합성 Kubernetes API(127.0.0.1, 가짜 Secret 1개·ConfigMap 1개)와 가짜 bearer token kubeconfig만 쓴다. 실제 클러스터·자격증명 없음.
- * npm cache·home은 임시 디렉터리다. OpenHub tool-config 모듈로 설정 파일을 쓰고, Health와 같은 argv(shell 없음)로,
- * Windows에서는 Client 설정과 같은 cmd /d /c npx 경로로도 실행한다(D-016: OpenHub 자신은 cmd를 실행하지 않는다. 여기서는 Client를 흉내 낸다).
+ * v0.2.0 Kubernetes tool config 실제 E2E(OPENHUB_E2E=1에서만). 승인된 InstallPlan·LifecyclePlan을 끝까지 실행한다.
+ * 실제 npm(npx Prepare, 임시 npm cache)과 실제 kubernetes-mcp-server@0.0.67을 쓴다. 클러스터·자격증명은 쓰지 않는다:
+ * 127.0.0.1 합성 Kubernetes API(가짜 Secret·ConfigMap, Secret 요청 카운터)와 가짜 bearer token kubeconfig만 쓴다.
+ * home 경로에 공백·괄호·&·한글을 넣는다. Kubernetes Manifest는 Registry에 등록하지 않고 이 테스트 안에서만 만든다(PR #7).
+ * MCP 서버는 각 Client 설정 파일에 OpenHub가 실제로 쓴 command·args를 그대로(shell 없이) 실행한다.
  */
-const VERSION = process.env["OPENHUB_E2E_K8S_VERSION"] ?? "0.0.67";
 const platform = process.platform === "win32" ? "windows" : "linux";
 const TOKEN = ["openhub", "e2e", "fake", "bearer", "9931"].join("-");
 const SECRET_PLAIN = ["openhub", "e2e", "fake", "secret", "value"].join("-");
 const SECRET_B64 = Buffer.from(SECRET_PLAIN).toString("base64");
-const TOML = 'read_only = true\ntoolsets = ["core"]\n\n[[denied_resources]]\ngroup = ""\nversion = "v1"\nkind = "Secret"\n';
 const meta = (name: string) => ({ name, namespace: "default", uid: name + "-uid", resourceVersion: "1", creationTimestamp: "2026-10-01T00:00:00Z" });
 const secret = { apiVersion: "v1", kind: "Secret", metadata: meta("demo"), type: "Opaque", data: { password: SECRET_B64 } };
 const configMap = { apiVersion: "v1", kind: "ConfigMap", metadata: meta("app-config"), data: { LOG_LEVEL: "info" } };
@@ -53,9 +63,9 @@ const ROUTES: Record<string, unknown> = {
 type Tool = { name: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } };
 type Reply = { error?: { message: string }; result?: { isError?: boolean } };
 
-async function session(argv: string[], cwd: string, env: NodeJS.ProcessEnv, calls: { name: string; arguments: Record<string, unknown> }[]): Promise<{ tools: Tool[]; replies: Reply[]; transcript: string }> {
+async function session(command: string, args: string[], cwd: string, calls: { name: string; arguments: Record<string, unknown> }[]): Promise<{ tools: Tool[]; replies: Reply[]; transcript: string }> {
   const windows = process.platform === "win32";
-  const child = spawn(argv[0]!, argv.slice(1), { cwd, env, shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], detached: !windows });
+  const child = spawn(command, args, { cwd, shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], detached: !windows });
   const closed = new Promise<void>((resolve) => child.on("close", () => resolve()));
   let buffer = "";
   let transcript = "";
@@ -80,7 +90,7 @@ async function session(argv: string[], cwd: string, env: NodeJS.ProcessEnv, call
   const request = (method: string, params: unknown) =>
     new Promise<Record<string, unknown>>((resolve, reject) => {
       const k = ++id;
-      const timer = setTimeout(() => reject(new Error("timeout " + method)), 300_000);
+      const timer = setTimeout(() => reject(new Error("timeout " + method + " " + transcript.slice(-300))), 120_000);
       waiters.set(k, (m) => (clearTimeout(timer), resolve(m)));
       child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: k, method, params }) + "\n");
     });
@@ -102,10 +112,14 @@ const CALLS = [
   { name: "resources_list", arguments: { apiVersion: "v1", kind: "Secret", namespace: "default" } },
   { name: "resources_get", arguments: { apiVersion: "v1", kind: "ConfigMap", namespace: "default", name: "app-config" } },
   { name: "configuration_view", arguments: { minified: false } },
+  { name: "resources_delete", arguments: { apiVersion: "v1", kind: "ConfigMap", namespace: "default", name: "app-config" } },
+  { name: "resources_create_or_update", arguments: { resource: "{}" } },
+  { name: "pods_exec", arguments: { namespace: "default", name: "x", command: ["id"] } },
 ];
+const BANNED = ["configuration_view", "pods_delete", "pods_exec", "pods_run", "resources_create_or_update", "resources_delete", "resources_scale"];
 
-describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 Kubernetes tool config 실제 E2E", () => {
-  it("OpenHub가 쓴 denied_resources 설정으로 Secret get·list가 거부되고 ConfigMap은 읽히며 token·Secret 값이 나오지 않는다(설정 없는 대조군은 Secret이 읽힌다)", async () => {
+describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 Kubernetes tool config 실제 E2E(승인된 설치·Health·drift·repair)", () => {
+  it("승인된 Plan으로 설치한 Client 설정 그대로 실행하면 Secret get·list가 거부되고 ConfigMap은 읽히며, drift를 repair 뒤에도 같다", async () => {
     const requests: string[] = [];
     const api = http.createServer((req, res) => {
       const p = (req.url ?? "").split("?")[0]!;
@@ -116,57 +130,147 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 Kubernetes tool conf
     });
     await new Promise<void>((r) => api.listen(0, "127.0.0.1", () => r()));
     const port = (api.address() as { port: number }).port;
-    const scratch = await mkdtemp(path.join(os.tmpdir(), "openhub-e2e-k8s-"));
+    // 공백·괄호·&·한글이 있는 경로(home·project 모두 이 아래에 생긴다).
+    const scratch = await mkdtemp(path.join(os.tmpdir(), "openhub e2e (k8s) & 한글-"));
     const npmCache = await mkdtemp(path.join(os.tmpdir(), "openhub-e2e-npmcache-"));
+    const saved = { cache: process.env["npm_config_cache"], kube: process.env["KUBECONFIG"] };
     try {
       const kubeconfig = path.join(scratch, "kubeconfig.yaml");
       await writeFile(kubeconfig, "apiVersion: v1\nkind: Config\nclusters:\n- name: fake\n  cluster: { server: 'http://127.0.0.1:" + String(port) + "' }\ncontexts:\n- name: fake\n  context: { cluster: fake, user: fake, namespace: default }\ncurrent-context: fake\nusers:\n- name: fake\n  user: { token: " + TOKEN + " }\n");
-      const env = { ...process.env, KUBECONFIG: kubeconfig, npm_config_cache: npmCache };
-      const loc = toolConfigLocation({ homeDir: scratch, scope: "user", toolId: "kubernetes-mcp-server" })!;
-      expect(await writeToolConfig(loc, TOML, { state: "absent" })).toMatchObject({ kind: "created" });
+      process.env["npm_config_cache"] = npmCache;
+      process.env["KUBECONFIG"] = kubeconfig;
+
+      const seed = await seedEntries();
+      const k8s = manifestSchema.parse({
+        name: "kubernetes-mcp-server",
+        repository: { github: "containers/kubernetes-mcp-server" },
+        category: ["mcp", "automation"],
+        capabilities: ["kubernetes-operations"],
+        targets: ["claude-code", "codex", "cursor"],
+        platform: { windows: true, macos: true, linux: true },
+        install: { preferredAdapter: "npx", options: { command: REVIEWED_TOOL_CONFIGS["kubernetes-mcp-server"]!.commands[0] } },
+        healthCheck: { type: "mcp-handshake" },
+        update: { source: "npm" },
+        rollback: { supported: true },
+        verification: "community",
+        recommendation: { appliesTo: { stacks: ["kubernetes"] }, identity: { mcpServerNames: ["kubernetes"] }, source: { type: "dedicated" } },
+        toolConfig: { format: "toml", content: KUBERNETES_TOOL_CONFIG },
+      });
+      const entries: RegistryEntry[] = [...seed, { ...seed[0]!, manifest: k8s }];
+      const h = await createHarness(scratch, { entries });
       const windowsNpx = platform === "windows" ? await locateWindowsNpxLauncher({ pathEnv: process.env["PATH"] ?? "", fs: { stat } }) : null;
-      const base = ["-y", "kubernetes-mcp-server@" + VERSION, "--read-only", "--toolsets", "core"];
-      const sub = substituteToolConfig([...base, "--config", TOOL_CONFIG_PLACEHOLDER], loc.file, platform);
-      if (!sub.ok) throw new Error(sub.message);
-      const healthArgv = npmToolArgv("npx", sub.args, platform, windowsNpx);
-      const controlArgv = npmToolArgv("npx", base, platform, windowsNpx);
-      if (healthArgv === null || controlArgv === null) throw new Error("launcher-not-found");
+      const { spawner: _fake, ...rest } = h.env;
+      const env: InstallEnvironment = { ...rest, spawner: nodeExecSpawner, windowsNpx: async () => windowsNpx, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env) };
+      const request = { ...h.request("kubernetes-mcp-server", (["claude-code", "codex", "cursor"] as const).map((client) => ({ client, scope: "project" as const }))), platform } as const;
+      const planned = await plannedOf({ ...h, env }, request);
+      expect(planned.plan.steps.map((s) => s.kind)).toEqual(["run", "tool-config", "config-patch", "config-patch", "config-patch"]);
+      const t0 = Date.now();
+      const result = await runInstallTransaction(planned, await approveAll(planned), request, env);
+      console.log("k8s install ms " + String(Date.now() - t0) + " " + JSON.stringify({ status: result.status, code: result.code, steps: result.steps.map((s) => s.id + ":" + s.status) }));
+      expect(result.status).toBe("succeeded");
+      expect(await recordInstallInState(planned, result, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() })).toMatchObject({ ok: true, recorded: 3 });
 
-      // 대조군: 설정 없이는 같은 합성 API에서 Secret 데이터가 읽힌다(합성 API가 실제로 Secret을 돌려준다는 증거).
-      const control = await session([controlArgv.executable, ...controlArgv.args], scratch, env, CALLS.slice(0, 1));
-      expect(JSON.stringify(control.replies[0])).toContain(SECRET_B64);
-      const secretRequestsBefore = requests.filter((r) => r.includes("/secrets")).length;
+      // 3개 Client 설정에 OpenHub가 실제로 쓴 command·args.
+      const claude = JSON.parse(await readFile(path.join(h.projectRoot, ".mcp.json"), "utf8")).mcpServers.kubernetes as { command: string; args: string[] };
+      const cursor = JSON.parse(await readFile(path.join(h.projectRoot, ".cursor", "mcp.json"), "utf8")).mcpServers.kubernetes as { command: string; args: string[] };
+      const codex = (parseToml(await readFile(path.join(h.projectRoot, ".codex", "config.toml"), "utf8")) as { mcp_servers: Record<string, { command: string; args: string[] }> }).mcp_servers["kubernetes"]!;
+      for (const [label, e] of [["claude-code", claude], ["cursor", cursor], ["codex", codex]] as const) {
+        console.log("k8s client " + label + ": " + JSON.stringify({ command: path.basename(e.command), args: e.args.map((a) => (path.isAbsolute(a) ? "<abs:" + path.basename(a) + ">" : a)) }));
+        expect(e.command).not.toBe("cmd");
+        if (platform === "windows") expect(e.command).toBe(windowsNpx!.node);
+        const config = e.args[e.args.indexOf("--config") + 1]!;
+        expect(config.startsWith(h.homeDir)).toBe(true);
+        expect(await readFile(config, "utf8")).toBe(KUBERNETES_TOOL_CONFIG);
+      }
+      expect(cursor).toEqual(claude);
+      expect(codex).toEqual(claude);
 
-      const runs = [{ label: "health-argv", argv: [healthArgv.executable, ...healthArgv.args] }];
-      if (platform === "windows") runs.push({ label: "client-cmd-wrapper", argv: ["cmd", "/d", "/c", "npx", ...sub.args] });
-      for (const run of runs) {
-        const s = await session(run.argv, scratch, env, CALLS);
+      const lifecycleEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), spawner: nodeExecSpawner, windowsNpx: async () => windowsNpx, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env) };
+      const runOp = async (operation: LifecycleRequest["operation"]) => {
+        const req: LifecycleRequest = { operation, toolId: "kubernetes-mcp-server", projectRoot: h.projectRoot, homeDir: h.homeDir, platform, includeUser: false };
+        const built = await planLifecycle({ ...req, entries });
+        if (!built.ok) throw new Error(built.code);
+        const outcome = await requestLifecycleApproval(built.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
+        if (outcome.status !== "approved") throw new Error(outcome.status);
+        return runLifecycleTransaction(built.planned, outcome.approval, req, lifecycleEnv);
+      };
+      const health = await runOp("health");
+      console.log("k8s health " + JSON.stringify(health.health));
+      expect(health).toMatchObject({ status: "health-checked", health: { status: "healthy" } });
+      // (선택) 실제 Client 프로그램 확인: OPENHUB_E2E_REAL_CLIENTS=1이고 claude·codex CLI가 있을 때만. 사용자 설정은 쓰지 않는다
+      // (CLAUDE_CONFIG_DIR·CODEX_HOME·HOME을 임시 디렉터리로 바꾸고, 테스트 프로젝트 안에서만 승인·trust를 준다. OpenHub가 하는 일이 아니다).
+      if (process.env["OPENHUB_E2E_REAL_CLIENTS"] === "1") {
+        const clientHome = path.join(scratch, "client home");
+        await mkdir(path.join(clientHome, ".claude-config"), { recursive: true });
+        await mkdir(path.join(clientHome, ".codex"), { recursive: true });
+        await mkdir(path.join(h.projectRoot, ".claude"), { recursive: true });
+        await writeFile(path.join(h.projectRoot, ".claude", "settings.local.json"), JSON.stringify({ enabledMcpjsonServers: ["kubernetes"] }));
+        // 격리된 Claude 설정의 프로젝트 승인 상태(사용자가 claude에서 승인한 것과 같은 상태). 경로 표기 두 가지를 모두 넣는다.
+        const approved = { hasTrustDialogAccepted: true, enabledMcpjsonServers: ["kubernetes"], disabledMcpjsonServers: [] };
+        const claudeProjects = { [h.projectRoot]: approved, [h.projectRoot.replace(/\\/gu, "/")]: approved };
+        await writeFile(path.join(clientHome, ".claude-config", ".claude.json"), JSON.stringify({ projects: claudeProjects }));
+        await writeFile(path.join(clientHome, ".codex", "config.toml"), "[projects." + JSON.stringify(h.projectRoot) + "]\ntrust_level = \"trusted\"\n");
+        const clientEnv = { ...process.env, HOME: clientHome, USERPROFILE: clientHome, CLAUDE_CONFIG_DIR: path.join(clientHome, ".claude-config"), CODEX_HOME: path.join(clientHome, ".codex") };
+        const run = (exe: string, args: string[]) =>
+          new Promise<{ code: number | null; out: string }>((resolve) => {
+            const child = spawn(exe, args, { cwd: h.projectRoot, env: clientEnv, shell: process.platform === "win32" && exe === "codex", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+            let out = "";
+            child.stdout.on("data", (d: Buffer) => (out += d.toString()));
+            child.stderr.on("data", (d: Buffer) => (out += d.toString()));
+            child.on("close", (code) => resolve({ code, out }));
+            child.on("error", () => resolve({ code: -1, out }));
+          });
+        const claudeList = await run("claude", ["mcp", "list"]);
+        console.log("k8s real claude: " + claudeList.out.replace(/[A-Za-z]:\\[^\s"]*/gu, "<abs>").replace(/\s+/gu, " ").slice(0, 400));
+        expect(claudeList.out).toMatch(/kubernetes:.*(✓|Connected)/u);
+        const codexList = await run("codex", ["mcp", "list"]);
+        console.log("k8s real codex: " + codexList.out.replace(/[A-Za-z]:\\[^\s"]*/gu, "<abs>").replace(/\s+/gu, " ").slice(0, 400));
+        expect(codexList.out).toContain("kubernetes");
+      }
+
+
+      const check = async (label: string) => {
+        const before = requests.filter((r) => r.includes("/secrets")).length;
+        const s = await session(claude.command, claude.args, h.projectRoot, CALLS);
         const names = s.tools.map((t) => t.name).sort();
-        console.log("k8s " + run.label + " tools: " + names.join(","));
+        console.log("k8s " + label + " tools: " + names.join(","));
         for (const t of s.tools) {
           expect(t.annotations?.readOnlyHint, t.name).toBe(true);
           expect(t.annotations?.destructiveHint ?? false, t.name).toBe(false);
         }
-        for (const banned of ["configuration_view", "pods_delete", "pods_exec", "pods_run", "resources_create_or_update", "resources_delete", "resources_scale"]) expect(names, run.label).not.toContain(banned);
-        const [getSecret, listSecret, getConfigMap, configView] = s.replies;
+        for (const banned of BANNED) expect(names).not.toContain(banned);
+        const [getSecret, listSecret, getConfigMap, configView, del, create, exec] = s.replies;
         for (const r of [getSecret, listSecret]) {
-          expect(r?.result?.isError, run.label).toBe(true);
-          expect(JSON.stringify(r), run.label).toMatch(/resource not allowed/u);
+          expect(r?.result?.isError, label).toBe(true);
+          expect(JSON.stringify(r), label).toMatch(/resource not allowed/u);
         }
-        expect(getConfigMap?.result?.isError ?? false, run.label).toBe(false);
-        expect(JSON.stringify(getConfigMap), run.label).toContain("LOG_LEVEL");
-        expect(configView?.error?.message ?? "", run.label).toMatch(/unknown tool/u);
-        expect(s.transcript, run.label).not.toContain(TOKEN);
-        expect(s.transcript, run.label).not.toContain(SECRET_B64);
-        expect(s.transcript, run.label).not.toContain(SECRET_PLAIN);
-      }
-      // 설정이 적용된 실행에서는 Secret 요청이 API에 도달하지 않는다.
-      expect(requests.filter((r) => r.includes("/secrets")).length).toBe(secretRequestsBefore);
-      // 파일은 승인한 내용 그대로이고, 바꾸면 digest가 달라진다(drift 판정 근거).
-      expect(await inspectToolConfig(loc)).toEqual({ state: "present", digest: toolConfigDigest(TOML) });
-      await writeFile(loc.file, TOML.replace('kind = "Secret"', 'kind = "ConfigMap"'));
-      expect(await inspectToolConfig(loc)).not.toEqual({ state: "present", digest: toolConfigDigest(TOML) });
+        expect(getConfigMap?.result?.isError ?? false, label).toBe(false);
+        expect(JSON.stringify(getConfigMap)).toContain("LOG_LEVEL");
+        for (const r of [configView, del, create, exec]) expect(r?.error?.message ?? "", label).toMatch(/unknown tool/u);
+        expect(s.transcript).not.toContain(TOKEN);
+        expect(s.transcript).not.toContain(SECRET_B64);
+        expect(s.transcript).not.toContain(SECRET_PLAIN);
+        expect(requests.filter((r) => r.includes("/secrets")).length, label).toBe(before);
+      };
+      await check("installed");
+
+      // drift: 다른 프로세스가 Secret 거부 규칙을 지우면 status가 잡고 Health는 막힌다. repair(승인) 뒤 다시 거부된다.
+      const configPath = claude.args[claude.args.indexOf("--config") + 1]!;
+      await writeFile(configPath, 'read_only = true\ntoolsets = ["core"]\n');
+      const status = await lifecycleStatus({ projectRoot: h.projectRoot, homeDir: h.homeDir, entries, platform, includeUser: false });
+      expect(status.ok && status.items.filter((i) => i.serverName === "kubernetes").map((i) => i.state)).toEqual(["tool-config-drift", "tool-config-drift", "tool-config-drift"]);
+      const blocked = await planLifecycle({ operation: "health", toolId: "kubernetes-mcp-server", projectRoot: h.projectRoot, homeDir: h.homeDir, entries, platform, includeUser: false });
+      expect(blocked.ok && blocked.planned.plan.status).toBe("blocked");
+      const repaired = await runOp("repair");
+      console.log("k8s repair " + JSON.stringify({ status: repaired.status, health: repaired.health?.status }));
+      expect(repaired).toMatchObject({ status: "repaired", health: { status: "healthy" } });
+      expect(await readFile(configPath, "utf8")).toBe(KUBERNETES_TOOL_CONFIG);
+      await check("repaired");
     } finally {
+      if (saved.cache === undefined) delete process.env["npm_config_cache"];
+      else process.env["npm_config_cache"] = saved.cache;
+      if (saved.kube === undefined) delete process.env["KUBECONFIG"];
+      else process.env["KUBECONFIG"] = saved.kube;
       api.close();
       await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
       await rm(npmCache, { recursive: true, force: true }).catch(() => undefined);

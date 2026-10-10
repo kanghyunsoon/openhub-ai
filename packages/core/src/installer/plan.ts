@@ -5,7 +5,7 @@ import type { Manifest } from "../manifest/index";
 import type { RegistryEntry } from "../registry/index";
 import { TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, type RecommendationReport } from "../recommendation/index";
 import { parseNpxPrepareArgs } from "../process/npx-prepare";
-import { REVIEWED_TOOL_CONFIGS, TOOL_CONFIG_MAX_BYTES, TOOL_CONFIG_PLACEHOLDER, toolConfigDigest, toolConfigFileId } from "../tool-config/index";
+import { NPX_CLI_PLACEHOLDER, REVIEWED_TOOL_CONFIGS, TOOL_CONFIG_MAX_BYTES, TOOL_CONFIG_PLACEHOLDER, toolConfigDigest, toolConfigFileId } from "../tool-config/index";
 
 /**
  * Immutable InstallPlan v1(TASK-027, D-012).
@@ -215,8 +215,10 @@ export const installPlanSchema = z
     const launch = plan.launch;
     if (launch !== null) {
       // D-016: cmd wrapper는 windows + npx에서 고정 prefix로만 생긴다. 그 밖에는 backend 그대로다.
+      // v0.2.0 tool config Tool({toolConfig} 인자)은 windows에서 node + {npxCli} 직접 실행이다(cmd 없음).
+      const direct = launch.platform === "windows" && launch.executable === "npx" && launch.args.includes(TOOL_CONFIG_PLACEHOLDER);
       const expected =
-        launch.platform === "windows" && launch.executable === "npx" ? ["cmd", "/d", "/c", "npx", ...launch.args] : [launch.executable, ...launch.args];
+        direct ? ["node", NPX_CLI_PLACEHOLDER, ...launch.args] : launch.platform === "windows" && launch.executable === "npx" ? ["cmd", "/d", "/c", "npx", ...launch.args] : [launch.executable, ...launch.args];
       if (JSON.stringify([launch.clientSpec.command, ...launch.clientSpec.args]) !== JSON.stringify(expected)) {
         ctx.addIssue({ code: "custom", path: ["launch", "clientSpec"], message: "clientSpec이 플랫폼별 launch 규칙(D-016)과 다릅니다" });
       }
