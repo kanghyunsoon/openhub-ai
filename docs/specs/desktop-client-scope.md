@@ -9,7 +9,7 @@ PR C is split into independent pull requests:
 | Part | Scope | Status |
 | --- | --- | --- |
 | C1 (this) | Client selection in the install flow: Claude Code, Codex, Cursor, supported OS, verification level per OS, install only the selected clients. Project scope only. | this PR |
-| C2 | User scope: project default, user optional with `user-scope-config` approval and a preview of the user files; Desktop lifecycle status, Health and repair for user-scope entries (approval, compensation and `PLAN_STALE` unchanged). | next |
+| C2 | User scope: project default, user optional with `user-scope-config` approval and a preview of the user files; Desktop lifecycle status, Health and repair for user-scope entries (approval, compensation and `PLAN_STALE` unchanged). | [desktop-user-scope.md](desktop-user-scope.md) |
 | C3 | Recommendation diagnosis: stack not detected, no need rule, no verified Registry candidate, client or OS incompatible, no install backend, excluded candidates (Core `diagnoseRecommendation`). | after C2 |
 
 User-scope install and user-scope lifecycle ship together in C2, so the Desktop never installs something it cannot show or repair.

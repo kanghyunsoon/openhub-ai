@@ -132,7 +132,9 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 Desktop Lifecycle", () => {
       [LIFECYCLE_STATUS_CHANNEL, LIFECYCLE_CHECK_CHANNEL, ...Object.values(LIFECYCLE_PLAN_CHANNELS), LIFECYCLE_RUN_CHANNEL].sort(),
     );
     const preload = await read("src/preload.ts");
-    expect(preload).toContain('lifecycleStatus: () => ipcRenderer.invoke("lifecycle:status")');
+    // v0.2.0 P0-3 C2: 상태 요청은 사용자 범위 보기 여부({ includeUser: boolean })만 넘긴다(경로 없음).
+    expect(preload).toContain('ipcRenderer.invoke("lifecycle:status", options !== null && typeof options === "object"');
+    expect(preload).toContain("? { includeUser: (options as { includeUser: boolean }).includeUser } : undefined");
     for (const ch of ["lifecycle:check", "lifecycle:plan-update", "lifecycle:plan-rollback", "lifecycle:plan-health", "lifecycle:run"]) {
       expect(preload).toMatch(new RegExp("\\(id: unknown\\) => ipcRenderer\\.invoke\\(\"" + ch + "\", String\\(id\\)\\)", "u"));
     }
@@ -292,7 +294,8 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 Desktop Lifecycle", () => {
   it("AC-046-09 Lifecycle을 붙여도 FOR YOU·설치 흐름이 그대로 동작하고 서로의 화면 요소를 건드리지 않는다", async () => {
     const w = await wired();
     await w.scan();
-    expect(await w.status()).toEqual({ status: "ok", items: [], note: "사용자 범위 설정은 Desktop에서 확인하지 않습니다(CLI --include-host)." });
+    // v0.2.0 P0-3 C2: 사용자 범위는 [사용자 범위 보기]를 켤 때만 읽는다(기본 off).
+    expect(await w.status()).toEqual({ status: "ok", items: [], note: "사용자 범위 설정은 [사용자 범위 보기]를 켤 때만 읽습니다.", includeUser: false });
     expect(await w.install()).toMatchObject({ status: "done", result: { status: "succeeded", stages: [{ name: "Prepared" }, { name: "Configured" }, { name: "Detected" }] } });
     expect((await items(w)).map((i) => i.toolId)).toEqual(["postgres-mcp"]);
     const js = await read("renderer/lifecycle.js");

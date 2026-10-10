@@ -3,6 +3,7 @@ import {
   INSTALL_CLIENTS,
   analyzeProject,
   clientVerificationLevel,
+  configTargetFor,
   defaultHostEnvironment,
   loadRegistry,
   locateWindowsNpxLauncher,
@@ -112,8 +113,8 @@ export interface InstallOptionsView {
   platformSupported: boolean;
   /** Manifest가 지원한다고 적은 OS. */
   platforms: ("windows" | "macos" | "linux")[];
-  /** Desktop 설치 범위(이 PR은 project만). */
-  scope: "project";
+  /** 설치 범위. 기본은 project이고 user는 사용자가 고를 때만(v0.2.0 P0-3 C2). */
+  defaultScope: "project";
   clients: {
     client: InstallClient;
     label: string;
@@ -126,6 +127,10 @@ export interface InstallOptionsView {
     /** 이 OS에서 OpenHub의 실제 실행 검증 수준. 기록이 없으면 not-recorded. */
     verification: ClientVerificationView;
     note: string;
+    /** 범위별로 OpenHub가 쓰는 설정 파일(논리 경로). user가 null이면 OpenHub가 그 사용자 설정을 쓰지 않는다(예: Claude Code ~/.claude.json). */
+    files: { project: string; user: string | null };
+    /** user 범위를 고를 수 없을 때의 이유(고를 수 있으면 null). */
+    userNote: string | null;
   }[];
 }
 
@@ -200,7 +205,11 @@ export function nativeDialogPrompter(dialog: NativeDialogLike): ApprovalPrompter
     channel: "desktop-native-dialog",
     async confirm(request) {
       const { plan, planDigest } = request.planned;
-      const detail = [...request.requirements.map((r) => tr("dialog.requirement", { id: r.id, message: installApprovalText(r.id) })), "", tr("dialog.digest", { digest: planDigest })].join("\n");
+      // 바뀔 설정 파일(범위·Client)을 승인 화면에 그대로 나열한다. user 범위가 있으면 더 넓은 영향을 따로 경고한다.
+      const written = plan.targets.filter((t) => t.envReference !== "manual");
+      const targetLines = written.map((t) => tr("install.dialog.target", { client: CLIENT_LABEL[t.client], scope: tr(t.scope === "user" ? "install.target.userScope" : "install.target.projectScope"), file: t.file }));
+      const userWarning = written.some((t) => t.scope === "user") ? [tr("install.dialog.userScopeWarning")] : [];
+      const detail = [...targetLines, ...userWarning, "", ...request.requirements.map((r) => tr("dialog.requirement", { id: r.id, message: installApprovalText(r.id) })), "", tr("dialog.digest", { digest: planDigest })].join("\n");
       const { response } = await dialog.showMessageBox({
         type: "warning",
         title: tr("install.dialog.title"),
@@ -316,21 +325,29 @@ async function recommendedTool(session: InstallSession, deps: InstallDeps, toolI
 }
 
 /**
- * renderer가 보낸 Client 선택을 검증한다. clients 속성이 있는 객체만 선택으로 본다. 그 밖의 값(경로 문자열, Plan 객체 등)은
- * AC-036-01처럼 무시하고 기존 기본값(지원 + 탐지)을 쓴다. clients가 있으면 배열이어야 하고 각 값은 INSTALL_CLIENTS이면서 Manifest가
- * 지원해야 한다. 하나라도 아니면 invalid(아무것도 계획하지 않는다). 중복은 한 번으로 본다.
+ * renderer가 보낸 Client·범위 선택을 검증한다. clients 속성이 있는 객체만 선택으로 본다. 그 밖의 값(경로 문자열, Plan 객체 등)은
+ * AC-036-01처럼 무시하고 기존 기본값(지원 + 탐지, project)을 쓴다. clients가 있으면 배열이어야 하고 각 값은 INSTALL_CLIENTS이면서
+ * Manifest가 지원해야 한다. scope가 있으면 "project" 또는 "user"뿐이고(없으면 project), user면 고른 Client마다 OpenHub가 쓰는
+ * 사용자 설정 파일이 있어야 한다(D-013 허용 목록: Cursor·Codex). 하나라도 아니면 invalid(아무것도 계획하지 않는다). 경로는 받지 않는다.
  */
-export function parseClientSelection(selection: unknown, supported: (c: InstallClient) => boolean, detected: (c: InstallClient) => boolean): { ok: true; clients: InstallClient[] } | { ok: false } {
+export function parseClientSelection(
+  selection: unknown,
+  supported: (c: InstallClient) => boolean,
+  detected: (c: InstallClient) => boolean,
+): { ok: true; clients: InstallClient[]; scope: "project" | "user" } | { ok: false } {
   const isSelection = selection !== null && typeof selection === "object" && !Array.isArray(selection) && Object.prototype.hasOwnProperty.call(selection, "clients");
-  if (!isSelection) return { ok: true, clients: INSTALL_CLIENTS.filter((c) => supported(c) && detected(c)) };
+  if (!isSelection) return { ok: true, clients: INSTALL_CLIENTS.filter((c) => supported(c) && detected(c)), scope: "project" };
   const raw = (selection as { clients?: unknown }).clients;
   if (!Array.isArray(raw) || raw.length > INSTALL_CLIENTS.length * 2) return { ok: false };
+  const scopeValue = Object.prototype.hasOwnProperty.call(selection, "scope") ? (selection as { scope?: unknown }).scope : "project";
+  if (scopeValue !== "project" && scopeValue !== "user") return { ok: false };
   const out: InstallClient[] = [];
   for (const value of raw) {
     if (typeof value !== "string" || !(INSTALL_CLIENTS as readonly string[]).includes(value) || !supported(value as InstallClient)) return { ok: false };
+    if (scopeValue === "user" && !configTargetFor(value as InstallClient, "user").writable) return { ok: false };
     if (!out.includes(value as InstallClient)) out.push(value as InstallClient);
   }
-  return { ok: true, clients: INSTALL_CLIENTS.filter((c) => out.includes(c)) };
+  return { ok: true, clients: INSTALL_CLIENTS.filter((c) => out.includes(c)), scope: scopeValue };
 }
 
 /** install:options — 현재 추천 목록에 있는 toolId의 Client 선택 화면 데이터. 계획·쓰기·실행 0. */
@@ -347,9 +364,20 @@ export async function optionsForRenderer(session: InstallSession, deps: InstallD
       const supported = found.supported(client);
       const detected = found.detected(client);
       const verification: ClientVerificationView = clientVerificationLevel(found.toolId, client, platform) ?? "not-recorded";
-      return { client, label: CLIENT_LABEL[client], supported, detected, selected: supported && detected, verification, note: clientNote(supported, detected, verification, platform) };
+      const user = configTargetFor(client, "user");
+      return {
+        client,
+        label: CLIENT_LABEL[client],
+        supported,
+        detected,
+        selected: supported && detected,
+        verification,
+        note: clientNote(supported, detected, verification, platform),
+        files: { project: configTargetFor(client, "project").logical, user: user.writable ? user.logical : null },
+        userNote: user.writable ? null : tr("install.client.userNotWritten", { file: user.logical }),
+      };
     });
-    return { status: "ok", view: { toolId: found.toolId, displayName: found.manifest.displayName ?? found.toolId, platform, platformSupported: platforms.includes(platform), platforms, scope: "project", clients } };
+    return { status: "ok", view: { toolId: found.toolId, displayName: found.manifest.displayName ?? found.toolId, platform, platformSupported: platforms.includes(platform), platforms, defaultScope: "project", clients } };
   } catch {
     return { status: "error", code: "options-failed", message: tr("install.planFailedMain") };
   }
@@ -386,7 +414,7 @@ export async function planForRenderer(session: InstallSession, deps: InstallDeps
     const chosen = parseClientSelection(selection, found.supported, found.detected);
     if (!chosen.ok) return { status: "error", code: "invalid-selection", message: tr("install.invalidSelection") };
     if (chosen.clients.length === 0) return { status: "no-client" };
-    const request: InstallRequest = { toolId, projectRoot: dir, homeDir: deps.homeDir, targets: chosen.clients.map((client: InstallClient) => ({ client, scope: "project" as const })), includeHost: false, platform };
+    const request: InstallRequest = { toolId, projectRoot: dir, homeDir: deps.homeDir, targets: chosen.clients.map((client: InstallClient) => ({ client, scope: chosen.scope })), includeHost: false, platform };
     const { result } = await planInstall(request, environment(deps, found.entries));
     // 계획하는 동안 더 새 요청이 왔거나 프로젝트가 바뀌었으면 이 결과는 버린다(화면에도 보이지 않는다).
     if (!session.isCurrent(toolId, ticket) || session.projectDir !== dir) return { status: "superseded" };

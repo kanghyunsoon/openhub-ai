@@ -50,7 +50,10 @@ import { tr, type MessageKey } from "./i18n/index";
  * - repair(v0.2.0 P0-3): tool-config-missing·tool-config-drift·tool-config-relocated·client-launcher-invalid(와 Core가 받아 주는
  *   경로만 다른 config-drift)는 Core가 실제로 ready Repair Plan을 만들 때만 [복구 계획 확인] 버튼을 만든다. 복구 로직은 Core의
  *   planLifecycleRequest(repair)·requestLifecycleApproval·runLifecycleTransaction을 그대로 쓴다.
- * - Desktop은 사용자 범위 config를 읽지 않는다(D-003). project scope만 다룬다.
+ * - 사용자 범위(v0.2.0 P0-3 C2): 기본은 project scope만 읽는다(D-003). 사용자가 INSTALLED의 [사용자 범위 보기]를 켜거나 사용자 범위
+ *   설치를 마쳤을 때만 lifecycle:status가 { includeUser: true }로 불리고, 그 뒤에만 Core includeUser로 허용 목록의 사용자 설정
+ *   (~/.cursor/mcp.json·~/.codex/config.toml)을 읽는다. "user:" 항목의 계획·실행은 사용자 범위 보기가 켜진 세션에서만 받는다.
+ *   프로젝트 분석은 사용자 설정을 읽지 않는다.
  * - Preview·결과·상태 문장은 CLI와 같은 Core 문장이다. skip된 Health는 Not verified로만 표시한다.
  */
 
@@ -86,6 +89,8 @@ export interface LifecycleDeps {
 
 export interface LifecycleEntryView {
   id: string;
+  /** 범위(Project·User 구분 표시). */
+  scope: "project" | "user";
   toolId: string | null;
   title: string;
   lines: string[];
@@ -99,7 +104,7 @@ export interface LifecycleEntryView {
   warning: string | null;
 }
 export type LifecycleStatusResponse =
-  | { status: "ok"; items: LifecycleEntryView[]; note: string }
+  | { status: "ok"; items: LifecycleEntryView[]; note: string; includeUser: boolean }
   | { status: "no-project" }
   | { status: "state-unreadable"; code: string; message: string }
   | { status: "error"; code: string; message: string };
@@ -222,7 +227,16 @@ export function nativeLifecycleDialogPrompter(dialog: NativeDialogLike): Lifecyc
 /** 화면에 보여 준 Plan을 entry id로 기억한다. 프로젝트 폴더는 설치 흐름과 같은 선택 결과를 쓴다. */
 export class LifecycleSession {
   readonly #pending = new Map<string, { planned: PlannedLifecycle; request: LifecycleRequest }>();
+  #includeUser = false;
   constructor(readonly projectDir: () => string | undefined) {}
+  /** 사용자가 [사용자 범위 보기]를 켰는가(lifecycle:status { includeUser }로만 바뀐다). */
+  get includeUser(): boolean {
+    return this.#includeUser;
+  }
+  setIncludeUser(on: boolean): void {
+    if (this.#includeUser !== on) this.#pending.clear();
+    this.#includeUser = on;
+  }
   remember(id: string, planned: PlannedLifecycle, request: LifecycleRequest): void {
     this.#pending.clear();
     this.#pending.set(id, { planned, request });
@@ -271,7 +285,8 @@ async function snapshot(session: LifecycleSession, deps: LifecycleDeps): Promise
   if (platform === undefined) return { status: "error", code: "platform-unsupported", message: tr("life.platformUnsupported") };
   const { entries } = await loadRegistry(deps.registryDir);
   const fs = deps.configFs === undefined ? {} : { fs: deps.configFs };
-  const status = await lifecycleStatus({ projectRoot: dir, homeDir: deps.homeDir, entries, platform, includeUser: false, ...fs, ...(deps.launcherCheckFs === undefined ? {} : { launcherCheckFs: deps.launcherCheckFs }) });
+  const includeUser = session.includeUser;
+  const status = await lifecycleStatus({ projectRoot: dir, homeDir: deps.homeDir, entries, platform, includeUser, ...fs, ...(deps.launcherCheckFs === undefined ? {} : { launcherCheckFs: deps.launcherCheckFs }) });
   if (!status.ok) return STATE_CODES.has(status.code) ? { status: "state-unreadable", code: status.code, message: stateUnreadableText(status.code) } : { status: "error", code: status.code, message: tr("life.stateUnreadable") };
   const state = await readLifecycleState({ homeDir: deps.homeDir, ...fs });
   const projectKey = await projectKeyFor(dir, deps.configFs);
@@ -289,8 +304,8 @@ async function snapshot(session: LifecycleSession, deps: LifecycleDeps): Promise
     // Repair 버튼: 오류 상태만 보고 켜지 않는다. Core가 지금 ready Repair Plan을 만들 수 있을 때만(파일 읽기·PATH 탐색만, 실행·쓰기·network 0).
     let canRepair = false;
     let warning = warningFor(item.state);
-    if (REPAIR_STATES.has(item.state) && item.toolId !== null && item.scope === "project") {
-      const request = repairRequest(item.toolId, item, dir, deps, platform);
+    if (REPAIR_STATES.has(item.state) && item.toolId !== null && (item.scope === "project" || includeUser)) {
+      const request = repairRequest(item.toolId, item, dir, deps, platform, includeUser);
       const built = await planLifecycleRequest(request, env).catch(() => null);
       canRepair = built !== null && built.ok && built.planned.plan.status === "ready";
       const reason = built === null ? "plan-failed" : !built.ok ? built.code : built.planned.plan.warnings.filter((w) => w.code === w.code.toUpperCase()).map((w) => w.code).join(", ") || built.planned.plan.status;
@@ -298,21 +313,27 @@ async function snapshot(session: LifecycleSession, deps: LifecycleDeps): Promise
       if (canRepair) warning = (warning ?? "") + tr("life.warn.repairAvailable");
       else if (item.state !== "config-drift") warning = (warning ?? "") + tr("life.warn.repairUnavailable", { reason });
     }
-    items.push({ id, toolId: item.toolId, title: title!, lines, state: item.state, managed, canUpdate: consistent, canRollback: consistent && hasPrevious, canHealth: consistent, canRepair, warning });
+    // 사용자 범위 보기가 꺼져 있으면 사용자 항목은 Version State 기록만 보이고(not-inspected) 실행 버튼이 없다.
+    if (item.scope === "user" && !includeUser) warning = tr("life.warn.userNotInspected");
+    items.push({ id, scope: item.scope, toolId: item.toolId, title: title!, lines, state: item.state, managed, canUpdate: consistent, canRollback: consistent && hasPrevious, canHealth: consistent, canRepair, warning });
   }
   return { dir, entries, items, raw };
 }
 
-function repairRequest(toolId: string, item: LifecycleToolStatus, dir: string, deps: LifecycleDeps, platform: NonNullable<ReturnType<typeof toRecommendPlatform>>): LifecycleRequest {
-  return { operation: "repair", toolId, projectRoot: dir, homeDir: deps.homeDir, platform, includeUser: false, targets: [{ client: item.client as InstallClient, scope: item.scope }] };
+function repairRequest(toolId: string, item: LifecycleToolStatus, dir: string, deps: LifecycleDeps, platform: NonNullable<ReturnType<typeof toRecommendPlatform>>, includeUser: boolean): LifecycleRequest {
+  return { operation: "repair", toolId, projectRoot: dir, homeDir: deps.homeDir, platform, includeUser, targets: [{ client: item.client as InstallClient, scope: item.scope }] };
 }
 
-/** lifecycle:status — 인자 없음. network·spawn·write 0회. */
-export async function statusForRenderer(session: LifecycleSession, deps: LifecycleDeps): Promise<LifecycleStatusResponse> {
+/**
+ * lifecycle:status — 인자는 { includeUser: boolean }뿐이다(사용자가 [사용자 범위 보기]를 켜고 끌 때만 보낸다). 없으면 지금 설정 그대로.
+ * 그 밖의 값은 무시한다. network·spawn·write 0회.
+ */
+export async function statusForRenderer(session: LifecycleSession, deps: LifecycleDeps, options?: unknown): Promise<LifecycleStatusResponse> {
   try {
+    if (options !== null && typeof options === "object" && typeof (options as { includeUser?: unknown }).includeUser === "boolean") session.setIncludeUser((options as { includeUser: boolean }).includeUser);
     const snap = await snapshot(session, deps);
     if (!("raw" in snap)) return snap;
-    return { status: "ok", items: snap.items, note: tr("life.note") };
+    return { status: "ok", items: snap.items, note: tr(session.includeUser ? "life.noteUser" : "life.note"), includeUser: session.includeUser };
   } catch {
     return { status: "error", code: "status-failed", message: tr("life.statusFailed") };
   }
@@ -322,6 +343,8 @@ async function requestFor(operation: LifecycleOperation, session: LifecycleSessi
   const snap = await snapshot(session, deps);
   if (!("raw" in snap)) return { error: snap.status === "no-project" ? ({ status: "no-project" } as const) : ({ status: "not-managed" } as const) };
   if (typeof id !== "string") return { error: { status: "not-managed" } as const };
+  // 사용자 항목은 사용자 범위 보기가 켜진 세션에서만 계획·실행한다(renderer가 id를 지어내도 사용자 설정을 읽지 않는다).
+  if (id.startsWith("user:") && !session.includeUser) return { error: { status: "not-managed" } as const };
   const view = snap.items.find((i) => i.id === id);
   const item = snap.raw.get(id);
   const allowed = operation === "rollback" ? view?.canRollback : operation === "health" ? view?.canHealth : operation === "repair" ? view?.canRepair : view?.canUpdate;
@@ -332,7 +355,7 @@ async function requestFor(operation: LifecycleOperation, session: LifecycleSessi
     projectRoot: snap.dir,
     homeDir: deps.homeDir,
     platform: toRecommendPlatform(deps.platform)!,
-    includeUser: false,
+    includeUser: session.includeUser,
     targets: [{ client: item.client as InstallClient, scope: item.scope }],
   };
   return { request, env: environment(deps, snap.entries) };
@@ -439,7 +462,7 @@ export async function runForRenderer(session: LifecycleSession, deps: LifecycleD
 
 /** IPC 핸들러 등록. 첫 번째 인자(entry id)만 쓰고 나머지는 무시한다. */
 export function registerLifecycle(ipc: IpcMainLike, session: LifecycleSession, deps: LifecycleDeps): void {
-  ipc.handle(LIFECYCLE_STATUS_CHANNEL, () => statusForRenderer(session, deps));
+  ipc.handle(LIFECYCLE_STATUS_CHANNEL, (_event: unknown, options: unknown) => statusForRenderer(session, deps, options));
   ipc.handle(LIFECYCLE_CHECK_CHANNEL, (_event: unknown, id: unknown) => checkForRenderer(session, deps, id));
   for (const operation of ["update", "rollback", "health", "repair"] as const) {
     ipc.handle(LIFECYCLE_PLAN_CHANNELS[operation], (_event: unknown, id: unknown) => planForRenderer(operation, session, deps, id));

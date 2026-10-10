@@ -30,6 +30,18 @@
   };
   const TITLE = { update: t("lifecycle.op.update"), rollback: t("lifecycle.op.rollback"), health: t("lifecycle.op.health"), repair: t("lifecycle.op.repair") };
   let current = null;
+  // 사용자 범위 보기(v0.2.0 P0-3 C2): 사용자가 켜거나 사용자 범위 설치를 마쳤을 때만 main이 사용자 설정을 읽는다.
+  let showUser = false;
+  const userToggle = button("lifecycle-user-toggle", t("lifecycle.userToggle.show"), () => {
+    showUser = !showUser;
+    void refresh({ includeUser: showUser });
+  });
+  userToggle.setAttribute("aria-pressed", "false");
+  list.before(userToggle);
+  const syncToggle = () => {
+    userToggle.textContent = t(showUser ? "lifecycle.userToggle.hide" : "lifecycle.userToggle.show");
+    userToggle.setAttribute("aria-pressed", String(showUser));
+  };
 
   function show(children) {
     panel.replaceChildren(...children);
@@ -40,6 +52,7 @@
   function renderEntry(item) {
     const li = el("li", "entry");
     li.dataset.entryId = item.id;
+    li.dataset.scope = item.scope;
     li.dataset.toolId = item.toolId || "";
     li.append(el("p", "entry-title", item.title));
     for (const line of item.lines) li.append(el("p", line.trim().startsWith("Health:") || line.trim().startsWith("Reason:") ? "entry-line entry-health" : "entry-line", line));
@@ -56,8 +69,9 @@
     return li;
   }
 
-  async function refresh() {
-    const response = await window.openhub.lifecycleStatus();
+  /** options: { includeUser }(토글을 바꿀 때만). 없으면 main의 지금 설정 그대로 다시 읽는다. */
+  async function refresh(options) {
+    const response = await window.openhub.lifecycleStatus(options);
     if (response.status === "no-project") {
       statusEl.textContent = t("lifecycle.prompt");
       list.replaceChildren();
@@ -72,7 +86,18 @@
     }
     statusEl.className = "todo";
     statusEl.textContent = response.items.length === 0 ? t("lifecycle.empty") : response.note;
-    list.replaceChildren(...response.items.map(renderEntry));
+    showUser = response.includeUser === true;
+    syncToggle();
+    // Project·User 범위를 나눠 보여 준다(같은 도구가 두 범위에 있으면 항목이 따로 보이고 실제 변경 대상도 따로다).
+    const nodes = [];
+    for (const scope of ["project", "user"]) {
+      const items = response.items.filter((i) => i.scope === scope);
+      if (items.length === 0) continue;
+      const header = el("li", "lifecycle-group group-" + scope, t(scope === "user" ? "lifecycle.group.user" : "lifecycle.group.project"));
+      header.dataset.scopeHeader = scope;
+      nodes.push(header, ...items.map(renderEntry));
+    }
+    list.replaceChildren(...nodes);
     return response;
   }
 
@@ -176,7 +201,8 @@
   // 프로젝트 분석 결과가 다시 그려질 때(사용자가 [프로젝트 선택]을 눌렀을 때)만 상태를 읽는다. timer·polling 없음.
   new MutationObserver(() => void refresh()).observe(document.getElementById("project-body"), { childList: true });
   // Adopt가 Version State에 항목을 등록하면(TASK-070) 같은 화면을 다시 읽는다. timer·polling 없음.
-  document.addEventListener("openhub:installed-changed", () => void refresh());
+  // 사용자 범위 설치를 마쳤으면(detail.userScope) 사용자 범위 보기를 켠다(사용자가 고른 동작의 결과).
+  document.addEventListener("openhub:installed-changed", (event) => void refresh(event.detail && event.detail.userScope ? { includeUser: true } : undefined));
 
   // 스모크(--smoke + OPENHUB_SMOKE_UPDATE): 화면과 같은 경로로 상태 → 업데이트 계획 → 체크 → 확인 → 결과를 기다린다.
   window.__openhubLifecycle = async (toolId) => {
@@ -243,6 +269,34 @@
       boxes: boxes.length,
       confirmDisabledBeforeChecks: disabledBefore,
       after: after.items ? after.items.filter((i) => i.toolId === toolId).map((i) => i.state) : [],
+    };
+  };
+
+  // 스모크(--smoke + OPENHUB_SMOKE_USER_SCOPE): 범위가 scope인 toolId 항목에서 op 버튼 click → 승인 항목 checkbox click → 확인 click →
+  // 결과를 기다린다. 사용자 범위면 먼저 [사용자 범위 보기]가 켜질 때까지 기다린다(사용자 범위 설치를 마치면 자동으로 켜진다, 직접 누르지 않는다).
+  // timer 없음(AC-046-02): 끝나지 않으면 E2E 테스트의 제한 시간이 멈춘다.
+  window.__openhubLifecycleOp = async (toolId, scope, op) => {
+    const guard = (promise) => promise;
+    if (scope === "user" && !(await guard(waitFor(userToggle, () => (userToggle.getAttribute("aria-pressed") === "true" ? true : null))))) return { status: "user-scope-not-shown" };
+    await refresh();
+    const find = () => [...list.querySelectorAll("li.entry")].find((x) => x.dataset.toolId === toolId && x.dataset.scope === scope && x.querySelector(".lifecycle-" + op));
+    const li = find();
+    if (!li) return { status: "no-" + op + "-button", entries: [...list.querySelectorAll("li.entry")].map((x) => x.dataset.entryId + "=" + (x.querySelector(".entry-warning")?.textContent || "")) };
+    li.querySelector(".lifecycle-" + op).click();
+    const ready = await guard(waitFor(panel, () => panel.querySelector(".lifecycle-confirm") || panel.querySelector(".install-warning")));
+    if (!ready || !ready.classList.contains("lifecycle-confirm")) return { status: "not-executable", message: ready ? ready.textContent : "timeout" };
+    const requirements = [...panel.querySelectorAll('input[type="checkbox"]')].map((b) => b.dataset.requirement);
+    for (const box of panel.querySelectorAll('input[type="checkbox"]')) box.click();
+    ready.click();
+    const done = await guard(waitFor(panel, () => panel.querySelector(".lifecycle-outcome") || panel.querySelector('[data-run-done="1"]')));
+    if (!done) return { status: "timeout", requirements };
+    const heading = panel.querySelector("h3");
+    const after = await refresh();
+    return {
+      status: done.classList.contains("lifecycle-outcome") && heading ? heading.dataset.status || "unknown" : "not-run",
+      outcome: done.classList.contains("lifecycle-outcome") ? [...done.classList].find((c) => c.startsWith("outcome-")).slice("outcome-".length) : done.textContent,
+      requirements,
+      after: after.items ? after.items.filter((i) => i.toolId === toolId).map((i) => i.scope + ":" + i.state) : [],
     };
   };
 })();

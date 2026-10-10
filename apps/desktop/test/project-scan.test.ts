@@ -48,7 +48,7 @@ describe("REQ-010 Desktop Project Scan", () => {
     expect(preload).toMatch(/exposeInMainWorld\("openhub", \{\s*listRegistry: \(\) => ipcRenderer\.invoke\("registry:list"\),\s*\.\.\.projectBridge,\s*\.\.\.recommendBridge,\s*\.\.\.installBridge,\s*\.\.\.lifecycleBridge,\s*\}\)/u);
     // v0.2.0 P0-3 PR C: 설치 브리지는 toolId 문자열과 Client 이름 문자열 목록만 보낸다(경로 없음).
     expect(preload).toMatch(/planInstall: \(toolId: unknown, selection\?: unknown\) => \{/u);
-    expect(preload).toContain('ipcRenderer.invoke("install:plan", String(toolId), clients === undefined ? undefined : { clients })');
+    expect(preload).toContain('ipcRenderer.invoke("install:plan", String(toolId), clients === undefined ? undefined : scope === undefined ? { clients } : { clients, scope })');
     expect(preload).toMatch(/runLifecycle: \(id: unknown\) => ipcRenderer\.invoke\("lifecycle:run", String\(id\)\)/u);
   });
 
