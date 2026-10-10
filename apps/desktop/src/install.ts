@@ -107,7 +107,12 @@ export interface InstallResultView {
   reapprove: boolean;
 }
 
-export type InstallRunResponse = { status: "done"; result: InstallResultView } | { status: "rejected" | "no-plan" } | { status: "error"; code: string; message: string };
+/** project-changed: 승인 대화상자가 열린 동안 다른 프로젝트를 골라 계획과 승인을 버렸다(실행·쓰기 0). */
+export type InstallRunResponse =
+  | { status: "done"; result: InstallResultView }
+  | { status: "rejected" | "no-plan" }
+  | { status: "project-changed"; message: string }
+  | { status: "error"; code: string; message: string };
 
 /** Plan → 화면 데이터. 문자열은 renderer가 textContent로만 넣는다. */
 export function buildInstallPlanView(planned: PlannedInstall): InstallPlanView {
@@ -253,6 +258,8 @@ export async function runForRenderer(session: InstallSession, deps: InstallDeps,
   if (typeof toolId !== "string") return { status: "no-plan" };
   const pending = session.take(toolId);
   if (pending === undefined) return { status: "no-plan" };
+  const changed = { status: "project-changed" as const, message: "계획을 만든 뒤 다른 프로젝트를 선택해 이 설치 계획과 승인을 버렸습니다. 아무것도 실행하거나 바꾸지 않았습니다. 지금 프로젝트에서 계획을 다시 확인하세요." };
+  if (session.projectDir !== pending.request.projectRoot) return changed;
   try {
     const { entries } = await loadRegistry(deps.registryDir);
     const env = environment(deps, entries);
@@ -261,6 +268,8 @@ export async function runForRenderer(session: InstallSession, deps: InstallDeps,
     }
     const outcome = await requestApproval(pending.planned, nativeDialogPrompter(deps.dialog));
     if (outcome.status !== "approved") return { status: "rejected" };
+    // 대화상자가 열린 동안 다른 프로젝트를 골랐으면 방금 받은 승인도 쓰지 않는다.
+    if (session.projectDir !== pending.request.projectRoot) return changed;
     const result = await runInstallTransaction(pending.planned, outcome.approval, pending.request, env);
     const view = buildInstallResultView(result);
     await recordDesktopInstall(pending.planned, result, pending.request, deps, view);

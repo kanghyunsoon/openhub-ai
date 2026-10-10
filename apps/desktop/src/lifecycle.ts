@@ -141,7 +141,13 @@ export interface LifecycleResultView {
   /** PLAN_STALE이면 재승인 화면으로 돌아간다. */
   reapprove: boolean;
 }
-export type LifecycleRunResponse = { status: "done"; result: LifecycleResultView } | { status: "rejected" | "no-plan" } | { status: "error"; code: string; message: string };
+/** project-changed: 계획을 만든 뒤(또는 승인 대화상자가 열린 동안) 다른 프로젝트를 골라 계획과 승인을 버렸다. 실행·쓰기 0. */
+export type LifecycleRunResponse =
+  | { status: "done"; result: LifecycleResultView }
+  | { status: "rejected" | "no-plan" }
+  | { status: "project-changed"; message: string }
+  | { status: "error"; code: string; message: string };
+export const PROJECT_CHANGED_MESSAGE = "계획을 만든 뒤 다른 프로젝트를 선택해 이 계획과 승인을 버렸습니다. 아무것도 실행하거나 바꾸지 않았습니다. 지금 프로젝트에서 계획을 다시 확인하세요.";
 
 const STATE_CODES = new Set(["STATE_CORRUPT", "STATE_VERSION_UNSUPPORTED", "STATE_PATH_ESCAPE"]);
 const OPERATION_TITLE = { update: "업데이트", rollback: "롤백", health: "Health Check", repair: "복구" } as const;
@@ -426,13 +432,16 @@ export async function runForRenderer(session: LifecycleSession, deps: LifecycleD
   const pending = session.take(id);
   if (pending === undefined) return { status: "no-plan" };
   // 계획을 만든 뒤 다른 프로젝트를 선택했으면 이전 계획을 실행하지 않는다(계획은 이미 버렸다). 대화상자도 열지 않는다.
-  if (session.projectDir() !== pending.request.projectRoot) return { status: "no-plan" };
+  const sameProject = () => session.projectDir() === pending.request.projectRoot;
+  if (!sameProject()) return { status: "project-changed", message: PROJECT_CHANGED_MESSAGE };
   try {
     const { entries } = await loadRegistry(deps.registryDir);
     const env = environment(deps, entries);
     if (pending.planned.plan.status === "up-to-date") return { status: "done", result: buildLifecycleResultView(await runLifecycleTransaction(pending.planned, undefined, pending.request, env)) };
     const outcome = await requestLifecycleApproval(pending.planned, nativeLifecycleDialogPrompter(deps.dialog));
     if (outcome.status !== "approved") return { status: "rejected" };
+    // 대화상자가 열린 동안 다른 프로젝트를 골랐으면 방금 받은 승인도 쓰지 않는다(승인·계획 폐기, 실행·쓰기 0).
+    if (!sameProject()) return { status: "project-changed", message: PROJECT_CHANGED_MESSAGE };
     return { status: "done", result: buildLifecycleResultView(await runLifecycleTransaction(pending.planned, outcome.approval, pending.request, env)) };
   } catch {
     return { status: "error", code: "run-failed", message: "실행하지 못했습니다" };

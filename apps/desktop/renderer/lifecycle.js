@@ -101,10 +101,12 @@
     const response = await window.openhub.runLifecycle(id);
     if (response.status === "rejected") {
       status.textContent = "승인하지 않아 중단했습니다. 아무것도 바꾸지 않았습니다.";
+      status.dataset.runDone = "1";
       return { status: "rejected", health: [] };
     }
     if (response.status !== "done") {
       status.textContent = "실행할 수 없습니다: " + (response.message || response.status);
+      status.dataset.runDone = "1";
       return { status: response.status, health: [] };
     }
     if (response.result.reapprove) {
@@ -196,23 +198,50 @@
     return { status: result.status, health: result.health || [], preview: view.previewLines.length, rollbackButton: Boolean(after && after.querySelector(".lifecycle-rollback")) };
   };
 
-  // 스모크(--smoke + OPENHUB_SMOKE_REPAIR): 화면과 같은 경로로 상태 → [복구 계획 확인] → 체크 → 확인 → 결과 → 최신 상태.
+  /** root 아래 DOM이 바뀔 때마다 predicate를 다시 보고, 값이 생기면 그 값으로 끝난다(timer 없음). */
+  function waitFor(root, predicate) {
+    return new Promise((resolve) => {
+      const first = predicate();
+      if (first) return resolve(first);
+      const observer = new MutationObserver(() => {
+        const value = predicate();
+        if (value) {
+          observer.disconnect();
+          resolve(value);
+        }
+      });
+      observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true });
+    });
+  }
+
+  // 스모크(--smoke + OPENHUB_SMOKE_REPAIR): 사람이 하는 것과 같은 DOM 조작만 쓴다. 실제 [복구 계획 확인] click → 승인 항목 checkbox
+  // click(change 이벤트) → 확인 버튼 click → (preload → main IPC → 승인 → Core 실행) → 결과 렌더링을 기다린 뒤 상태를 다시 읽는다.
+  // 내부 open()·run()을 직접 부르지 않는다. main 스모크는 가짜 npm(cache 항목만)·가짜 Health를 쓴다.
   window.__openhubRepair = async (toolId) => {
     await refresh();
     const li = [...list.querySelectorAll("li.entry")].find((x) => x.dataset.toolId === toolId && x.querySelector(".lifecycle-repair"));
     if (!li) return { status: "no-repair-button", states: [...list.querySelectorAll("li.entry")].map((x) => x.dataset.entryId) };
-    const view = await open("repair", li.dataset.entryId);
-    if (view === null) return { status: "no-plan" };
-    for (const box of panel.querySelectorAll('input[type="checkbox"]')) {
-      box.checked = true;
-      box.dispatchEvent(new Event("change"));
-    }
-    const confirm = panel.querySelector(".lifecycle-confirm");
-    if (!confirm || confirm.disabled) return { status: "not-executable" };
-    confirm.disabled = true;
-    const result = await run("repair", li.dataset.entryId);
+    li.querySelector(".lifecycle-repair").click();
+    const ready = await waitFor(panel, () => panel.querySelector(".lifecycle-confirm") || panel.querySelector(".install-warning"));
+    if (!ready.classList.contains("lifecycle-confirm")) return { status: "not-executable", message: ready.textContent };
+    const preview = (panel.querySelector(".install-preview")?.textContent || "").split("\n").length;
+    const boxes = [...panel.querySelectorAll('input[type="checkbox"]')];
+    const disabledBefore = ready.disabled;
+    for (const box of boxes) box.click();
+    if (ready.disabled) return { status: "not-executable", boxes: boxes.length };
+    ready.click();
+    const done = await waitFor(panel, () => panel.querySelector(".lifecycle-outcome") || panel.querySelector('[data-run-done="1"]'));
+    const heading = panel.querySelector("h3")?.textContent || "";
     const after = await refresh();
-    return { status: result.status, outcome: result.outcome, health: result.health || [], preview: view.previewLines.length, after: after.items ? after.items.map((i) => i.state) : [] };
+    return {
+      status: done.classList.contains("lifecycle-outcome") ? heading.replace(/^결과 · /u, "").split(" ")[0] : "not-run",
+      outcome: done.classList.contains("lifecycle-outcome") ? [...done.classList].find((c) => c.startsWith("outcome-")).slice("outcome-".length) : done.textContent,
+      health: [...panel.querySelectorAll(".install-change")].map((p) => p.textContent.trim()).filter((t) => t.startsWith("Health:")),
+      preview,
+      boxes: boxes.length,
+      confirmDisabledBeforeChecks: disabledBefore,
+      after: after.items ? after.items.filter((i) => i.toolId === toolId).map((i) => i.state) : [],
+    };
   };
 })();
 

@@ -11,8 +11,10 @@ import { approveAll, createHarness, plannedOf } from "../../../packages/core/tes
 /**
  * v0.2.0 P0-3 Desktop Repair 실제 Electron E2E(OPENHUB_E2E=1, Electron 바이너리가 있을 때만). Core로 kubernetes-mcp-server를 임시
  * 프로젝트에 설치하고 tool config를 지운 뒤, 실제 Electron 앱을 --smoke + OPENHUB_SMOKE_REPAIR로 띄운다. renderer가 화면의
- * [복구 계획 확인] → 승인 항목 체크 → 확인 버튼 → (preload → main IPC → 네이티브 대화상자 자리의 자동 확인) → 결과 → 최신 상태를 그대로 지난다.
- * 가짜 npm(cache 항목만)·가짜 Health를 쓴다(network·실제 MCP 실행 0). 실제 Kubernetes·자격증명은 쓰지 않는다.
+ * [복구 계획 확인] click → 승인 항목 checkbox click → 확인 버튼 click → (preload → main IPC → 네이티브 대화상자 자리의 자동 확인 → Core 실행)
+ * → 결과 렌더링 → 최신 상태를 그대로 지난다(renderer 내부 함수 직접 호출 없음).
+ * 이 테스트는 Electron UI·IPC 통합 검증이다: 가짜 npm(cache 항목만)·가짜 Health를 쓴다(network·실제 MCP 실행 0). 실제 MCP 서버 Health는
+ * packages/core/test/registry/kubernetes-tool-config.e2e.test.ts가 따로 검증한다. 실제 Kubernetes·자격증명은 쓰지 않는다.
  */
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const DESKTOP = path.join(ROOT, "apps", "desktop");
@@ -57,9 +59,10 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || electronBin === null)("v0.
     });
     const line = out.stdout.split("\n").find((l) => l.startsWith("OPENHUB_SMOKE "));
     if (line === undefined) throw new Error("smoke 결과 없음: " + out.stderr.slice(-1500));
-    const smoke = JSON.parse(line.slice("OPENHUB_SMOKE ".length)) as { repair?: { status: string; outcome: string; health: string[]; preview: number; after: string[]; npmCalls: number; healthRuns: number; dialogs: string[] }; runtime: { electronVersion: string } };
+    const smoke = JSON.parse(line.slice("OPENHUB_SMOKE ".length)) as { repair?: { status: string; outcome: string; health: string[]; preview: number; boxes: number; confirmDisabledBeforeChecks: boolean; after: string[]; npmCalls: number; healthRuns: number; dialogs: string[] }; runtime: { electronVersion: string } };
     console.log("desktop repair electron: " + JSON.stringify({ exit: out.code, electron: smoke.runtime.electronVersion, repair: smoke.repair }));
-    expect(smoke.repair).toMatchObject({ status: "repaired", outcome: "succeeded", healthRuns: 1, dialogs: ["OpenHub 복구 승인"] });
+    expect(smoke.repair).toMatchObject({ status: "repaired", outcome: "succeeded", healthRuns: 1, npmCalls: 2, dialogs: ["OpenHub 복구 승인"], boxes: 3, confirmDisabledBeforeChecks: true });
+    expect(smoke.repair!.health[0]).toMatch(/^Health: Healthy/u);
     expect(smoke.repair!.after).toEqual(["state-consistent", "state-consistent", "state-consistent"]);
     expect(smoke.repair!.preview).toBeGreaterThan(5);
     expect(out.code).toBe(0);

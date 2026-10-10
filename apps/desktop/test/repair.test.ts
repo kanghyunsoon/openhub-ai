@@ -305,11 +305,32 @@ describe("v0.2.0 P0-3 Desktop Repair(lifecycle:plan-repair → 네이티브 승�
     const other = path.join(c.h.base, "other project");
     await mkdir(other);
     c.setProject(other);
-    expect(await c.run()).toEqual({ status: "no-plan" });
+    expect(await c.run()).toMatchObject({ status: "project-changed" });
     expect(c.dialogs).toEqual([]);
     expect(c.npm.calls).toEqual([]);
     c.setProject(c.h.projectRoot);
     expect(await c.run()).toEqual({ status: "no-plan" });
+    await expect(readFile(await c.toolConfigFile())).rejects.toThrow();
+  });
+
+  it("16b: 승인 대화상자가 열린 동안 다른 프로젝트를 고르면 승인을 쓰지 않는다(이전 프로젝트 쓰기 0, 다른 프로젝트 보존)", async () => {
+    let switchTo: (() => void) | undefined;
+    const c = await setup({ dialog: () => (switchTo?.(), 1) });
+    const other = path.join(c.h.base, "other project");
+    await mkdir(other);
+    await writeFile(path.join(other, ".mcp.json"), JSON.stringify(OTHER, null, 2) + "\n");
+    switchTo = () => c.setProject(other);
+    await unlink(await c.toolConfigFile());
+    const files = await c.files();
+    const state = await c.stateBytes();
+    expect((await c.plan()).status).toBe("ok");
+    expect(await c.run()).toMatchObject({ status: "project-changed" });
+    expect(c.dialogs).toHaveLength(1);
+    expect(c.npm.calls).toEqual([]);
+    expect(c.healthRuns).toEqual([]);
+    expect(await c.files()).toEqual(files);
+    expect(await c.stateBytes()).toBe(state);
+    expect(await readFile(path.join(other, ".mcp.json"), "utf8")).toBe(JSON.stringify(OTHER, null, 2) + "\n");
     await expect(readFile(await c.toolConfigFile())).rejects.toThrow();
   });
 

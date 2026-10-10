@@ -178,7 +178,7 @@ async function createWindow(): Promise<void> {
       const repair =
         smokeRepairTool === undefined || smokeRepair === undefined || project === undefined
           ? undefined
-          : ((await win.webContents.executeJavaScript("window.__openhubRepair(" + JSON.stringify(smokeRepairTool) + ")")) as { status: string; outcome?: string; health?: string[]; preview?: number; after?: string[] });
+          : ((await win.webContents.executeJavaScript("window.__openhubRepair(" + JSON.stringify(smokeRepairTool) + ")")) as { status: string; outcome?: string; health?: string[]; preview?: number; boxes?: number; confirmDisabledBeforeChecks?: boolean; after?: string[] });
       const release =
         smokeReleaseTool === undefined || update === undefined
           ? undefined
