@@ -29,20 +29,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-      # 선택(수동 실행에서 real_clients=true일 때만): Linux에서 실제 Client 프로그램이 OpenHub가 쓴 프로젝트 설정으로 서버를 띄우는지 확인한다.
-      # 버전 고정. 로그인·API key·모델 호출 없음(테스트가 자식 환경에서 key를 지운다). 설치 위치는 runner 임시 폴더, secret 없음.
-      - name: Pinned real clients (opt-in)
-        if: ${{ inputs.real_clients == true }}
-        run: |
-          npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/clients" @openai/codex@0.147.0 @anthropic-ai/claude-code@2.1.258
-          echo "$RUNNER_TEMP/clients/node_modules/.bin" >> "$GITHUB_PATH"
-          {
-            echo "OPENHUB_E2E_CODEX_JS=$RUNNER_TEMP/clients/node_modules/@openai/codex/bin/codex.js"
-            echo "OPENHUB_E2E_REAL_CLIENTS=1"
-            echo "OPENHUB_E2E_CODEX_APP_SERVER=1"
-          } >> "$GITHUB_ENV"
-          "$RUNNER_TEMP/clients/node_modules/.bin/codex" --version
-          "$RUNNER_TEMP/clients/node_modules/.bin/claude" --version
       - name: Remote validation (저장소·archived·이전·license·release source, 비인증)
         run: pnpm registry:remote registry-remote-report.json
       - uses: actions/upload-artifact@v4
@@ -66,6 +52,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      # 선택(수동 실행에서 real_clients=true일 때만): Linux에서 실제 Client 프로그램이 OpenHub가 쓴 프로젝트 설정으로 서버를 띄우는지 확인한다.
+      # 버전 고정. 로그인·API key·모델 호출 없음(테스트가 자식 환경에서 key를 지운다). 설치 위치는 runner 임시 폴더, secret 없음.
+      - name: Pinned real clients (opt-in)
+        if: ${{ inputs.real_clients == true }}
+        run: |
+          npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/clients" @openai/codex@0.147.0 @anthropic-ai/claude-code@2.1.258
+          echo "$RUNNER_TEMP/clients/node_modules/.bin" >> "$GITHUB_PATH"
+          {
+            echo "OPENHUB_E2E_CODEX_JS=$RUNNER_TEMP/clients/node_modules/@openai/codex/bin/codex.js"
+            echo "OPENHUB_E2E_REAL_CLIENTS=1"
+            echo "OPENHUB_E2E_CODEX_APP_SERVER=1"
+          } >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/clients/node_modules/.bin/codex" --version
+          "$RUNNER_TEMP/clients/node_modules/.bin/claude" --version
       - name: Sandbox install + M5 Health (npx·uvx·docker, runner 안에서만)
         run: pnpm exec vitest run packages/core/test/installer/executor.e2e.test.ts packages/core/test/registry/sandbox.e2e.test.ts packages/core/test/registry/npx-prepare.e2e.test.ts packages/core/test/registry/kubernetes-tool-config.e2e.test.ts --reporter=default --reporter=json --outputFile.json=sandbox-vitest.json
         env:
