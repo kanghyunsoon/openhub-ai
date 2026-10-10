@@ -80,12 +80,12 @@
     const targets = el("ul", "install-targets");
     for (const target of view.targets) {
       targets.append(
-        el("li", target.userScope ? "target warn-user-scope" : "target", t("install.target", { file: target.file, client: target.client, scope: t(target.userScope ? "install.target.userScope" : "install.target.projectScope"), manual: target.manual ? t("install.target.manual") : "" })),
+        el("li", target.userScope ? "target warn-user-scope" : "target", t("install.target", { file: target.file, client: target.client, scope: t(target.userScope ? "install.target.userScope" : "install.target.projectScope"), manual: target.manual ? t("install.target.manual") : target.change === "unchanged" ? t("install.target.unchanged") : target.change === "conflict" ? t("install.target.conflict") : "" })),
       );
     }
     nodes.push(targets);
     if (view.alreadyInstalled) {
-      // 사용자 범위 요청이 프로젝트 설치 때문에 already-installed가 된 경우: 성공이 아니라 "변경 없음"이며 사용자 설정을 쓰지 않았다.
+      // 고른 대상이 모두 같은 항목으로 이미 설정돼 있다: 성공이 아니라 "변경 없음"이며 (사용자 범위였다면) 사용자 설정을 쓰지 않았다.
       nodes.push(el("p", view.userScope ? "install-warning" : "todo", t(view.userScope ? "install.noChangesUserScope" : "install.noChanges")));
       show(nodes);
       panel.dataset.planState = "already-installed";

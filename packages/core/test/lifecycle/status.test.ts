@@ -78,7 +78,8 @@ describe("REQ-043 Install 연계·Status·Drift", () => {
     expect(p.result.status).toBe("partial-compensated");
     expect(p.recorded).toEqual({ ok: true, recorded: 0 });
     const noop = await createHarness(scratch, { entries: seed });
-    await writeFile(path.join(noop.projectRoot, ".mcp.json"), '{ "mcpServers": { "memory": { "command": "npx", "args": [] } } }\n');
+    // v0.2.0 범위별 판정: no-op은 고른 대상에 같은 항목이 있을 때다.
+    await writeFile(path.join(noop.projectRoot, ".mcp.json"), '{ "mcpServers": { "memory": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"] } } }\n');
     const n = await installed(noop, "memory-mcp", [{ client: "claude-code", scope: "project" }]);
     expect(n.result.status).toBe("no-op");
     for (const h of [failed, partial, noop]) expect(Object.keys((await stateOf(h)).entries)).toEqual([]);

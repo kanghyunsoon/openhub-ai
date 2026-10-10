@@ -3,8 +3,8 @@ import * as nodeFs from "node:fs/promises";
 import path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { WINDOWS_CMD_EXTRA_METACHARACTERS, tokenizeManifestCommand } from "./command";
-import { NPX_CLI_PLACEHOLDER, TOOL_CONFIG_PLACEHOLDER } from "../tool-config/index";
-import { canonicalize, type ApprovalRequirement, type ConfigPatchStep, type ConfigScope, type EnvReferenceStyle, type InstallClient, type PlanTargetInput, type ServerEntry } from "./plan";
+import { NPX_CLI_PLACEHOLDER, TOOL_CONFIG_PLACEHOLDER, planFormOfEntry } from "../tool-config/index";
+import { canonicalize, entryPlanDigest, type ApprovalRequirement, type ConfigPatchStep, type ConfigScope, type EnvReferenceStyle, type InstallClient, type PlanTargetInput, type ServerEntry } from "./plan";
 
 /**
  * Agent Client Config Writer(TASK-032, D-013·D-014).
@@ -178,25 +178,47 @@ export function detectIndent(text: string): string | number {
   return lead.startsWith("\t") ? "\t" : lead.length;
 }
 
-function hasServerKey(bytes: Buffer | null, format: ConfigFormat, serverName: string): boolean {
-  if (bytes === null) return false;
+/** 서버 항목을 찾는다. 없으면 { present: false }. 해석할 수 없는 파일은 예외다. */
+function findServerEntry(bytes: Buffer | null, format: ConfigFormat, serverName: string): { present: false } | { present: true; value: unknown } {
+  if (bytes === null) return { present: false };
   const { text } = decode(bytes);
-  if (text.trim() === "") return false;
+  if (text.trim() === "") return { present: false };
   const doc: unknown = format === "json" ? JSON.parse(text) : parseToml(text);
   const servers = isRecord(doc) ? doc[format === "json" ? "mcpServers" : "mcp_servers"] : undefined;
-  return isRecord(servers) && Object.prototype.hasOwnProperty.call(servers, serverName);
+  return isRecord(servers) && Object.prototype.hasOwnProperty.call(servers, serverName) ? { present: true, value: servers[serverName] } : { present: false };
 }
 
-/** Plan에 넣을 대상 정보(논리 경로·precondition). 파일 내용은 digest로만 남긴다. */
-export async function inspectConfigTarget(client: InstallClient, scope: ConfigScope, serverName: string, roots: ConfigRoots): Promise<PlanTargetInput> {
+/**
+ * Client 설정에서 읽은 항목 → Plan 형태(비교용). 기본은 planFormOfEntry(OpenHub 관리 tool config 경로·Windows node 실행 경로를
+ * placeholder로 되돌린다). undefined를 돌려주면 "같은 항목인지 판정할 수 없음"이고 그 대상은 충돌로 막힌다.
+ */
+export type EntryPlanForm = (entry: unknown) => unknown;
+
+export const defaultEntryPlanForm: EntryPlanForm = (entry) =>
+  isRecord(entry) && typeof entry.command === "string" && Array.isArray(entry.args) && entry.args.every((a) => typeof a === "string")
+    ? planFormOfEntry(entry as { command: string; args: string[] })
+    : entry;
+
+/**
+ * Plan에 넣을 대상 정보(논리 경로·precondition). 파일 내용은 digest로만 남긴다.
+ * 같은 서버 이름 항목이 있으면 그 항목을 Plan 형태로 되돌린 값의 digest(entryDigest)도 넣는다(v0.2.0 범위별 설치 판정).
+ * 항목 값 자체(경로·인자)는 Plan에 남기지 않는다.
+ */
+export async function inspectConfigTarget(client: InstallClient, scope: ConfigScope, serverName: string, roots: ConfigRoots, planForm: EntryPlanForm = defaultEntryPlanForm): Promise<PlanTargetInput> {
   const target = configTargetFor(client, scope);
   if (!target.writable) return { client, scope, file: target.logical, envReference: "manual", precondition: { exists: false, fileDigest: null, keyAbsent: true } };
   const fs = roots.fs ?? nodeConfigFs;
   const { file } = await resolveInside(target, roots, fs);
   const bytes = await readOptional(fs, file);
   let keyAbsent = true;
+  let entryDigest: string | undefined;
   try {
-    keyAbsent = !hasServerKey(bytes, target.format, serverName);
+    const found = findServerEntry(bytes, target.format, serverName);
+    keyAbsent = !found.present;
+    if (found.present) {
+      const form = planForm(found.value);
+      if (form !== undefined) entryDigest = entryPlanDigest(form);
+    }
   } catch {
     keyAbsent = true; // 해석 불가 파일은 쓰기 단계에서 CONFIG_UNPARSEABLE로 멈춘다. digest가 내용 변화를 잡는다.
   }
@@ -205,7 +227,7 @@ export async function inspectConfigTarget(client: InstallClient, scope: ConfigSc
     scope,
     file: target.logical,
     envReference: target.envReference,
-    precondition: { exists: bytes !== null, fileDigest: bytes === null ? null : fileSha256(bytes), keyAbsent },
+    precondition: { exists: bytes !== null, fileDigest: bytes === null ? null : fileSha256(bytes), keyAbsent, ...(entryDigest === undefined ? {} : { entryDigest }) },
   };
 }
 

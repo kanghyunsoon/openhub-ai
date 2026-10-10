@@ -5,11 +5,13 @@ import {
   FLOATING_ARTIFACT_NOTICE,
   assembleInstallPlan,
   canonicalize,
+  entryPlanDigest,
   installPlanDigest,
   installPlanSchema,
   installationStatusFromReport,
   registryDigestExcluding,
   serializeInstallPlan,
+  serverEntry,
   type InstallPlanV1,
   type RegistryEntry,
 } from "../../src/index";
@@ -174,11 +176,18 @@ describe("REQ-034 InstallPlan v1 계약과 canonical digest", () => {
     expect(memory.warnings.map((w) => w.code)).toContain("manual-setup-required");
   });
 
-  it("AC-027-09 resolved installed Tool은 already-installed이고 steps가 비어 실행할 것이 없다", async () => {
+  it("AC-027-09 (v0.2.0 대상별 판정) 고른 대상에 같은 항목이 있으면 already-installed이고 steps가 비어 실행할 것이 없다. 다른 대상은 추가할 수 있다", async () => {
     const p = await fixtureProfile("claude-mcp");
     const report = reportFor(p, seed);
     expect(installationStatusFromReport(report, "playwright-mcp")).toBe("installed");
-    const { plan } = planFor(seed, report, "playwright-mcp", { targets: [target("cursor")] });
+    // 도구가 Claude Code 프로젝트에 있어도 Cursor 프로젝트(대상)에는 없다 → 추가할 수 있다(도구 전체 설치 여부로 막지 않는다).
+    const other = planFor(seed, report, "playwright-mcp", { targets: [target("cursor")] }).plan;
+    expect(other.status).toBe("installable");
+    expect(other.steps.filter((s) => s.kind === "config-patch").map((s) => s.kind === "config-patch" && s.client)).toEqual(["cursor"]);
+    // 같은 대상에 같은 항목(Plan 형태 digest 일치)이 있으면 already-installed다.
+    const launch = assemblyInput(seed, report, "playwright-mcp").launch!;
+    const same = { exists: true, fileDigest: "sha256:" + "a".repeat(64), keyAbsent: false, entryDigest: entryPlanDigest(serverEntry("cursor", launch, [])) };
+    const { plan } = planFor(seed, report, "playwright-mcp", { targets: [target("cursor", "project", { precondition: same })] });
     expect(plan.status).toBe("already-installed");
     expect(plan.steps).toEqual([]);
     expect(plan.launch).toBeNull();

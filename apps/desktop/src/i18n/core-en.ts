@@ -1,6 +1,7 @@
 import {
   CAPABILITIES,
   REVIEWED_TOOL_CONFIGS,
+  installTargetChange,
   toolConfigVerificationGaps,
   type ApprovalRequirement,
   type InstallPlanV1,
@@ -169,7 +170,7 @@ function singleSentenceEn(plan: AnyPlan | null, code: string): string | undefine
 function perItemEn(plan: AnyPlan, code: string): string[] | null | undefined {
   if (code === "required-env" || code === "environment-unverified") return requiredNames(plan).map((n) => requiredEnvEn([n]));
   if (code === "manual-setup-required") return plan.targets.filter((x) => "envReference" in x && x.envReference === "manual").map((t) => clientName(t.client) + " " + t.scope + " configuration (" + t.file + ") is not written by OpenHub. Set it up yourself.");
-  if (code === "CONFIG_KEY_EXISTS") return isInstall(plan) ? plan.targets.filter((x) => x.envReference !== "manual" && !x.precondition.keyAbsent).map((t) => t.file + " already has a " + t.serverName + " entry; OpenHub does not overwrite it.") : null;
+  if (code === "CONFIG_KEY_EXISTS") return isInstall(plan) ? plan.targets.filter((x) => installTargetChange(plan, x) === "conflict").map((t) => t.file + " already has a " + t.serverName + " entry; OpenHub does not overwrite it.") : null;
   if (code === "client-launch-unverified" || code === "platform-unverified") {
     const platform = isInstall(plan) ? plan.launch?.platform : plan.platform;
     if (platform === undefined) return null;
@@ -215,7 +216,7 @@ const windowsWrapperEn = "Windows compatibility policy (OpenHub): to let the cli
 
 export function installationStatusEn(plan: InstallPlanV1): string {
   const { installationStatus, inspectedScopes } = plan.source.recommendation;
-  if (installationStatus === "installed") return "Already configured";
+  if (installationStatus === "installed") return plan.status === "already-installed" ? "Already configured" : "Already configured for another client or scope (see Files to change for each selected target)";
   if (installationStatus === "unknown") return "Could not determine whether it is installed";
   if (installationStatus === "unidentified-present") return "An unidentified MCP server already exists";
   return inspectedScopes.includes("user") ? "Not installed (project + user scope checked)" : "Not installed in project scope (user scope not checked)";
@@ -253,8 +254,12 @@ export function installPreviewEn(planned: PlannedInstall): string[] {
   if (plan.targets.length === 0) lines.push("  (none)");
   for (const t of plan.targets) {
     const where = clientName(t.client) + ", " + t.scope + " scope";
-    if (t.envReference === "manual") lines.push("  - " + t.file + " (" + where + ") not written — set it up yourself");
-    else lines.push("  - " + t.file + " (" + where + ") adds the " + (t.client === "codex" ? "mcp_servers." : "mcpServers.") + t.serverName + " entry · " + (t.precondition.exists ? "existing file" : "new file"));
+    const key = (t.client === "codex" ? "mcp_servers." : "mcpServers.") + t.serverName;
+    const change = installTargetChange(plan, t);
+    if (change === "manual") lines.push("  - " + t.file + " (" + where + ") not written — set it up yourself");
+    else if (change === "unchanged") lines.push("  - " + t.file + " (" + where + ") " + key + " no change — the same entry already exists");
+    else if (change === "conflict") lines.push("  - " + t.file + " (" + where + ") " + key + " not written — an entry with the same name but different content exists (conflict; not overwritten)");
+    else lines.push("  - " + t.file + " (" + where + ") adds the " + key + " entry · " + (t.precondition.exists ? "existing file" : "new file"));
   }
   lines.push("", "Environment variables");
   if (plan.requiredEnv.length === 0) lines.push("  (none needed)");
