@@ -17,6 +17,12 @@
     "preparation": "pull",
     "spec": "ghcr.io/github/github-mcp-server"
   },
+  "kubernetes-mcp-server": {
+    "kind": "npm-package",
+    "pinned": true,
+    "preparation": "npm-cache",
+    "spec": "kubernetes-mcp-server@0.0.67"
+  },
   "memory-mcp": {
     "kind": "npm-package",
     "pinned": false,

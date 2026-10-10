@@ -11,7 +11,6 @@ import {
   createTreeKiller,
   lifecycleStatus,
   locateWindowsNpxLauncher,
-  manifestSchema,
   nodeExecSpawner,
   npmChildEnv,
   planLifecycle,
@@ -31,7 +30,7 @@ import { seedEntries } from "../recommendation/helpers";
  * v0.2.0 Kubernetes tool config 실제 E2E(OPENHUB_E2E=1에서만). 승인된 InstallPlan·LifecyclePlan을 끝까지 실행한다.
  * 실제 npm(npx Prepare, 임시 npm cache)과 실제 kubernetes-mcp-server@0.0.67을 쓴다. 클러스터·자격증명은 쓰지 않는다:
  * 127.0.0.1 합성 Kubernetes API(가짜 Secret·ConfigMap, Secret 요청 카운터)와 가짜 bearer token kubeconfig만 쓴다.
- * home 경로에 공백·괄호·&·한글을 넣는다. Kubernetes Manifest는 Registry에 등록하지 않고 이 테스트 안에서만 만든다(PR #7).
+ * home 경로에 공백·괄호·&·한글을 넣는다. 실제 Registry Manifest(registry/mcp/kubernetes-mcp-server.yaml)를 쓴다.
  * MCP 서버는 각 Client 설정 파일에 OpenHub가 실제로 쓴 command·args를 그대로(shell 없이) 실행한다.
  */
 const platform = process.platform === "win32" ? "windows" : "linux";
@@ -140,23 +139,11 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 Kubernetes tool conf
       process.env["npm_config_cache"] = npmCache;
       process.env["KUBECONFIG"] = kubeconfig;
 
-      const seed = await seedEntries();
-      const k8s = manifestSchema.parse({
-        name: "kubernetes-mcp-server",
-        repository: { github: "containers/kubernetes-mcp-server" },
-        category: ["mcp", "automation"],
-        capabilities: ["kubernetes-operations"],
-        targets: ["claude-code", "codex", "cursor"],
-        platform: { windows: true, macos: true, linux: true },
-        install: { preferredAdapter: "npx", options: { command: REVIEWED_TOOL_CONFIGS["kubernetes-mcp-server"]!.commands[0] } },
-        healthCheck: { type: "mcp-handshake" },
-        update: { source: "npm" },
-        rollback: { supported: true },
-        verification: "community",
-        recommendation: { appliesTo: { stacks: ["kubernetes"] }, identity: { mcpServerNames: ["kubernetes"] }, source: { type: "dedicated" } },
-        toolConfig: { format: "toml", content: KUBERNETES_TOOL_CONFIG },
-      });
-      const entries: RegistryEntry[] = [...seed, { ...seed[0]!, manifest: k8s }];
+      // 실제 Registry Manifest(registry/mcp/kubernetes-mcp-server.yaml). 검토된 명령과 같아야 한다.
+      const entries: RegistryEntry[] = await seedEntries();
+      const k8s = entries.find((x) => x.manifest.name === "kubernetes-mcp-server")!.manifest;
+      expect(k8s.install.options?.["command"]).toBe(REVIEWED_TOOL_CONFIGS["kubernetes-mcp-server"]!.commands[0]);
+      expect(k8s.toolConfig?.content).toBe(KUBERNETES_TOOL_CONFIG);
       const h = await createHarness(scratch, { entries });
       const windowsNpx = platform === "windows" ? await locateWindowsNpxLauncher({ pathEnv: process.env["PATH"] ?? "", fs: { stat } }) : null;
       const { spawner: _fake, ...rest } = h.env;

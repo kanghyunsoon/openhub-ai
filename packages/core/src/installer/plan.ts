@@ -5,7 +5,7 @@ import type { Manifest } from "../manifest/index";
 import type { RegistryEntry } from "../registry/index";
 import { TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, type RecommendationReport } from "../recommendation/index";
 import { parseNpxPrepareArgs } from "../process/npx-prepare";
-import { NPX_CLI_PLACEHOLDER, REVIEWED_TOOL_CONFIGS, TOOL_CONFIG_MAX_BYTES, TOOL_CONFIG_PLACEHOLDER, toolConfigDigest, toolConfigFileId } from "../tool-config/index";
+import { NPX_CLI_PLACEHOLDER, REVIEWED_TOOL_CONFIGS, TOOL_CONFIG_MAX_BYTES, TOOL_CONFIG_PLACEHOLDER, toolConfigDigest, toolConfigFileId, toolConfigVerificationNotices } from "../tool-config/index";
 
 /**
  * Immutable InstallPlan v1(TASK-027, D-012).
@@ -427,7 +427,10 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
     if (input.backend?.adapter === "docker") warnings.push({ code: "docker-daemon-unchecked", message: "docker 데몬 연결 여부는 확인하지 않았습니다. 데몬이 꺼져 있으면 준비 단계가 실패합니다" });
     for (const name of requiredNames) warnings.push({ code: "required-env", message: requiredEnvNotice(name) });
     if (manifest.category.includes("database") && requiredNames.length > 0) warnings.push({ code: "database-credential-scope", message: DATABASE_CREDENTIAL_NOTICE });
-    if (toolConfigSteps.length > 0 && reviewed !== undefined) warnings.push({ code: "tool-config", message: reviewed.notice });
+    if (toolConfigSteps.length > 0 && reviewed !== undefined) {
+      warnings.push({ code: "tool-config", message: reviewed.notice });
+      warnings.push(...toolConfigVerificationNotices(manifest.name, targets.filter((t) => t.envReference !== "manual").map((t) => t.client), input.launch!.platform));
+    }
     if (approvalRequirements.has("client-env-parse-risk")) warnings.push({ code: "client-env-parse-risk", message: clientEnvParseRiskNotice(requiredNames) });
     for (const t of targets.filter((x) => x.envReference === "manual")) {
       warnings.push({ code: "manual-setup-required", message: `${t.client} ${t.scope} 설정(${t.file})은 OpenHub가 쓰지 않습니다. 직접 설정해야 합니다` });
