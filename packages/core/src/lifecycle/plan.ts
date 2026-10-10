@@ -1,4 +1,5 @@
 import { z } from "zod";
+import path from "node:path";
 import { containsAbsolutePath } from "../analyzer/index";
 import type { FetchLike } from "../discovery/github";
 import {
@@ -31,12 +32,16 @@ import {
   serverEntry,
   serverEntrySchema,
   sha256Digest,
+  toolConfigStepFor,
+  toolConfigStepSchema,
   type ConfigScope,
   type InstallBackend,
   type InstallClient,
   type PlanBlocker,
+  type ToolConfigStateInput,
 } from "../installer/plan";
 import { installCandidates } from "../installer/router";
+import { NPX_CLI_PLACEHOLDER, REVIEWED_TOOL_CONFIGS, TOOL_CONFIG_PLACEHOLDER, inspectToolConfig, planFormOfEntry, toolConfigDigest, toolConfigLocation, type ToolConfigFs } from "../tool-config/index";
 import { PLAN_CHANGE_KINDS } from "../installer/stale";
 import type { Manifest } from "../manifest/index";
 import { TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, type RecommendPlatform } from "../recommendation/index";
@@ -56,10 +61,11 @@ import { projectKeyFor, readLifecycleState, type StateErrorCode } from "./store"
  */
 
 export const LIFECYCLE_PLAN_SCHEMA_VERSION = 1;
-export const LIFECYCLE_OPERATIONS = ["update", "rollback", "health"] as const;
+/** repair(v0.2.0): tool config Tool의 누락·변경된 OpenHub 관리 파일과 Client 설정 경로를 승인 뒤 다시 만든다(버전은 그대로). */
+export const LIFECYCLE_OPERATIONS = ["update", "rollback", "health", "repair"] as const;
 export type LifecycleOperation = (typeof LIFECYCLE_OPERATIONS)[number];
 export const LIFECYCLE_PLAN_STATUSES = ["ready", "up-to-date", "blocked", "unsupported"] as const;
-export const LIFECYCLE_APPROVAL_REQUIREMENTS = ["base", "health-execution", "user-scope-config", "environment-unverified", "health-gate-skipped", "rollback-to-previous"] as const;
+export const LIFECYCLE_APPROVAL_REQUIREMENTS = ["base", "health-execution", "user-scope-config", "environment-unverified", "health-gate-skipped", "rollback-to-previous", "tool-config"] as const;
 export type LifecycleApprovalRequirement = (typeof LIFECYCLE_APPROVAL_REQUIREMENTS)[number];
 export const LIFECYCLE_PLAN_CHANGE_KINDS = [...PLAN_CHANGE_KINDS, "state", "resolution", "health-policy", "rollback-snapshot"] as const;
 export type LifecyclePlanChange = (typeof LIFECYCLE_PLAN_CHANGE_KINDS)[number];
@@ -84,6 +90,7 @@ export const LIFECYCLE_APPROVAL_MESSAGES: Readonly<Record<LifecycleApprovalRequi
   "environment-unverified": "이 도구는 실행에 환경변수가 필요하지만 OpenHub는 해당 값이나 설정 여부를 확인하지 않습니다.",
   "health-gate-skipped": HEALTH_GATE_SKIP_NOTICE,
   "rollback-to-previous": "Version State에 남은 직전 버전으로 되돌립니다. 현재 버전 설정은 바뀝니다.",
+  "tool-config": "OpenHub가 ~/.openhub/tool-config 아래에 검토된 서버 정책 파일을 만들거나 바꾸고, Client 설정이 그 파일을 쓰게 합니다.",
 };
 
 const text = z.string().min(1).max(300);
@@ -129,6 +136,8 @@ const lifecycleTargetSchema = z.strictObject({
   /** Version State revision(미추적 대상은 null). */
   stateRevision: z.number().int().min(1).nullable(),
   precondition: z.strictObject({ fileDigest: sha256.nullable(), entryDigest: sha256.nullable() }),
+  /** repair: 옮기거나 복사한 프로젝트에서 이 기록(EntryKey)을 새 위치로 가져온다(v0.2.0). */
+  relocatedFrom: text.optional(),
 });
 export type LifecyclePlanTarget = z.output<typeof lifecycleTargetSchema>;
 
@@ -152,7 +161,7 @@ export const lifecyclePlanSchema = z
     current: z.strictObject({ requested: text, identity: artifactIdentitySchema.nullable(), clientSpec: clientSpecSchema }),
     target: z.strictObject({ requested: text, identity: artifactIdentitySchema.nullable(), clientSpec: clientSpecSchema }),
     targets: z.array(lifecycleTargetSchema).min(1),
-    steps: z.array(z.discriminatedUnion("kind", [runStepSchema, configReplaceStepSchema, healthStepSchema, stateCommitStepSchema, healthRecordStepSchema])),
+    steps: z.array(z.discriminatedUnion("kind", [runStepSchema, toolConfigStepSchema, configReplaceStepSchema, healthStepSchema, stateCommitStepSchema, healthRecordStepSchema])),
     healthPolicy: z.strictObject({ gate: z.enum(HEALTH_GATES), timeouts: timeoutsSchema }),
     requiredEnv: z.array(z.strictObject({ name: envName, required: z.boolean(), status: z.literal("unchecked") })),
     sideEffects: z.array(z.enum(["network", "download", "file-write", "process-launch"])),
@@ -164,8 +173,9 @@ export const lifecyclePlanSchema = z
       ctx.addIssue({ code: "custom", path: ["target", "identity"], message: "update Plan은 resolved identity가 있어야 한다" });
     }
     const spec = plan.target.clientSpec;
-    const wrapped = plan.platform === "windows" && plan.backend === "npx";
-    if (wrapped ? spec.command !== "cmd" || JSON.stringify(spec.args.slice(0, 3)) !== JSON.stringify(["/d", "/c", "npx"]) : spec.command !== plan.backend) {
+    const direct = plan.platform === "windows" && plan.backend === "npx" && spec.args.includes(TOOL_CONFIG_PLACEHOLDER);
+    const wrapped = plan.platform === "windows" && plan.backend === "npx" && !direct;
+    if (direct ? spec.command !== "node" || spec.args[0] !== NPX_CLI_PLACEHOLDER : wrapped ? spec.command !== "cmd" || JSON.stringify(spec.args.slice(0, 3)) !== JSON.stringify(["/d", "/c", "npx"]) : spec.command !== plan.backend) {
       ctx.addIssue({ code: "custom", path: ["target", "clientSpec"], message: "clientSpec이 플랫폼별 launch 규칙(D-016)과 다릅니다" });
     }
     const hasHealth = plan.steps.some((s) => s.kind === "health");
@@ -208,6 +218,7 @@ export interface LifecycleTargetInput {
   entryKey: string;
   stateRevision: number | null;
   precondition: { fileDigest: string | null; entryDigest: string | null };
+  relocatedFrom?: string;
 }
 
 export interface LifecyclePlanAssemblyInput {
@@ -224,6 +235,8 @@ export interface LifecyclePlanAssemblyInput {
   targets: LifecycleTargetInput[];
   healthGate: HealthGate;
   blockers: PlanBlocker[];
+  /** tool config Tool(v0.2.0): 검토된 내용과 scope별 현재 상태. 있으면 update·rollback·repair가 tool-config 단계를 갖는다. */
+  toolConfig?: { content: string; current: readonly { scope: ConfigScope; current: ToolConfigStateInput }[] };
 }
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -246,7 +259,7 @@ export function assembleLifecyclePlan(input: LifecyclePlanAssemblyInput): Planne
     ? "unsupported"
     : blockers.length > 0
       ? "blocked"
-      : operation !== "health" && sameIdentity
+      : operation !== "health" && operation !== "repair" && sameIdentity
         ? "up-to-date"
         : "ready";
   const ready = status === "ready";
@@ -277,6 +290,13 @@ export function assembleLifecyclePlan(input: LifecyclePlanAssemblyInput): Planne
       const image = input.target.identity?.spec ?? input.target.launchArgs[input.target.launchArgs.length - 1]!;
       steps.push({ id: "docker-pull", kind: "run", executable: "docker", args: ["pull", image], cwd: "isolated", network: true, timeoutMs: DOCKER_PULL_TIMEOUT_MS });
     }
+    // tool config: Client 설정을 바꾸기 전에 scope별 OpenHub 관리 파일을 검토된 내용으로 맞춘다.
+    if (input.toolConfig !== undefined) {
+      for (const scope of [...new Set(targets.map((t) => t.scope))].sort((a, b) => SCOPE_ORDER[a] - SCOPE_ORDER[b])) {
+        const found = input.toolConfig.current.find((c) => c.scope === scope);
+        if (found !== undefined) steps.push(toolConfigStepFor(input.toolId, input.toolConfig.content, scope, found.current));
+      }
+    }
     const launch = { platform: input.platform, executable: backend, args: [...input.target.launchArgs], envNames: [...requiredNames], clientSpec };
     for (const t of targets) {
       steps.push({
@@ -301,6 +321,7 @@ export function assembleLifecyclePlan(input: LifecyclePlanAssemblyInput): Planne
     if (requiredNames.length > 0) approvalRequirements.add("environment-unverified");
     if (!healthRequired) approvalRequirements.add("health-gate-skipped");
     if (operation === "rollback") approvalRequirements.add("rollback-to-previous");
+    if (steps.some((s) => s.kind === "tool-config")) approvalRequirements.add("tool-config");
   }
 
   const warnings: LifecyclePlanV1["warnings"] = blockers.map((b) => ({ code: b.code, message: b.message }));
@@ -315,6 +336,8 @@ export function assembleLifecyclePlan(input: LifecyclePlanAssemblyInput): Planne
     }
     for (const name of requiredNames) warnings.push({ code: "environment-unverified", message: requiredEnvNotice(name) });
     if (!healthRequired) warnings.push({ code: "health-gate-skipped", message: HEALTH_GATE_SKIP_NOTICE });
+    const reviewed = REVIEWED_TOOL_CONFIGS[input.toolId];
+    if (steps.some((s) => s.kind === "tool-config") && reviewed !== undefined) warnings.push({ code: "tool-config", message: reviewed.notice });
   }
   warnings.sort((a, b) => cmp(a.code, b.code) || cmp(a.message, b.message));
 
@@ -325,7 +348,7 @@ export function assembleLifecyclePlan(input: LifecyclePlanAssemblyInput): Planne
       sideEffects.add("download");
     }
     if (s.kind === "health") sideEffects.add("process-launch");
-    if (s.kind === "config-replace" || s.kind === "state-commit" || s.kind === "health-record") sideEffects.add("file-write");
+    if (s.kind === "config-replace" || s.kind === "state-commit" || s.kind === "health-record" || s.kind === "tool-config") sideEffects.add("file-write");
   }
 
   const plan: LifecyclePlanV1 = {
@@ -357,6 +380,8 @@ export interface LifecyclePlanOptions {
   operation: LifecycleOperation;
   toolId: string;
   projectRoot: string;
+  /** OpenHub 관리 tool config 파일 접근(v0.2.0, 테스트 주입용). */
+  toolConfigFs?: ToolConfigFs;
   homeDir: string;
   entries: readonly RegistryEntry[];
   platform: RecommendPlatform;
@@ -375,6 +400,7 @@ export interface LifecyclePlanOptions {
 
 export type LifecyclePlanErrorCode =
   | "TOOL_NOT_FOUND"
+  | "REPAIR_UNSUPPORTED"
   | "NOT_MANAGED"
   | "NO_ROLLBACK_TARGET"
   | "HEALTH_SKIP_NOT_ALLOWED"
@@ -412,7 +438,13 @@ function substituteArtifact(backend: InstallBackend, args: readonly string[], fr
   return out;
 }
 
-const argsOfClientSpec = (spec: { command: string; args: readonly string[] }) => (spec.command === "cmd" ? spec.args.slice(3) : [...spec.args]);
+const argsOfClientSpec = (spec: { command: string; args: readonly string[] }) => (spec.command === "cmd" ? spec.args.slice(3) : spec.command === "node" ? spec.args.slice(1) : [...spec.args]);
+/** launch 인자 검사. {toolConfig} token은 검토된 placeholder로 보고, 그 Tool은 Windows cmd 래퍼 규칙을 쓰지 않는다(직접 실행). */
+const launchTokensOk = (backend: "npx" | "uvx", args: readonly string[], platform: RecommendPlatform) => {
+  const usesToolConfig = args.includes(TOOL_CONFIG_PLACEHOLDER);
+  const tokens = args.map((a) => (a === TOOL_CONFIG_PLACEHOLDER ? "openhub-tool-config-placeholder" : a));
+  return tokenizeManifestCommand(backend + " " + tokens.join(" "), backend, { windowsCmdWrapper: platform === "windows" && backend === "npx" && !usesToolConfig }).ok;
+};
 const stateDigestOf = (states: readonly ToolState[]) =>
   sha256Digest(JSON.stringify(canonicalize([...states].sort((a, b) => cmp(entryKeyOf(a.target), entryKeyOf(b.target))).map(({ lastHealth: _ignored, ...rest }) => rest))));
 
@@ -439,11 +471,31 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
     (s) => s.toolId === options.toolId && (s.target.scope === "project" ? s.target.projectKey === projectKey : userAllowed),
   );
   const wanted = options.targets === undefined ? undefined : new Set(options.targets.map((t) => t.client + ":" + t.scope));
-  const selected = managed.filter((s) => wanted === undefined || wanted.has(s.target.client + ":" + s.target.scope));
+  let selected = managed.filter((s) => wanted === undefined || wanted.has(s.target.client + ":" + s.target.scope));
+  const roots = { projectRoot: options.projectRoot, homeDir: options.homeDir, fs };
+  // repair(v0.2.0): 옮기거나 복사한 프로젝트. 이 프로젝트의 Client 항목이 다른 projectKey 기록의 항목과 byte 단위로 같으면 그 기록을 가져온다.
+  const relocatedFrom = new Map<string, string>();
+  if (selected.length === 0 && options.operation === "repair" && manifest.toolConfig !== undefined) {
+    const candidates = Object.values(read.state.entries).filter(
+      (s) => s.toolId === options.toolId && s.target.scope === "project" && s.target.projectKey !== projectKey && s.toolConfig !== undefined && (wanted === undefined || wanted.has(s.target.client + ":project")),
+    );
+    const byClient = new Map<string, ToolState[]>();
+    for (const s of candidates) {
+      const value = await readConfiguredEntry(s.target.client, "project", s.target.serverName, roots).catch(() => undefined);
+      if (value === undefined || configEntryDigest(value) !== s.config.entryDigest) continue;
+      byClient.set(s.target.client, [...(byClient.get(s.target.client) ?? []), s]);
+    }
+    for (const [, list] of byClient) {
+      if (list.length !== 1) return { ok: false, code: "NOT_MANAGED", message: "같은 설정을 가진 기록이 여러 개라 어느 프로젝트에서 옮겨 왔는지 정할 수 없습니다" };
+      const s = list[0]!;
+      const moved: ToolState = { ...s, target: { ...s.target, projectKey, projectName: path.basename(path.resolve(options.projectRoot)) } };
+      relocatedFrom.set(entryKeyOf(moved.target), entryKeyOf(s.target));
+      selected.push(moved);
+    }
+  }
   if (selected.length === 0) return { ok: false, code: "NOT_MANAGED", message: "Version State에 이 프로젝트의 " + options.toolId + " 기록이 없습니다" };
   selected.sort((a, b) => cmp(entryKeyOf(a.target), entryKeyOf(b.target)));
 
-  const roots = { projectRoot: options.projectRoot, homeDir: options.homeDir, fs };
   const blockers: PlanBlocker[] = [];
   const targets: LifecycleTargetInput[] = [];
   const inspect = async (client: InstallClient, scope: ConfigScope, serverName: string) => {
@@ -456,14 +508,58 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
     }
   };
 
+  const requiredSorted = [...requiredNames].sort(cmp);
+  let repairNeeded = relocatedFrom.size > 0;
   for (const s of selected) {
     const t = s.target;
     const found = await inspect(t.client, t.scope, t.serverName);
     const entryDigest = found.value === undefined ? null : configEntryDigest(found.value);
+    // repair: 경로만 다른(Plan 형태가 기록과 같은) OpenHub 항목은 복구 대상이다. 그 밖의 다른 내용은 여전히 config-drift다.
+    const repairable =
+      options.operation === "repair" &&
+      found.value !== undefined &&
+      same(planFormOfEntry(found.value as { command: string; args: string[] }), serverEntry(t.client, { platform: s.launch.platform, executable: s.backend, args: [], envNames: requiredSorted, clientSpec: s.launch.clientSpec }, requiredSorted));
     if (!found.readable) blockers.push({ code: "CONFIG_UNREADABLE", message: t.file + "을(를) 안전하게 읽지 못했습니다" });
     else if (entryDigest === null) blockers.push({ code: "MISSING_CONFIG", message: t.file + "에 " + t.serverName + " 항목이 없습니다(Version State와 다릅니다)" });
-    else if (entryDigest !== s.config.entryDigest) blockers.push({ code: "CONFIG_DRIFT", message: t.file + "의 " + t.serverName + " 항목이 OpenHub가 기록한 내용과 다릅니다(config-drift)" });
-    targets.push({ client: t.client, scope: t.scope, file: t.file, serverName: t.serverName, entryKey: entryKeyOf(t), stateRevision: s.revision, precondition: { fileDigest: found.fileDigest, entryDigest } });
+    else if (entryDigest !== s.config.entryDigest && !repairable) blockers.push({ code: "CONFIG_DRIFT", message: t.file + "의 " + t.serverName + " 항목이 OpenHub가 기록한 내용과 다릅니다(config-drift)" });
+    else if (entryDigest !== s.config.entryDigest) repairNeeded = true;
+    const from = relocatedFrom.get(entryKeyOf(t));
+    targets.push({
+      client: t.client,
+      scope: t.scope,
+      file: t.file,
+      serverName: t.serverName,
+      entryKey: entryKeyOf(t),
+      stateRevision: from === undefined ? s.revision : null,
+      precondition: { fileDigest: found.fileDigest, entryDigest },
+      ...(from === undefined ? {} : { relocatedFrom: from }),
+    });
+  }
+
+  // tool config(v0.2.0): scope별 OpenHub 관리 파일을 확인한다. update·rollback·health는 기록과 같아야 진행하고, repair는 다시 만든다.
+  const toolConfigCurrent: { scope: ConfigScope; current: ToolConfigStateInput }[] = [];
+  const usesToolConfig = manifest.toolConfig !== undefined && selected.some((s) => s.toolConfig !== undefined);
+  if (usesToolConfig) {
+    for (const scope of [...new Set(selected.map((s) => s.target.scope))]) {
+      const loc = toolConfigLocation({ homeDir: options.homeDir, scope, toolId: options.toolId, ...(scope === "project" ? { projectKey } : {}) });
+      const recorded = selected.find((s) => s.target.scope === scope)?.toolConfig;
+      let current: ToolConfigStateInput | null = null;
+      if (loc !== null) current = await inspectToolConfig(loc, options.toolConfigFs).catch(() => null);
+      if (current === null) {
+        blockers.push({ code: "TOOL_CONFIG_UNREADABLE", message: scope + " 범위 tool config를 안전하게 확인하지 못했습니다(symlink·junction·권한)" });
+        continue;
+      }
+      toolConfigCurrent.push({ scope, current });
+      const consistent = current.state === "present" && recorded !== undefined && current.digest === recorded.digest;
+      if (options.operation === "repair") {
+        if (!consistent) repairNeeded = true;
+      } else if (current.state === "absent") blockers.push({ code: "TOOL_CONFIG_MISSING", message: scope + " 범위 tool config가 없습니다(tool-config-missing). openhub lifecycle repair로 다시 만드세요" });
+      else if (!consistent) blockers.push({ code: "TOOL_CONFIG_DRIFT", message: scope + " 범위 tool config가 OpenHub가 기록한 내용과 다릅니다(tool-config-drift). openhub lifecycle repair로 다시 만드세요" });
+    }
+  }
+  if (options.operation === "repair") {
+    if (!usesToolConfig) return { ok: false, code: "REPAIR_UNSUPPORTED", message: "repair는 OpenHub 관리 tool config를 쓰는 도구에만 씁니다" };
+    if (!repairNeeded && blockers.length === 0) blockers.push({ code: "NOTHING_TO_REPAIR", message: "tool config와 Client 설정이 Version State와 같아 복구할 것이 없습니다" });
   }
 
   // 명시한 대상 중 Version State가 없는 곳: 표준 항목이면 미관리, 다른 내용이면 untracked-foreign(자동 편입하지 않는다).
@@ -508,7 +604,7 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
         if (!resolved.ok) return { ok: false, code: resolved.code, message: resolved.message };
         const args = substituteArtifact(backend, launched.value.launch.args, launched.value.artifact.spec, resolved.identity.spec);
         if (args === null) return { ok: false, code: "MANIFEST_COMMAND_REJECTED", message: "launch 인자에서 artifact 위치를 찾지 못했습니다" };
-        if (backend === "docker" ? !isValidDockerImage(resolved.identity.spec) : !tokenizeManifestCommand(backend + " " + args.join(" "), backend, { windowsCmdWrapper: options.platform === "windows" && backend === "npx" }).ok) {
+        if (backend === "docker" ? !isValidDockerImage(resolved.identity.spec) : !launchTokensOk(backend, args, options.platform)) {
           return { ok: false, code: "MANIFEST_COMMAND_REJECTED", message: "resolved artifact를 launch 인자로 안전하게 표현할 수 없습니다" };
         }
         target = { requested, identity: resolved.identity, launchArgs: args };
@@ -526,8 +622,11 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
     const safe =
       backend === "docker"
         ? isValidDockerImage(prev.artifact.resolved?.spec ?? args[args.length - 1] ?? "")
-        : tokenizeManifestCommand(backend + " " + args.join(" "), backend, { windowsCmdWrapper: options.platform === "windows" && backend === "npx" }).ok;
+        : launchTokensOk(backend, args, options.platform);
     if (!safe) blockers.push({ code: "ROLLBACK_TARGET_INVALID", message: "직전 버전의 실행 인자를 안전하게 표현할 수 없습니다" });
+    if (usesToolConfig && prev.toolConfig !== undefined && toolConfigDigest(manifest.toolConfig!.content) !== prev.toolConfig.digest) {
+      blockers.push({ code: "ROLLBACK_TARGET_INVALID", message: "직전 버전의 tool config 내용을 현재 검토된 정책으로 복원할 수 없습니다" });
+    }
     target = { requested: prev.artifact.requested, identity: prev.artifact.resolved, launchArgs: args };
   }
 
@@ -541,6 +640,7 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
       stateDigest: stateDigestOf(selected),
       backend,
       platform: options.platform,
+      ...(usesToolConfig && options.operation !== "health" ? { toolConfig: { content: manifest.toolConfig!.content, current: toolConfigCurrent } } : {}),
       current,
       target,
       targets,

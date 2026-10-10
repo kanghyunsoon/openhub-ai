@@ -11,6 +11,7 @@ import type { RecommendPlatform } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
 import { entryKeyOf, type ArtifactIdentity, type LastHealth, type ToolState } from "./state";
 import { commitLifecycleState, projectKeyFor, readLifecycleState, type StateErrorCode } from "./store";
+import { inspectToolConfig, planFormOfEntry, toolConfigLocation, type ToolConfigFs } from "../tool-config/index";
 
 /**
  * Install 연계·Lifecycle Status·Drift(TASK-038, D-017).
@@ -20,7 +21,21 @@ import { commitLifecycleState, projectKeyFor, readLifecycleState, type StateErro
  * - user scope config는 명시적으로 켰을 때만 읽는다(D-003). 표준 항목과 다른 미추적 항목은 자동 편입하지 않는다.
  */
 
-export const LIFECYCLE_ENTRY_STATES = ["state-consistent", "config-drift", "missing-config", "untracked-adoptable", "untracked-foreign", "not-inspected"] as const;
+/**
+ * tool-config-*(v0.2.0, tool config Tool만): missing은 OpenHub 관리 파일이 없음, drift는 내용이 기록과 다름(또는 확인 불가),
+ * relocated는 옮기거나 복사한 프로젝트에 다른 프로젝트 기록과 같은 항목이 있음. 셋 다 openhub lifecycle repair(승인 필요)로 고친다.
+ */
+export const LIFECYCLE_ENTRY_STATES = [
+  "state-consistent",
+  "config-drift",
+  "missing-config",
+  "tool-config-missing",
+  "tool-config-drift",
+  "tool-config-relocated",
+  "untracked-adoptable",
+  "untracked-foreign",
+  "not-inspected",
+] as const;
 export type LifecycleEntryState = (typeof LIFECYCLE_ENTRY_STATES)[number];
 export type ArtifactLockStatus = "artifact-locked" | "artifact-unlocked";
 export type ArtifactPresence = "launch-on-demand" | "artifact-unknown";
@@ -73,27 +88,38 @@ export interface InstallRecordContext {
   now: () => Date;
 }
 
-/** succeeded InstallResult → ToolState 목록(target마다 1개). 그 밖의 결과는 빈 목록이다. */
-export function toolStatesFromInstall(planned: PlannedInstall, result: InstallResultV1, projectKey: string, projectName: string, now: Date): ToolState[] {
+/**
+ * succeeded InstallResult → ToolState 목록(target마다 1개). 그 밖의 결과는 빈 목록이다.
+ * written: tool config Tool이면 Client 설정에 실제로 쓴 항목(절대 경로 포함). digest는 그 값으로 계산하고 값 자체는 저장하지 않는다.
+ */
+export function toolStatesFromInstall(planned: PlannedInstall, result: InstallResultV1, projectKey: string, projectName: string, now: Date, written?: ReadonlyMap<string, ServerEntry>): ToolState[] {
   const { plan } = planned;
   if (result.status !== "succeeded" || plan.backend === null || plan.launch === null || plan.artifact === null) return [];
   const applied = new Set(result.configChanges.filter((c) => c.applied && !c.restored).map((c) => c.client + ":" + c.scope));
   const resolved = identityFromPinnedArtifact(plan.backend.adapter, plan.artifact);
+  const toolConfigOf = (scope: "project" | "user") => {
+    const step = plan.steps.find((x) => x.kind === "tool-config" && x.scope === scope);
+    return step?.kind === "tool-config" ? { toolConfig: { fileId: step.fileId, scope: step.scope, digest: step.contentDigest } } : {};
+  };
   return plan.steps
     .filter((s): s is ConfigPatchStep => s.kind === "config-patch" && applied.has(s.client + ":" + s.scope))
-    .map((s) => ({
+    .map((s) => {
+      const value = written?.get(s.client + ":" + s.scope) ?? s.value;
+      return {
       toolId: plan.toolId,
       backend: plan.backend!.adapter,
       revision: 1,
       target: { client: s.client, scope: s.scope, file: s.file, serverName: s.path[1]!, projectName: s.scope === "project" ? projectName : null, projectKey: s.scope === "project" ? projectKey : null },
       artifact: { requested: plan.artifact!.spec, resolved },
       launch: { platform: plan.launch!.platform, clientSpec: { command: plan.launch!.clientSpec.command, args: [...plan.launch!.clientSpec.args] } },
-      config: { entryDigest: configEntryDigest(s.value), tomlBlockDigest: s.client === "codex" ? tomlBlockDigest(s.path[1]!, s.value) : null },
+      config: { entryDigest: configEntryDigest(value), tomlBlockDigest: s.client === "codex" ? tomlBlockDigest(s.path[1]!, value) : null },
+      ...toolConfigOf(s.scope),
       appliedPlanDigest: planned.planDigest,
       committedAt: now.toISOString(),
       lastHealth: null,
       previous: null,
-    }));
+      };
+    });
 }
 
 export type InstallRecordResult = { ok: true; recorded: number } | { ok: false; code: StateErrorCode; message: string };
@@ -103,7 +129,20 @@ export async function recordInstallInState(planned: PlannedInstall, result: Inst
   if (result.status !== "succeeded") return { ok: true, recorded: 0 };
   const fs = ctx.fs ?? nodeConfigFs;
   const projectKey = await projectKeyFor(ctx.projectRoot, fs);
-  const states = toolStatesFromInstall(planned, result, projectKey, path.basename(path.resolve(ctx.projectRoot)), ctx.now());
+  // tool config Tool: Client 설정에 실제로 쓴 항목을 다시 읽어 Plan 형태로 되돌렸을 때 Plan 값과 같아야 기록한다.
+  let written: Map<string, ServerEntry> | undefined;
+  if (planned.plan.steps.some((s) => s.kind === "tool-config")) {
+    written = new Map();
+    const roots = { projectRoot: ctx.projectRoot, homeDir: ctx.homeDir, fs };
+    for (const s of planned.plan.steps.filter((x): x is ConfigPatchStep => x.kind === "config-patch")) {
+      const entry = (await readConfiguredEntry(s.client, s.scope, s.path[1]!, roots).catch(() => undefined)) as ServerEntry | undefined;
+      if (entry === undefined || JSON.stringify(canonicalize(planFormOfEntry(entry))) !== JSON.stringify(canonicalize(s.value))) {
+        return { ok: false, code: "STATE_INVALID", message: s.file + "의 항목이 설치 계획과 달라 Version State에 기록하지 않았습니다" };
+      }
+      written.set(s.client + ":" + s.scope, entry);
+    }
+  }
+  const states = toolStatesFromInstall(planned, result, projectKey, path.basename(path.resolve(ctx.projectRoot)), ctx.now(), written);
   if (states.length === 0) return { ok: true, recorded: 0 };
   const read = await readLifecycleState({ homeDir: ctx.homeDir, fs });
   if (!read.ok) return read;
@@ -135,6 +174,8 @@ export interface LifecycleStatusOptions {
   /** user scope config를 읽을지(D-003, 기본 false). */
   includeUser: boolean;
   fs?: ConfigFs;
+  /** OpenHub 관리 tool config 파일 접근(v0.2.0, 테스트 주입용). */
+  toolConfigFs?: ToolConfigFs;
 }
 
 export type LifecycleStatusResult = { ok: true; items: LifecycleToolStatus[] } | { ok: false; code: StateErrorCode; message: string };
@@ -163,6 +204,12 @@ export async function lifecycleStatus(options: LifecycleStatusOptions): Promise<
       const entry = await readConfiguredEntry(t.client, t.scope, t.serverName, roots).catch(() => undefined);
       entryState = entry === undefined ? "missing-config" : configEntryDigest(entry) === state.config.entryDigest ? "state-consistent" : "config-drift";
     }
+    if (entryState === "state-consistent" && state.toolConfig !== undefined) {
+      const loc = toolConfigLocation({ homeDir: options.homeDir, scope: t.scope, toolId: state.toolId, ...(t.scope === "project" ? { projectKey } : {}) });
+      const now = loc === null ? null : await inspectToolConfig(loc, options.toolConfigFs).catch(() => null);
+      if (now !== null && now.state === "absent") entryState = "tool-config-missing";
+      else if (now === null || now.digest !== state.toolConfig.digest) entryState = "tool-config-drift";
+    }
     items.push({
       toolId: state.toolId,
       scope: t.scope,
@@ -188,6 +235,15 @@ export async function lifecycleStatus(options: LifecycleStatusOptions): Promise<
       const entry = await readConfiguredEntry(target.client, target.scope, alias, roots).catch(() => undefined);
       if (entry === undefined) continue;
       const digest = configEntryDigest(entry);
+      // 옮기거나 복사한 프로젝트: 다른 프로젝트 기록과 byte 단위로 같은 tool config 항목(repair로 이 프로젝트 기록을 만든다).
+      const relocated =
+        reg.manifest.toolConfig !== undefined &&
+        target.scope === "project" &&
+        Object.values(read.state.entries).some((s) => s.toolId === reg.manifest.name && s.target.scope === "project" && s.target.projectKey !== projectKey && s.target.client === target.client && s.config.entryDigest === digest);
+      if (relocated) {
+        items.push({ toolId: reg.manifest.name, scope: "project", client: target.client, file: target.logical, serverName: alias, state: "tool-config-relocated", artifact: null, revision: null, health: "unknown", environmentUnverified: false });
+        continue;
+      }
       const identity = gradeServer({ client: target.client, scope: target.scope, file: target.logical, serverName: alias, artifact: artifactKeyFromEntry(entry) }, fingerprints).grade;
       const adoptable = identity === "exact" && standardEntries(reg.manifest, target.client, options.platform).some((s) => configEntryDigest(s) === digest);
       items.push({

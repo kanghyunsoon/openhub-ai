@@ -27,6 +27,7 @@ export const APPROVAL_REQUIREMENT_MESSAGES: Readonly<Record<ApprovalRequirement,
   "fallback-backend": "Manifest가 우선 지정한 방식 대신 대체 backend로 설치합니다.",
   "floating-artifact": "원격 패키지 버전이 고정되어 있지 않습니다. 나중에 실행하면 다른 artifact가 내려올 수 있습니다.",
   "client-env-parse-risk": "Claude Code가 실행되는 환경에 필요한 환경변수를 직접 준비해야 합니다. OpenHub는 값이나 존재 여부를 확인하지 않습니다.",
+  "tool-config": "OpenHub가 ~/.openhub/tool-config 아래에 검토된 서버 정책 파일을 만들거나 바꾸고, Client 설정이 그 파일을 쓰게 합니다.",
 };
 
 // ---------------------------------------------------------------- 공통 kernel

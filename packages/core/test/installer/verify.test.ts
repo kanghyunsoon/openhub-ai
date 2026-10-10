@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -113,7 +114,19 @@ describe("REQ-035 Post-install Verification", () => {
     const p = await plannedOf(h, request);
     const approval = await approveAll(p);
     let verifying = false;
-    const tampered: ConfigFs = { ...h.env.configFs!, readFile: async (f) => (verifying && f.endsWith(".mcp.json") ? Buffer.from('{ "mcpServers": { "memory": { "command": "other", "args": [] } } }') : h.env.configFs!.readFile(f)) };
+    // 확인 단계의 첫 읽기만 다른 내용을 돌려준다(파일 자체는 그대로). v0.2.0부터 복구는 "지금 파일이 이번에 쓴 byte와 같을 때만" 하므로
+    // 복구 시점 읽기까지 바꾸면 외부 변경으로 보고 덮어쓰지 않는다(아래 별도 테스트).
+    let tamperOnce = true;
+    const tampered: ConfigFs = {
+      ...h.env.configFs!,
+      readFile: async (f) => {
+        if (verifying && tamperOnce && f.endsWith(".mcp.json")) {
+          tamperOnce = false;
+          return Buffer.from('{ "mcpServers": { "memory": { "command": "other", "args": [] } } }');
+        }
+        return h.env.configFs!.readFile(f);
+      },
+    };
     const result = await runInstallTransaction(p, approval, request, { ...h.env, configFs: tampered, trace: (phase) => (verifying = phase === "verify") });
     expect(result).toMatchObject({ status: "partial-compensated", code: "CONFIGURED_MISMATCH", verification: { configured: false } });
     expect(result.configChanges[0]).toMatchObject({ applied: true, restored: true });
@@ -129,6 +142,24 @@ describe("REQ-035 Post-install Verification", () => {
     expect(undetected).toMatchObject({ status: "succeeded", verification: { prepared: "launch-on-demand", configured: true, detected: false } });
     expect(undetected.warnings.map((w) => w.code)).toEqual(["configured-not-detected"]);
     expect(JSON.parse(await readFile(path.join(d.projectRoot, ".mcp.json"), "utf8")).mcpServers.memory.command).toBe("npx");
+  });
+
+  it("v0.2.0 복구 직전 파일이 이번에 쓴 byte와 다르면(다른 프로세스가 바꿨으면) 덮어쓰지 않고 COMPENSATION_INCOMPLETE로 실패한다", async () => {
+    const h = await createHarness(scratch, { entries: seed });
+    const file = path.join(h.projectRoot, ".mcp.json");
+    await writeFile(file, '{ "mcpServers": { "keep": { "command": "x", "args": [] } } }\n');
+    const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    const p = await plannedOf(h, request);
+    const external = '{ "mcpServers": { "memory": { "command": "someone-else", "args": [] } } }\n';
+    // 확인 단계에 들어가면 다른 프로세스가 파일을 바꾼 것처럼 실제 파일을 바꾸고, 확인은 실패하게 한다.
+    const verify = async () => {
+      writeFileSync(file, external);
+      return { verification: { prepared: "launch-on-demand" as const, configured: false, detected: "skipped" as const }, warnings: [], nextActions: [] };
+    };
+    const result = await runInstallTransaction(p, await approveAll(p), request, { ...h.env, verify });
+    expect(result).toMatchObject({ status: "failed", code: "COMPENSATION_INCOMPLETE", retryable: false });
+    expect(result.configChanges[0]).toMatchObject({ applied: true, restored: false });
+    expect(await readFile(file, "utf8")).toBe(external);
   });
 
   it("AC-034-07 nextActions는 env 준비·Claude 승인·Codex trusted·Cursor env·재시작을 안내하고 Installed·설치 완료라는 상태 이름이 없다", async () => {

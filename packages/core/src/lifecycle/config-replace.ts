@@ -39,6 +39,8 @@ export interface ReplaceConfigOptions extends ConfigRoots {
   acknowledgements: readonly string[];
   /** Codex 대상의 Version State tomlBlockDigest(LF 기준). JSON 대상은 쓰지 않는다. */
   expectedBlockDigest?: string | null;
+  /** placeholder 형태 → 실제로 쓸 값(v0.2.0 tool config). installer ApplyConfigOptions.materialize와 같다. */
+  materialize?: (value: ServerEntry) => ServerEntry;
 }
 
 class ReplaceError extends Error {
@@ -135,9 +137,10 @@ export async function replaceConfigEntry(step: ConfigReplaceStep, options: Repla
     const { file } = await resolveInside(target, options, fs);
     const original = await readOptional(fs, file);
     if (original === null) return { ok: false, code: "CONFIG_DRIFT", message: target.logical + " 파일이 없습니다" };
-    const next = replaceConfigText(original, target.format, serverName, step.expectedEntryDigest, step.value, options.expectedBlockDigest);
+    const value = options.materialize === undefined ? step.value : options.materialize(step.value);
+    const next = replaceConfigText(original, target.format, serverName, step.expectedEntryDigest, value, options.expectedBlockDigest);
     await atomicWrite(fs, file, next);
-    return { ok: true, receipt: Object.freeze({ client: step.client, scope: step.scope, file: target.logical, serverName, absolutePath: file, original, createdDirs: Object.freeze([]) }) };
+    return { ok: true, receipt: Object.freeze({ client: step.client, scope: step.scope, file: target.logical, serverName, absolutePath: file, original, written: next, createdDirs: Object.freeze([]) }) };
   } catch (error) {
     if (error instanceof ReplaceError || error instanceof ConfigWriteError) return { ok: false, code: error.code, message: error.message };
     return { ok: false, code: "CONFIG_WRITE_FAILED", message: "설정 파일을 바꾸지 못했습니다" };

@@ -18,6 +18,7 @@ export const LIFECYCLE_RESULT_STATUSES = [
   "updated",
   "rolled-back",
   "health-checked",
+  "repaired",
   "up-to-date",
   "resolution-failed",
   "approval-required",

@@ -63,6 +63,10 @@ export const installResultSchema = z
     configChanges: z.array(
       z.strictObject({ client: z.enum(INSTALL_CLIENTS), scope: z.enum(CONFIG_SCOPES), file: text, serverName: text, applied: z.boolean(), restored: z.boolean() }),
     ),
+    /** OpenHub 관리 tool config 변경(v0.2.0, tool config Tool만). 논리 ID만 남긴다. */
+    toolConfigChanges: z
+      .array(z.strictObject({ fileId: text, scope: z.enum(CONFIG_SCOPES), action: z.enum(["create", "replace", "keep"]), applied: z.boolean(), restored: z.boolean() }))
+      .optional(),
     verification: verificationSchema.nullable(),
     requiredEnv: z.array(z.strictObject({ name: z.string().regex(/^[A-Z][A-Z0-9_]*$/u), status: z.literal("unchecked") })),
     warnings: z.array(z.strictObject({ code: text, message: text })),

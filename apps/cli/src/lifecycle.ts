@@ -44,6 +44,8 @@ import { updateImpactHeader } from "./release";
  *   openhub update <toolId> [--project <p>] [--client <id>]… [--scope project|user] [--to <version>] [--skip-health] [--json]
  *   openhub rollback <toolId> [--project <p>] [--client <id>]… [--scope project|user] [--skip-health] [--json]
  *   openhub lifecycle health <toolId> [--project <p>] [--client <id>]… [--scope project|user] [--json]
+ *   openhub lifecycle repair <toolId> [--project <p>] [--client <id>]… [--scope project|user] [--json]
+ *     (v0.2.0) OpenHub 관리 tool config가 없거나 바뀌었거나 프로젝트를 옮긴 경우, 승인 뒤 다시 만들고 Client 설정 경로를 고친 다음 Health를 실행한다.
  * - 승인 규칙은 openhub install과 같다: 추가 승인 항목마다 y/N, 마지막에 toolId 정확 입력. 비TTY는 exit 3, --json은 Plan만.
  *   --yes·-y·--approve는 exit 2. --skip-health는 Health 생략을 "요청"할 뿐이며 health-gate-skipped 승인을 따로 받는다.
  * - status는 network·spawn·write 0회, --check는 resolver만 호출한다(spawn·write 0회).
@@ -87,6 +89,7 @@ const EXIT_BY_STATUS: Readonly<Record<LifecycleResultV1["status"], number>> = {
   updated: 0,
   "rolled-back": 0,
   "health-checked": 0,
+  repaired: 0,
   "up-to-date": 0,
   "resolution-failed": 1,
   "approval-required": 3,
@@ -139,6 +142,7 @@ export async function runLifecycle(argv: readonly string[], io: LifecycleCommand
   const [sub, ...rest] = argv;
   if (sub === "status") return runStatus(rest, io, usage);
   if (sub === "health") return runLifecycleOperation("health", rest, io, usage);
+  if (sub === "repair") return runLifecycleOperation("repair", rest, io, usage);
   io.err("알 수 없는 lifecycle 하위 명령: " + (sub ?? "(없음)") + "\n\n" + usage);
   return 2;
 }
@@ -223,7 +227,7 @@ export async function runLifecycleOperation(operation: LifecycleOperation, argv:
         scope: { type: "string", default: "project" },
         json: { type: "boolean", default: false },
         ...(operation === "update" ? { to: { type: "string" as const } } : {}),
-        ...(operation === "health" ? {} : { "skip-health": { type: "boolean" as const, default: false } }),
+        ...(operation === "health" || operation === "repair" ? {} : { "skip-health": { type: "boolean" as const, default: false } }),
       },
       allowPositionals: true,
       strict: true,

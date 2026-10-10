@@ -17,7 +17,8 @@ export const HEALTH_STATUSES = ["healthy", "unhealthy", "timeout", "launch-faile
 export type LifecycleHealthStatus = (typeof HEALTH_STATUSES)[number];
 export const ARTIFACT_KINDS = ["npm-package", "python-package", "container-image"] as const;
 export const ARTIFACT_SOURCES = ["npm-registry", "pypi", "docker-registry"] as const;
-export const CLIENT_COMMANDS = ["npx", "uvx", "docker", "cmd"] as const;
+/** node: v0.2.0 tool config Tool의 Windows 직접 실행(첫 인자 {npxCli}). 실제 절대 경로는 Client 설정에만 있다. */
+export const CLIENT_COMMANDS = ["npx", "uvx", "docker", "cmd", "node"] as const;
 
 const text = z.string().min(1).max(300);
 const sha256 = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
@@ -54,6 +55,8 @@ export const toolStateCoreSchema = z.strictObject({
     clientSpec: z.strictObject({ command: z.enum(CLIENT_COMMANDS), args: z.array(text) }),
   }),
   config: z.strictObject({ entryDigest: sha256, tomlBlockDigest: sha256.nullable() }),
+  /** OpenHub 관리 tool config(v0.2.0, tool config Tool만). 논리 ID·scope·내용 digest만 남긴다(경로 없음). */
+  toolConfig: z.strictObject({ fileId: text, scope: z.enum(CONFIG_SCOPES), digest: sha256 }).optional(),
   appliedPlanDigest: sha256,
   committedAt: z.iso.datetime(),
 });

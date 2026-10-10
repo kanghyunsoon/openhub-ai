@@ -1,6 +1,20 @@
 import type { FetchLike } from "../discovery/github";
+import path from "node:path";
 import { restoreConfig, type ConfigFs, type ConfigWriteReceipt } from "../installer/config-writer";
-import type { ConfigScope, InstallClient } from "../installer/plan";
+import type { ConfigScope, InstallClient, ServerEntry, ToolConfigStep } from "../installer/plan";
+import { toolConfigLocationFor } from "../installer/transaction";
+import {
+  TOOL_CONFIG_PLACEHOLDER,
+  inspectToolConfig,
+  materializeClientArgs,
+  restoreToolConfig,
+  verifyClientLauncher,
+  writeToolConfig,
+  type LauncherCheckFs,
+  type ToolConfigFs,
+  type ToolConfigLocation,
+  type ToolConfigUndo,
+} from "../tool-config/index";
 import { executeLifecyclePreparation, type ExecSpawner, type IsolatedDir } from "../process/executor";
 import { createTreeKiller, runHealthCheck, type HealthCheckResult, type HealthRunOptions, type HealthRunReport, type HealthSpawner, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
 import type { BackendProbeReport } from "../process/probe";
@@ -22,7 +36,7 @@ import { lifecycleResultSchema, type LifecycleResultStatus, type LifecycleResult
 import { entryKeyOf, type LastHealth, type ToolState, type ToolStateCore } from "./state";
 import type { LifecycleStateFile } from "./state";
 import { configEntryDigest, tomlBlockDigest } from "./status";
-import { LIFECYCLE_STATE_LOGICAL_PATH, commitLifecycleState, readLifecycleState } from "./store";
+import { LIFECYCLE_STATE_LOGICAL_PATH, commitLifecycleState, projectKeyFor, readLifecycleState } from "./store";
 
 /**
  * Update transaction(TASK-043, D-019·D-020). 순서:
@@ -72,6 +86,10 @@ export interface LifecycleEnvironment {
   runHealth?: (verified: VerifiedLifecyclePlan, options: HealthRunOptions) => Promise<HealthRunReport>;
   /** operation별 Plan 생성기 교체(테스트 주입용). 기본은 planLifecycle(update·rollback·health). */
   planners?: Partial<Record<LifecycleOperation, (request: LifecycleRequest, env: LifecycleEnvironment) => Promise<LifecyclePlanResult>>>;
+  /** OpenHub 관리 tool config 파일 접근(v0.2.0, 테스트 주입용). */
+  toolConfigFs?: ToolConfigFs;
+  /** Windows Client 직접 실행 경로 검증용 fs(v0.2.0). */
+  launcherCheckFs?: LauncherCheckFs;
   trace?: (phase: LifecyclePhase) => void;
 }
 
@@ -93,12 +111,14 @@ export async function planLifecycleRequest(request: LifecycleRequest, env: Lifec
     ...(env.fetch === undefined ? {} : { fetch: env.fetch }),
     ...(env.timeoutMs === undefined ? {} : { timeoutMs: env.timeoutMs }),
     ...(env.configFs === undefined ? {} : { fs: env.configFs }),
+    ...(env.toolConfigFs === undefined ? {} : { toolConfigFs: env.toolConfigFs }),
   });
 }
 
 const RESOLVER_CODES = new Set(["RESOLVER_SOURCE_UNSUPPORTED", "RESOLUTION_TIMEOUT", "RESOLUTION_OFFLINE", "RESOLUTION_TOO_LARGE", "RESOLUTION_INVALID"]);
 type ResultStep = LifecycleResultV1["steps"][number];
-const succeeded = (operation: LifecycleOperation): LifecycleResultStatus => (operation === "rollback" ? "rolled-back" : operation === "health" ? "health-checked" : "updated");
+const succeeded = (operation: LifecycleOperation): LifecycleResultStatus =>
+  operation === "rollback" ? "rolled-back" : operation === "health" ? "health-checked" : operation === "repair" ? "repaired" : "updated";
 const coreOf = (s: ToolState): ToolStateCore => {
   const { previous: _p, lastHealth: _h, ...core } = s;
   return core;
@@ -224,15 +244,56 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
     return finalize({ planned: verified, status: "preparation-failed", code: prep.steps.find((s) => s.status === "failed")?.code ?? "STEP_FAILED", steps, retryable: true, nextActions: ["준비 단계가 실패해 설정 파일과 Version State는 바꾸지 않았습니다. 네트워크·docker 데몬 상태를 확인한 뒤 다시 시도하세요"] });
   }
 
+  // v0.2.0 tool config: 위치·Windows Client 실행 경로를 확인한 뒤(실패하면 아무것도 쓰지 않음) 승인한 내용을 scope별로 쓴다.
+  const usesToolConfig = plan.target.clientSpec.args.includes(TOOL_CONFIG_PLACEHOLDER) || plan.current.clientSpec.args.includes(TOOL_CONFIG_PLACEHOLDER);
+  const locations = new Map<ConfigScope, ToolConfigLocation>();
+  let clientLauncher: WindowsNpxLauncher | null = null;
+  if (usesToolConfig) {
+    for (const scope of new Set(plan.targets.map((t) => t.scope))) {
+      const loc = await toolConfigLocationFor({ toolId: plan.toolId, projectRoot: request.projectRoot, homeDir: request.homeDir }, scope, { ...(fs === undefined ? {} : { configFs: fs }) });
+      if (loc === null) {
+        skipRest(0);
+        return finalize({ planned: verified, status: "config-failed", code: "TOOL_CONFIG_REJECTED", steps, retryable: false, nextActions: ["tool config 위치를 확인하지 못해 아무것도 바꾸지 않았습니다"] });
+      }
+      locations.set(scope, loc);
+    }
+    if (plan.platform === "windows") {
+      clientLauncher = windowsNpx;
+      const checked = clientLauncher === null ? { ok: false as const, reason: "Node.js 실행 경로를 찾지 못했습니다" } : await verifyClientLauncher(clientLauncher, env.launcherCheckFs);
+      if (!checked.ok) {
+        skipRest(0);
+        return finalize({ planned: verified, status: "config-failed", code: "MANUAL_SETUP_REQUIRED", steps, retryable: false, nextActions: ["Client 설정에 쓸 Node.js 실행 경로를 검증하지 못해 아무것도 바꾸지 않았습니다: " + checked.reason] });
+      }
+    }
+  }
+  const materialize = (scope: ConfigScope) => (value: ServerEntry): ServerEntry => {
+    const loc = locations.get(scope);
+    const m = materializeClientArgs(value, { platform: plan.platform, ...(loc === undefined ? {} : { toolConfigFile: loc.file }), launcher: clientLauncher });
+    if (!m.ok) throw Object.assign(new Error(m.message), { code: m.code });
+    return { ...value, command: m.command, args: m.args };
+  };
+  const toolUndos: { step: ToolConfigStep; loc: ToolConfigLocation; undo: ToolConfigUndo }[] = [];
+
   // config 교체(영수증) — 실패하면 이미 바꾼 파일을 원본 byte로 되돌린다.
   const receipts: { entryKey: string; receipt: ConfigWriteReceipt }[] = [];
   const restored = new Set<string>();
   const applied = new Set<string>();
+  const written = new Map<string, ServerEntry>();
   const compensate = async (): Promise<boolean> => {
     let all = true;
     for (const { entryKey, receipt } of [...receipts].reverse()) {
       if (await restoreConfig(receipt, fs)) restored.add(entryKey);
       else all = false;
+    }
+    // tool config: 이번에 쓴 내용 그대로일 때만 되돌린다(그 사이 바뀌었으면 덮어쓰지 않고 실패).
+    for (const t of [...toolUndos].reverse()) {
+      try {
+        await restoreToolConfig(t.loc, t.undo, env.toolConfigFs);
+        const s = steps.find((o) => o.id === t.step.id);
+        if (s !== undefined && s.status === "done" && t.undo.kind !== "unchanged") s.status = "compensated";
+      } catch {
+        all = false;
+      }
     }
     const restoredIds = new Set(plan.targets.filter((t) => restored.has(t.entryKey)).map((t) => "config-" + t.client + "-" + t.scope));
     for (const s of steps) if (s.status === "done" && restoredIds.has(s.id)) s.status = "compensated";
@@ -254,11 +315,36 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
       ],
     });
 
+  for (const step of plan.steps.filter((s): s is ToolConfigStep => s.kind === "tool-config")) {
+    const loc = locations.get(step.scope);
+    try {
+      if (loc === undefined) throw new Error("tool config 위치가 없습니다");
+      const expected = step.expected.state === "absent" ? ({ state: "absent" } as const) : ({ state: "present", digest: step.expected.digest! } as const);
+      const undo = await writeToolConfig(loc, step.content, expected, env.toolConfigFs);
+      toolUndos.push({ step, loc, undo });
+      outcome(step.id, { status: "done" });
+    } catch (error) {
+      const code = (error as { code?: string }).code ?? "TOOL_CONFIG_WRITE_FAILED";
+      outcome(step.id, { status: "failed", code, excerpt: (error as Error).message });
+      skipRest(0);
+      if (!(await compensate())) return failedRestore();
+      return finalize({ planned: verified, status: "config-failed", code, steps, applied, restored, compensated: toolUndos.length > 0, retryable: code === "TOOL_CONFIG_STALE" || code === "TOOL_CONFIG_WRITE_FAILED", nextActions: [code === "TOOL_CONFIG_STALE" ? "승인 뒤 tool config가 바뀌었습니다. 새 계획을 확인하고 다시 승인하세요" : "tool config를 쓰지 못해 Client 설정과 Version State는 바꾸지 않았습니다"] });
+    }
+  }
+
   const configSteps = plan.steps.filter((s): s is ConfigReplaceStep => s.kind === "config-replace");
   if (configSteps.length > 0) trace("config-replace");
   for (const step of configSteps) {
     const target = plan.targets.find((t) => "config-" + t.client + "-" + t.scope === step.id)!;
-    const r = await replaceConfigEntry(step, { ...roots, acknowledgements: verified.acknowledgements, expectedBlockDigest: states.get(target.entryKey)?.config.tomlBlockDigest ?? null });
+    const source = states.get(target.entryKey) ?? (target.relocatedFrom === undefined ? undefined : stateRead.state.entries[target.relocatedFrom]);
+    let r: Awaited<ReturnType<typeof replaceConfigEntry>>;
+    try {
+      const m = usesToolConfig ? materialize(step.scope) : undefined;
+      if (m !== undefined) written.set(step.id, m(step.value));
+      r = await replaceConfigEntry(step, { ...roots, acknowledgements: verified.acknowledgements, expectedBlockDigest: source?.config.tomlBlockDigest ?? null, ...(m === undefined ? {} : { materialize: m }) });
+    } catch (error) {
+      r = { ok: false, code: "MANUAL_SETUP_REQUIRED", message: (error as Error).message };
+    }
     if (!r.ok) {
       outcome(step.id, { status: "failed", code: r.code, excerpt: r.message });
       skipRest(0);
@@ -277,10 +363,27 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
     trace("health");
     const manifest = (await env.loadEntries()).find((e) => e.manifest.name === plan.toolId)?.manifest;
     const run = env.runHealth ?? runHealthCheck;
+    // tool config Tool: Client와 같은 파일로 실행한다. 실행 직전 파일이 승인·기록된 내용과 같은지 다시 확인한다.
+    let toolConfigFile: string | undefined;
+    if (usesToolConfig) {
+      const scope = plan.targets[0]!.scope;
+      const loc = locations.get(scope)!;
+      const expected = toolUndos.find((t) => t.step.scope === scope)?.step.contentDigest ?? states.get(plan.targets[0]!.entryKey)?.toolConfig?.digest;
+      const now = await inspectToolConfig(loc, env.toolConfigFs).catch(() => null);
+      if (expected === undefined || now === null || now.state !== "present" || now.digest !== expected) {
+        outcome(healthStep.id, { status: "failed", code: "TOOL_CONFIG_DRIFT", excerpt: "Health 직전 tool config가 승인한 내용과 달라 실행하지 않았습니다" });
+        skipRest(0);
+        if (plan.operation === "health") return finalize({ planned: verified, status: "health-failed", code: "TOOL_CONFIG_DRIFT", steps, retryable: true, nextActions: ["tool config가 바뀌었습니다. openhub lifecycle repair로 다시 만드세요"] });
+        if (!(await compensate())) return failedRestore();
+        return finalize({ planned: verified, status: "health-failed", code: "TOOL_CONFIG_DRIFT", steps, applied, restored, compensated: true, retryable: true, nextActions: ["Health 직전 tool config가 바뀌어 설정을 원래 내용으로 되돌렸습니다"] });
+      }
+      toolConfigFile = loc.file;
+    }
     const report = await run(verified, {
       healthCheckType: manifest?.healthCheck?.type,
       windowsNpx,
       tempBase: env.tempBase,
+      ...(toolConfigFile === undefined ? {} : { toolConfigFile }),
       ...(env.healthSpawner === undefined ? {} : { spawner: env.healthSpawner }),
       ...(env.killTree === undefined ? {} : { killTree: env.killTree }),
     });
@@ -324,22 +427,28 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
     health.status === "skipped" ? { status: "skipped", environmentUnverified: true, checkedAt: null } : { status: "healthy", environmentUnverified: health.environmentUnverified, checkedAt: now.toISOString() };
   const entries = { ...stateRead.state.entries };
   const revisions = new Map<string, { before: number | null; after: number | null }>();
+  const currentProjectKey = plan.targets.some((t) => t.relocatedFrom !== undefined) ? await projectKeyFor(request.projectRoot, fs) : null;
   for (const step of configSteps) {
     const t = plan.targets.find((x) => "config-" + x.client + "-" + x.scope === step.id)!;
-    const old = states.get(t.entryKey)!;
+    const value = written.get(step.id) ?? step.value;
+    const toolConfigStep = toolUndos.find((u) => u.step.scope === t.scope)?.step;
+    // repair로 옮긴 기록: 원래 기록을 바탕으로 이 프로젝트의 새 기록(revision 1)을 만든다. 원래 기록은 그대로 둔다(복사 시나리오).
+    const moved = t.relocatedFrom === undefined ? undefined : stateRead.state.entries[t.relocatedFrom];
+    const old = moved === undefined ? states.get(t.entryKey)! : { ...moved, target: { ...moved.target, projectKey: currentProjectKey, projectName: path.basename(path.resolve(request.projectRoot)) } };
     const next: ToolState = {
       ...coreOf(old),
-      revision: old.revision + 1,
+      revision: moved === undefined ? old.revision + 1 : 1,
       artifact: { requested: plan.target.requested, resolved: plan.target.identity },
       launch: { platform: plan.platform, clientSpec: { command: plan.target.clientSpec.command, args: [...plan.target.clientSpec.args] } },
-      config: { entryDigest: configEntryDigest(step.value), tomlBlockDigest: t.client === "codex" ? tomlBlockDigest(t.serverName, step.value) : null },
+      config: { entryDigest: configEntryDigest(value), tomlBlockDigest: t.client === "codex" ? tomlBlockDigest(t.serverName, value) : null },
+      ...(toolConfigStep === undefined ? {} : { toolConfig: { fileId: toolConfigStep.fileId, scope: toolConfigStep.scope, digest: toolConfigStep.contentDigest } }),
       appliedPlanDigest: verified.planDigest,
       committedAt: now.toISOString(),
       lastHealth,
-      previous: coreOf(old),
+      previous: moved === undefined ? (plan.operation === "repair" ? old.previous : coreOf(old)) : null,
     };
     entries[entryKeyOf(next.target)] = next;
-    revisions.set(t.entryKey, { before: old.revision, after: next.revision });
+    revisions.set(t.entryKey, { before: moved === undefined ? old.revision : null, after: next.revision });
   }
   const commit = await commitLifecycleState({ ...stateRead.state, entries }, stateRead.digest, { homeDir: request.homeDir, ...(fs === undefined ? {} : { fs }) });
   const commitStep = plan.steps.find((s) => s.kind === "state-commit")!;
