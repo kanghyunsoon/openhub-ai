@@ -109,7 +109,8 @@ describe("REQ-034 Desktop 설치 흐름", () => {
     expect([...w.handlers.keys()].filter((c) => c.startsWith("install:")).sort()).toEqual([INSTALL_DISCARD_CHANNEL, INSTALL_OPTIONS_CHANNEL, INSTALL_PLAN_CHANNEL, INSTALL_RUN_CHANNEL].sort());
     const preload = await read("src/preload.ts");
     expect(preload).toContain('installOptions: (toolId: unknown) => ipcRenderer.invoke("install:options", String(toolId))');
-    expect(preload).toContain('return ipcRenderer.invoke("install:plan", String(toolId), clients === undefined ? undefined : { clients });');
+    // v0.2.0 P0-3 C2: 범위 이름("project"·"user")만 함께 보낸다(경로 없음, main이 검증).
+    expect(preload).toContain('return ipcRenderer.invoke("install:plan", String(toolId), clients === undefined ? undefined : scope === undefined ? { clients } : { clients, scope });');
     expect(preload).toContain(".clients.slice(0, 6).map(String)");
     expect(preload).toContain('runInstall: (toolId: unknown) => ipcRenderer.invoke("install:run", String(toolId))');
     expect(await read("renderer/install.js")).toContain('t("install.open")');

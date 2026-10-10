@@ -1,0 +1,36 @@
+name: Desktop E2E (Linux)
+
+# 데스크톱 실제 Electron E2E를 Linux runner(xvfb)에서 실행한다. 데스크톱·Core를 바꾸는 PR과 수동 실행에서만 돈다(required check 아님).
+# 테스트는 임시 project·home만 쓰고 가짜 npm·Health를 쓴다(실제 MCP 실행·secret 없음).
+on:
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "packages/core/src/**"
+      - ".github/workflows/desktop-e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Electron 실행 의존성(xvfb·GTK·NSS)
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0t64 libnss3 libxss1 libasound2t64 libgbm1 libnotify4 libsecret-1-0
+      - run: pnpm install --frozen-lockfile
+      - name: Desktop Electron E2E (xvfb)
+        # GitHub runner에서는 Chromium SUID sandbox helper를 설정할 수 없어 이 job에서만 Electron sandbox를 끈다(테스트 전용).
+        # 각 파일이 beforeAll에서 데스크톱을 빌드하므로(같은 출력 폴더) 파일을 하나씩 실행한다.
+        run: xvfb-run -a pnpm exec vitest run apps/desktop/test/i18n-electron.e2e.test.ts apps/desktop/test/repair-electron.e2e.test.ts apps/desktop/test/install-clients-electron.e2e.test.ts apps/desktop/test/user-scope-electron.e2e.test.ts --no-file-parallelism --reporter=verbose
+        env:
+          OPENHUB_E2E: "1"
+          ELECTRON_DISABLE_SANDBOX: "1"
+

@@ -42,7 +42,9 @@ const installBridge = {
   installOptions: (toolId: unknown) => ipcRenderer.invoke("install:options", String(toolId)),
   planInstall: (toolId: unknown, selection?: unknown) => {
     const clients = selection !== null && typeof selection === "object" && Array.isArray((selection as { clients?: unknown }).clients) ? ((selection as { clients: unknown[] }).clients.slice(0, 6).map(String)) : undefined;
-    return ipcRenderer.invoke("install:plan", String(toolId), clients === undefined ? undefined : { clients });
+    // 범위는 "project"·"user" 이름만(경로 없음). 그 밖의 값은 문자열로 넘기고 main이 거부한다.
+    const scope = clients !== undefined && typeof (selection as { scope?: unknown }).scope === "string" ? String((selection as { scope: string }).scope) : undefined;
+    return ipcRenderer.invoke("install:plan", String(toolId), clients === undefined ? undefined : scope === undefined ? { clients } : { clients, scope });
   },
   runInstall: (toolId: unknown) => ipcRenderer.invoke("install:run", String(toolId)),
   discardInstallPlan: (toolId: unknown) => ipcRenderer.invoke("install:discard", String(toolId)),
@@ -53,7 +55,9 @@ const installBridge = {
  * 최종 승인은 main 프로세스의 네이티브 확인 대화상자에서만 만들어진다.
  */
 const lifecycleBridge = {
-  lifecycleStatus: () => ipcRenderer.invoke("lifecycle:status"),
+  // 사용자 범위 보기(v0.2.0 P0-3 C2): { includeUser: boolean }만 넘긴다. 없으면 main의 현재 설정 그대로.
+  lifecycleStatus: (options?: unknown) =>
+    ipcRenderer.invoke("lifecycle:status", options !== null && typeof options === "object" && typeof (options as { includeUser?: unknown }).includeUser === "boolean" ? { includeUser: (options as { includeUser: boolean }).includeUser } : undefined),
   checkLifecycle: (id: unknown) => ipcRenderer.invoke("lifecycle:check", String(id)),
   planLifecycleUpdate: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-update", String(id)),
   planLifecycleRollback: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-rollback", String(id)),

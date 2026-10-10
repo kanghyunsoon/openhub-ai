@@ -17,7 +17,7 @@
   let current = null;
   // 요청 번호: 선택 화면·계획 요청마다 올린다. 응답이 왔을 때 번호가 다르면(더 새 요청·프로젝트 변경) 그 응답은 버린다.
   let seq = 0;
-  /** toolId → 마지막으로 계획한 Client 목록(PLAN_STALE 재계획에 쓴다). */
+  /** toolId → 마지막으로 계획한 선택({ clients, scope }, PLAN_STALE 재계획에 쓴다). */
   const lastSelection = new Map();
   let chooser = null;
 
@@ -66,6 +66,11 @@
       panel.prepend(el("p", "install-warning", t("install.stale", { changed: response.result.changed.join(", ") })));
       return { status: "stale", stages: [], reopened: view !== null };
     }
+    // 설치가 끝나면 INSTALLED를 다시 읽게 한다. 사용자 범위 설치였으면 INSTALLED의 사용자 범위 보기를 켠다(사용자가 고른 동작의 결과).
+    if (response.result.status === "succeeded") {
+      const sel = lastSelection.get(toolId);
+      document.dispatchEvent(new CustomEvent("openhub:installed-changed", { detail: { userScope: Boolean(sel && sel.scope === "user") } }));
+    }
     return renderResult(response.result);
   }
 
@@ -80,7 +85,8 @@
     }
     nodes.push(targets);
     if (view.alreadyInstalled) {
-      nodes.push(el("p", "todo", t("install.noChanges")));
+      // 사용자 범위 요청이 프로젝트 설치 때문에 already-installed가 된 경우: 성공이 아니라 "변경 없음"이며 사용자 설정을 쓰지 않았다.
+      nodes.push(el("p", view.userScope ? "install-warning" : "todo", t(view.userScope ? "install.noChangesUserScope" : "install.noChanges")));
       show(nodes);
       panel.dataset.planState = "already-installed";
       return;
@@ -125,15 +131,37 @@
     superseded: t("install.msg.superseded"),
   };
 
-  /** Client 선택 화면. 지원하지 않는 Client는 고를 수 없고 이유를 보여 준다. 선택을 바꾸면 보이던 계획을 지운다. */
+  /**
+   * Client·범위 선택 화면. 지원하지 않는 Client는 고를 수 없고 이유를 보여 준다. 범위는 기본 Project이고 User는 사용자가 고를 때만이다.
+   * User 범위에서 OpenHub가 쓰지 않는 Client 설정(예: Claude Code ~/.claude.json)은 고를 수 없다. Client마다 그 범위에서 실제로 쓰일 파일을
+   * 보여 준다. 선택(Client·범위)을 바꾸면 보이던 계획을 지우고 main의 Pending Plan도 버린다. 경로는 main에 보내지 않는다.
+   */
   function renderChooser(view) {
     const box = el("div", "install-clients");
     box.dataset.toolId = view.toolId;
     box.append(el("h3", "", t("install.clients.title", { name: view.displayName })));
     box.append(el("p", "todo", t("install.clients.platform", { platforms: view.platforms.join(", ") || "-", os: view.platform })));
     if (!view.platformSupported) box.append(el("p", "install-warning", t("install.clients.platformUnsupported", { os: view.platform })));
-    box.append(el("p", "todo", t("install.clients.scope")));
-    const inputs = [];
+    let scope = view.defaultScope;
+    const scopeBox = el("div", "install-scope");
+    scopeBox.append(el("strong", "", t("install.scope.title")));
+    const radios = [];
+    for (const value of ["project", "user"]) {
+      const label = el("label", "scope-choice");
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "install-scope-" + view.toolId;
+      radio.value = value;
+      radio.dataset.scope = value;
+      radio.checked = value === scope;
+      label.append(radio, el("span", "", t(value === "user" ? "install.scope.user" : "install.scope.project")));
+      scopeBox.append(label);
+      radios.push(radio);
+    }
+    const userWarning = el("p", "install-warning warn-user-scope", t("install.scope.userWarning"));
+    scopeBox.append(userWarning);
+    box.append(scopeBox);
+    const rows = [];
     for (const c of view.clients) {
       const label = el("label", "client-choice" + (c.supported ? "" : " unsupported"));
       const input = document.createElement("input");
@@ -141,33 +169,50 @@
       input.dataset.client = c.client;
       input.dataset.verification = c.verification;
       input.checked = c.selected;
-      input.disabled = !c.supported;
-      label.append(input, el("strong", "", c.label), el("span", "client-note", c.note));
+      const file = el("span", "client-note client-file");
+      const reason = el("span", "client-note client-user-note");
+      label.append(input, el("strong", "", c.label), el("span", "client-note", c.note), file, reason);
       box.append(label);
-      inputs.push(input);
+      rows.push({ c, input, label, file, reason });
     }
     const hint = el("p", "install-warning", t("install.clients.none"));
     const reviewButton = el("button", "install-review", t("install.clients.review"));
     reviewButton.type = "button";
-    const selected = () => inputs.filter((i) => i.checked && !i.disabled).map((i) => i.dataset.client);
+    const selected = () => rows.filter((r) => r.input.checked && !r.input.disabled).map((r) => r.input.dataset.client);
     const sync = () => {
+      for (const r of rows) {
+        const userBlocked = scope === "user" && r.c.files.user === null;
+        r.input.disabled = !r.c.supported || userBlocked;
+        if (userBlocked) r.input.checked = false;
+        r.label.classList.toggle("unsupported", r.input.disabled);
+        const target = scope === "user" ? r.c.files.user : r.c.files.project;
+        r.file.textContent = r.c.supported && target ? t("install.client.file", { file: target, scope: t(scope === "user" ? "scope.user" : "scope.project") }) : "";
+        r.reason.textContent = userBlocked && r.c.supported ? r.c.userNote || "" : "";
+      }
+      userWarning.hidden = scope !== "user";
       const none = selected().length === 0;
       reviewButton.disabled = none;
       hint.hidden = !none;
     };
-    for (const input of inputs) {
-      input.addEventListener("change", () => {
-        sync();
-        // 보이던 계획(또는 계획 중인 요청)은 다른 선택의 것이다. 응답을 버리고, 화면을 지우고, main의 Pending Plan도 버린다.
-        seq += 1;
-        void window.openhub.discardInstallPlan(view.toolId);
-        if (panel.querySelector(".install-preview") || panel.dataset.planState === "planning") {
-          show([el("p", "install-warning", t("install.clients.changed"))]);
-          panel.dataset.planState = "changed";
-        }
+    const changed = () => {
+      sync();
+      // 보이던 계획(또는 계획 중인 요청)은 다른 선택의 것이다. 응답을 버리고, 화면을 지우고, main의 Pending Plan도 버린다.
+      seq += 1;
+      void window.openhub.discardInstallPlan(view.toolId);
+      if (panel.querySelector(".install-preview") || panel.dataset.planState === "planning") {
+        show([el("p", "install-warning", t("install.clients.changed"))]);
+        panel.dataset.planState = "changed";
+      }
+    };
+    for (const r of rows) r.input.addEventListener("change", changed);
+    for (const radio of radios) {
+      radio.addEventListener("change", () => {
+        if (!radio.checked) return;
+        scope = radio.value;
+        changed();
       });
     }
-    reviewButton.addEventListener("click", () => void review(view.toolId, selected()));
+    reviewButton.addEventListener("click", () => void review(view.toolId, { clients: selected(), scope }));
     box.append(hint, reviewButton);
     sync();
     return box;
@@ -190,13 +235,14 @@
     return response.view;
   }
 
-  async function review(toolId, clients) {
+  /** selection: { clients, scope } 또는 undefined(기본 선택). */
+  async function review(toolId, selection) {
     current = toolId;
     const my = ++seq;
-    lastSelection.set(toolId, clients);
+    lastSelection.set(toolId, selection);
     panel.dataset.planState = "planning";
     show([el("p", "todo", t("install.planning"))]);
-    const response = await window.openhub.planInstall(toolId, clients === undefined ? undefined : { clients });
+    const response = await window.openhub.planInstall(toolId, selection);
     // 더 새 요청이 있었거나 선택·프로젝트가 바뀌었으면 이 응답은 화면에 쓰지 않는다.
     if (my !== seq || current !== toolId) return null;
     if (response.status !== "ok") {
@@ -204,10 +250,11 @@
       panel.dataset.planState = "failed:" + response.status;
       return null;
     }
-    // 사용자가 고른 Client와 실제 Plan 대상이 같은지 확인한다(다르면 승인 화면을 만들지 않고 main의 Plan도 버린다).
-    if (Array.isArray(clients)) {
-      const planned = [...new Set(response.view.targets.map((x) => x.client))].sort().join(",");
-      if (planned !== [...new Set(clients)].sort().join(",")) {
+    // 사용자가 고른 Client·범위와 실제 Plan 대상이 같은지 확인한다(다르면 승인 화면을 만들지 않고 main의 Plan도 버린다).
+    if (selection && Array.isArray(selection.clients)) {
+      const planned = [...new Set(response.view.targets.map((x) => x.client + "@" + x.scope))].sort().join(",");
+      const wanted = [...new Set(selection.clients.map((c) => c + "@" + (selection.scope || "project")))].sort().join(",");
+      if (planned !== wanted) {
         void window.openhub.discardInstallPlan(toolId);
         show([el("p", "install-warning", t("install.selectionMismatch"))]);
         panel.dataset.planState = "failed:selection-mismatch";
@@ -240,12 +287,14 @@
   // 스모크(--smoke + OPENHUB_SMOKE_INSTALL): 화면과 같은 경로로 계획 → 체크 → 확인 → 결과를 기다린다.
   // clients가 있으면 Client 선택 화면에서 그 Client만 체크한다(없으면 기본 선택 그대로).
   // race가 있으면(OPENHUB_SMOKE_INSTALL_RACE) race.first만 체크하고 [계획 보기]를 누른 직후, 응답을 기다리지 않고 clients로 바꿔 다시 누른다.
-  window.__openhubInstall = async (toolId, clients, race) => {
+  // scope가 "user"면 범위 선택에서 User를 누른다(OPENHUB_SMOKE_INSTALL_SCOPE).
+  window.__openhubInstall = async (toolId, clients, race, scope) => {
     decorate();
     const card = [...document.querySelectorAll("#for-you-list li.rec")].find((li) => li.dataset.toolId === toolId);
     if (!card) return { status: "not-recommended", stages: [] };
     const options = await open(toolId);
     if (options === null) return { status: "no-plan", stages: [] };
+    if (scope === "user") panel.querySelector('.install-scope input[data-scope="user"]').click();
     const choices = [...panel.querySelectorAll(".install-clients input[type=checkbox]")].map((i) => ({ client: i.dataset.client, enabled: !i.disabled, checked: i.checked, verification: i.dataset.verification }));
     if (Array.isArray(clients)) {
       for (const input of panel.querySelectorAll(".install-clients input[type=checkbox]")) {

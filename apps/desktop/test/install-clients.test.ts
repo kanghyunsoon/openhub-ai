@@ -138,7 +138,7 @@ describe("v0.2.0 P0-3 PR C Desktop 설치 Client 선택", () => {
     expect(w.recommended).toContain("postgres-mcp");
     const r = await w.options("postgres-mcp", "C:/Windows/System32", { clients: ["codex"] });
     if (r.status !== "ok") throw new Error(r.status);
-    expect(r.view).toMatchObject({ toolId: "postgres-mcp", platform: "linux", platformSupported: true, scope: "project" });
+    expect(r.view).toMatchObject({ toolId: "postgres-mcp", platform: "linux", platformSupported: true, defaultScope: "project" });
     expect(r.view.clients.map((c) => [c.client, c.supported, c.detected, c.selected, c.verification])).toEqual([
       ["claude-code", true, true, true, "not-recorded"],
       ["codex", true, false, false, "not-recorded"],
@@ -214,7 +214,7 @@ describe("v0.2.0 P0-3 PR C Desktop 설치 Client 선택", () => {
     expect(ignoredPlan.status === "ok" && ignoredPlan.view.targets.map((t) => t.client)).toEqual(["claude-code"]);
     expect(w.spawns).toEqual([]);
     const supported = (c: InstallClient) => c !== "cursor";
-    expect(parseClientSelection({ clients: ["codex", "claude-code"] }, supported, () => false)).toEqual({ ok: true, clients: ["claude-code", "codex"] });
+    expect(parseClientSelection({ clients: ["codex", "claude-code"] }, supported, () => false)).toEqual({ ok: true, clients: ["claude-code", "codex"], scope: "project" });
     expect(parseClientSelection({ clients: null }, supported, () => false)).toEqual({ ok: false });
   });
 
