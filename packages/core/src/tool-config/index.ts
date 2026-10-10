@@ -38,15 +38,23 @@ export interface ReviewedToolConfig {
   /** 같은 고지의 영어 문장(v0.2.0 Desktop English 표시 전용). Plan·CLI 출력에는 쓰지 않는다. */
   noticeEn: string;
   /**
-   * Client별 검증 수준(v0.2.0). launch-verified: 실제 Client가 OpenHub가 쓴 설정으로 서버를 띄움을 확인,
+   * OS × Client별 검증 수준(v0.2.0). 한 OS에서 얻은 근거를 다른 OS에 적용하지 않는다.
+   * launch-verified: 실제 Client가 OpenHub가 쓴 설정으로 서버를 띄움을 확인,
    * spec-launch-verified: OpenHub가 쓴 실행 명령(command·args)으로 실제 Client가 서버를 띄우고 tools/call까지 됨을 확인했지만
    * 그 Client가 프로젝트 설정 파일에서 직접 띄우는 경로는 확인하지 못함(설정 인식은 따로 확인),
    * config-recognized: 설정 인식만 확인(실제 MCP 연결·호출 미검증), not-verified: 확인하지 않음. 설치 계획에 그대로 드러낸다.
+   * platformVerified가 false인 OS의 Client는 모두 not-verified여야 한다(테스트로 강제).
    */
-  clientVerification: Readonly<Record<"claude-code" | "codex" | "cursor", "launch-verified" | "spec-launch-verified" | "config-recognized" | "not-verified">>;
+  clientVerification: Readonly<Record<ToolConfigPlatform, Readonly<Record<ToolConfigClient, ClientVerificationLevel>>>>;
   /** 플랫폼별 실제 E2E 검증 여부. false인 플랫폼은 설치 계획에 미검증으로 드러낸다. */
-  platformVerified: Readonly<Record<"windows" | "macos" | "linux", boolean>>;
+  platformVerified: Readonly<Record<ToolConfigPlatform, boolean>>;
 }
+
+export type ToolConfigClient = "claude-code" | "codex" | "cursor";
+export type ToolConfigPlatform = "windows" | "macos" | "linux";
+export type ClientVerificationLevel = "launch-verified" | "spec-launch-verified" | "config-recognized" | "not-verified";
+export const TOOL_CONFIG_CLIENTS: readonly ToolConfigClient[] = Object.freeze(["claude-code", "codex", "cursor"] as const);
+export const TOOL_CONFIG_PLATFORMS: readonly ToolConfigPlatform[] = Object.freeze(["windows", "linux", "macos"] as const);
 
 export const KUBERNETES_TOOL_CONFIG = 'read_only = true\ntoolsets = ["core"]\n\n[[denied_resources]]\ngroup = ""\nversion = "v1"\nkind = "Secret"\n';
 
@@ -59,28 +67,68 @@ export const REVIEWED_TOOL_CONFIGS: Readonly<Record<string, ReviewedToolConfig>>
       "OpenHub가 ~/.openhub/tool-config 아래에 서버 정책 파일(read_only, core toolset, Secret 조회 거부)을 만들고 Client 설정의 --config로 넘깁니다. 서버는 kubeconfig의 current context 사용자 권한으로 동작하며 OpenHub는 kubeconfig를 읽지 않습니다. Pod·Node 로그에 비밀정보가 있으면 막지 못합니다. 읽기 전용 RBAC 사용자를 쓰세요.",
     noticeEn:
       "OpenHub creates a server policy file under ~/.openhub/tool-config (read_only, core toolset, Secret reads denied) and passes it with --config in the client configuration. The server acts with the permissions of the kubeconfig's current-context user, and OpenHub does not read the kubeconfig. Secrets printed in pod or node logs are not blocked. Use a read-only RBAC user.",
-    // 2026-10-10 기록: Claude Code 2.1.258 실제 연결. Codex CLI 0.147.0은 프로젝트 설정 인식(codex mcp list) + 같은 command·args로
-    // codex exec 실제 시작·tools/call(ConfigMap 성공, Secret 거부)까지. Cursor 미설치. Windows·Linux E2E, macOS 미검증.
-    clientVerification: Object.freeze({ "claude-code": "launch-verified", codex: "spec-launch-verified", cursor: "not-verified" } as const),
+    // 근거(2026-10-10, docs/specs/registry-kubernetes-mcp-server.md):
+    // - Windows: Claude Code 2.1.258이 OpenHub가 쓴 항목으로 서버를 실제로 시작("Connected"). Codex CLI 0.147.0이 격리 CODEX_HOME에서
+    //   trust한 프로젝트의 .codex/config.toml(OpenHub가 쓴 항목)로 서버를 시작하고 tools/call(ConfigMap 성공, Secret 거부)까지(app-server,
+    //   모델 호출 0, trust 없는 대조군은 서버 0개). Cursor 미설치.
+    // - Linux(registry-remote.yml real_clients=true, run 38059220353): 같은 검사를 Linux runner에서 버전 고정 CLI로 실행. Claude Code
+    //   2.1.258 "Connected", Codex CLI 0.147.0 app-server가 trust한 프로젝트 설정으로 서버 시작(13 tools)·ConfigMap 성공·Secret 거부,
+    //   대조군 0개. 로그인·API key·모델 호출 없음. Cursor는 Linux에서도 실행하지 않았다.
+    // - macOS: 미검증.
+    clientVerification: Object.freeze({
+      windows: Object.freeze({ "claude-code": "launch-verified", codex: "launch-verified", cursor: "not-verified" } as const),
+      linux: Object.freeze({ "claude-code": "launch-verified", codex: "launch-verified", cursor: "not-verified" } as const),
+      macos: Object.freeze({ "claude-code": "not-verified", codex: "not-verified", cursor: "not-verified" } as const),
+    }),
     platformVerified: Object.freeze({ windows: true, linux: true, macos: false }),
   }),
 });
 
 const CLIENT_LABEL = { "claude-code": "Claude Code", codex: "Codex", cursor: "Cursor" } as const;
+const PLATFORM_LABEL = { windows: "Windows", linux: "Linux", macos: "macOS" } as const;
 
-/** 검증 수준 고지(설치 계획 warning). 실제 실행을 확인한 Client·플랫폼은 문구가 없다. */
-export function toolConfigVerificationNotices(toolId: string, clients: readonly ("claude-code" | "codex" | "cursor")[], platform: "windows" | "macos" | "linux"): { code: string; message: string }[] {
+/** 한 OS에서 한 Client의 검증 수준. 검토된 tool config가 없으면 null, 검증하지 않은 OS면 "platform-unverified". */
+export function clientVerificationLevel(toolId: string, client: ToolConfigClient, platform: ToolConfigPlatform): ClientVerificationLevel | "platform-unverified" | null {
+  const reviewed = REVIEWED_TOOL_CONFIGS[toolId];
+  if (reviewed === undefined) return null;
+  if (!reviewed.platformVerified[platform]) return "platform-unverified";
+  return reviewed.clientVerification[platform][client];
+}
+
+/** 검증 수준 미달 항목(구조). 설치 계획 warning(한국어)과 Desktop 영어 문구가 모두 이 결과에서 만들어진다. */
+export interface ToolConfigVerificationGap {
+  code: "client-launch-unverified" | "platform-unverified";
+  platform: ToolConfigPlatform;
+  /** platform-unverified는 null. */
+  client: ToolConfigClient | null;
+  /** client-launch-unverified의 수준(launch-verified는 항목이 없다). */
+  level: Exclude<ClientVerificationLevel, "launch-verified"> | null;
+}
+
+/** 선택한 Client와 OS 조합 중 실제 실행을 확인하지 못한 것. 실제 실행을 확인한 조합은 항목이 없다. */
+export function toolConfigVerificationGaps(toolId: string, clients: readonly ToolConfigClient[], platform: ToolConfigPlatform): ToolConfigVerificationGap[] {
   const reviewed = REVIEWED_TOOL_CONFIGS[toolId];
   if (reviewed === undefined) return [];
-  const out: { code: string; message: string }[] = [];
+  const out: ToolConfigVerificationGap[] = [];
   for (const client of [...new Set(clients)]) {
-    const level = reviewed.clientVerification[client];
-    if (level === "spec-launch-verified") out.push({ code: "client-launch-unverified", message: CLIENT_LABEL[client] + ": OpenHub가 쓰는 실행 명령으로 서버 시작·도구 호출은 확인했지만, 이 Client가 프로젝트 설정 파일에서 직접 시작하는 경로는 OpenHub가 검증하지 않았습니다." });
-    if (level === "config-recognized") out.push({ code: "client-launch-unverified", message: CLIENT_LABEL[client] + ": 설정 인식만 확인했습니다. 이 Client에서 실제 MCP 연결·호출은 OpenHub가 검증하지 않았습니다." });
-    if (level === "not-verified") out.push({ code: "client-launch-unverified", message: CLIENT_LABEL[client] + ": 이 Client에서의 실제 실행은 OpenHub가 검증하지 않았습니다." });
+    // 검증하지 않은 OS에서는 표에 무엇이 있든 not-verified로 본다(근거 없는 확장 방지).
+    const level = reviewed.platformVerified[platform] ? reviewed.clientVerification[platform][client] : "not-verified";
+    if (level !== "launch-verified") out.push({ code: "client-launch-unverified", platform, client, level });
   }
-  if (!reviewed.platformVerified[platform]) out.push({ code: "platform-unverified", message: platform + "에서는 OpenHub가 이 도구의 설치·실행을 실제로 검증하지 않았습니다." });
+  if (!reviewed.platformVerified[platform]) out.push({ code: "platform-unverified", platform, client: null, level: null });
   return out;
+}
+
+/** 검증 수준 고지(설치 계획 warning, 한국어). toolConfigVerificationGaps를 문장으로 옮긴다. */
+export function toolConfigVerificationNotices(toolId: string, clients: readonly ToolConfigClient[], platform: ToolConfigPlatform): { code: string; message: string }[] {
+  return toolConfigVerificationGaps(toolId, clients, platform).map((g) => {
+    const os = PLATFORM_LABEL[g.platform];
+    if (g.client === null) return { code: g.code, message: os + "에서는 OpenHub가 이 도구의 설치·실행을 실제로 검증하지 않았습니다." };
+    const who = CLIENT_LABEL[g.client] + " (" + os + ")";
+    if (g.level === "spec-launch-verified") return { code: g.code, message: who + ": OpenHub가 쓰는 실행 명령으로 서버 시작·도구 호출은 확인했지만, 이 Client가 프로젝트 설정 파일에서 직접 시작하는 경로는 OpenHub가 검증하지 않았습니다." };
+    if (g.level === "config-recognized") return { code: g.code, message: who + ": 설정 인식만 확인했습니다. 이 Client에서 실제 MCP 연결·호출은 OpenHub가 검증하지 않았습니다." };
+    return { code: g.code, message: who + ": 이 OS에서 이 Client의 실제 실행은 OpenHub가 검증하지 않았습니다." };
+  });
 }
 export const TOOL_CONFIG_ALLOWLIST: readonly string[] = Object.freeze(Object.keys(REVIEWED_TOOL_CONFIGS));
 

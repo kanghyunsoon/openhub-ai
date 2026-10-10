@@ -202,6 +202,109 @@ async function codexExecCheck(o: { scratch: string; projectRoot: string; kubecon
   expect(o.requests.filter((r) => r.includes("/secrets")).length).toBe(before);
 }
 
+/**
+ * Codex 프로젝트 설정 → 실제 MCP 실행·호출(OPENHUB_E2E_CODEX_APP_SERVER=1, 모델 호출 0). Codex CLI의 app-server(JSON-RPC, stdio)를
+ * 띄워 thread/start(cwd = 테스트 프로젝트) → mcpServerStatus/list → mcpServer/tool/call 순서로 부른다. 격리:
+ * - CODEX_HOME = 임시 디렉터리. 그 config.toml에는 테스트 프로젝트 trust 한 줄만 있다. 사용자 ~/.codex는 읽지도 쓰지도 않는다.
+ * - 로그인 파일·API key를 쓰지 않는다(자식 환경에서 OPENAI_API_KEY·CODEX_API_KEY를 지운다). turn/start(모델 호출)를 부르지 않는다.
+ * - HOME·USERPROFILE은 가짜 ~/.kube/config만 있는 임시 디렉터리다.
+ */
+async function codexAppServerCheck(o: { scratch: string; projectRoot: string; kubeconfig: string; requests: string[] }) {
+  // 대조군: trust가 없는 격리 CODEX_HOME에서는 프로젝트 .codex/config.toml의 서버가 로드되지 않는다(= 아래 결과는 프로젝트 파일에서 온 것).
+  const untrusted = await codexAppServerSession({ ...o, trust: false });
+  expect(untrusted.servers, "trust 없음").not.toContain("kubernetes");
+  const trusted = await codexAppServerSession({ ...o, trust: true });
+  expect(trusted.servers).toContain("kubernetes");
+  console.log("codex project servers: " + JSON.stringify({ untrusted: untrusted.servers, trusted: trusted.servers, tools: trusted.tools.length }));
+  expect(trusted.tools).toHaveLength(13);
+  for (const banned of BANNED) expect(trusted.tools).not.toContain(banned);
+}
+
+async function codexAppServerSession(o: { scratch: string; projectRoot: string; kubeconfig: string; requests: string[]; trust: boolean }): Promise<{ servers: string[]; tools: string[] }> {
+  const codexJs = findCodexJs();
+  expect(codexJs, "codex.js(npm 전역 @openai/codex)").not.toBeNull();
+  const codexHome = path.join(o.scratch, "codex isolated home " + (o.trust ? "trusted" : "untrusted"));
+  const isoHome = path.join(o.scratch, "codex user home " + (o.trust ? "trusted" : "untrusted"));
+  await mkdir(codexHome, { recursive: true });
+  await mkdir(path.join(isoHome, ".kube"), { recursive: true });
+  await writeFile(path.join(isoHome, ".kube", "config"), await readFile(o.kubeconfig, "utf8"));
+  await writeFile(path.join(codexHome, "config.toml"), o.trust ? "[projects." + JSON.stringify(o.projectRoot) + "]\ntrust_level = \"trusted\"\n" : "");
+  const env: Record<string, string> = { ...(process.env as Record<string, string>), CODEX_HOME: codexHome, HOME: isoHome, USERPROFILE: isoHome, KUBECONFIG: o.kubeconfig };
+  for (const k of ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN"]) delete env[k];
+  const before = o.requests.filter((r) => r.includes("/secrets")).length;
+  const child = spawn(process.execPath, [codexJs!, "app-server"], { cwd: o.projectRoot, env, shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+  let buffer = "";
+  let transcript = "";
+  const pending = new Map<number, (m: Record<string, unknown>) => void>();
+  const methods: string[] = [];
+  child.stdout.on("data", (d: Buffer) => {
+    transcript += d.toString();
+    buffer += d.toString();
+    let i: number;
+    while ((i = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, i).trim();
+      buffer = buffer.slice(i + 1);
+      if (line === "") continue;
+      try {
+        const m = JSON.parse(line) as Record<string, unknown>;
+        if (typeof m["method"] === "string") {
+          methods.push(m["method"] as string);
+          // 서버가 보낸 요청(승인 등)은 거절한다.
+          if (m["id"] !== undefined) child.stdin.write(JSON.stringify({ id: m["id"], error: { code: -32601, message: "not supported in test" } }) + "\n");
+        } else if (typeof m["id"] === "number") pending.get(m["id"] as number)?.(m);
+      } catch {
+        // 로그 줄
+      }
+    }
+  });
+  let stderr = "";
+  child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+  let id = 0;
+  const request = (method: string, params: unknown) =>
+    new Promise<Record<string, unknown>>((resolve, reject) => {
+      const k = ++id;
+      const timer = setTimeout(() => reject(new Error("timeout " + method + " " + stderr.slice(-400))), 120_000);
+      pending.set(k, (m) => (clearTimeout(timer), resolve(m)));
+      child.stdin.write(JSON.stringify({ id: k, method, params }) + "\n");
+    });
+  const scrub = (s: string) => s.replace(/[A-Za-z]:\\[^\s"]*/gu, "<abs>").replace(/\s+/gu, " ");
+  try {
+    const init = await request("initialize", { clientInfo: { name: "openhub-e2e", version: "0" }, capabilities: { experimentalApi: true } });
+    child.stdin.write(JSON.stringify({ method: "initialized" }) + "\n");
+    const thread = await request("thread/start", { cwd: o.projectRoot, ephemeral: true, sandbox: "read-only", approvalPolicy: "never" });
+    console.log("codex app-server: " + scrub(JSON.stringify({ init: Object.keys(init), threadError: thread["error"] ?? null })));
+    const threadId = (thread["result"] as { thread?: { id?: string } } | undefined)?.thread?.id;
+    expect(threadId, "thread/start " + scrub(JSON.stringify(thread).slice(0, 600))).toBeTruthy();
+    const status = await request("mcpServerStatus/list", { threadId, detail: "full" });
+    const data = ((status["result"] as { data?: { name: string; tools?: Record<string, unknown> }[] } | undefined)?.data ?? []);
+    const servers = data.map((s) => s.name).sort();
+    const tools = Object.keys(data.find((s) => s.name === "kubernetes")?.tools ?? {}).sort();
+    if (!o.trust) return { servers, tools };
+    const calls = [
+      { name: "configmap", arguments: { apiVersion: "v1", kind: "ConfigMap", namespace: "default", name: "app-config" } },
+      { name: "secret-get", arguments: { apiVersion: "v1", kind: "Secret", namespace: "default", name: "demo" } },
+    ];
+    const results: Record<string, string> = {};
+    for (const c of calls) {
+      const r = await request("mcpServer/tool/call", { threadId, server: "kubernetes", tool: "resources_get", arguments: c.arguments });
+      results[c.name] = JSON.stringify(r);
+    }
+    console.log("codex tool calls: " + scrub(JSON.stringify(Object.fromEntries(Object.entries(results).map(([k, v]) => [k, v.slice(0, 300)])))));
+    expect(results["configmap"]).toContain("LOG_LEVEL");
+    expect(results["secret-get"]).toMatch(/resource not allowed/u);
+    for (const s of [transcript, stderr]) {
+      expect(s).not.toContain(TOKEN);
+      expect(s).not.toContain(SECRET_B64);
+      expect(s).not.toContain(SECRET_PLAIN);
+    }
+    expect(o.requests.filter((r) => r.includes("/secrets")).length).toBe(before);
+    expect(methods).not.toContain("turn/started");
+    return { servers, tools };
+  } finally {
+    if (child.pid !== undefined) await createTreeKiller({ cwd: os.tmpdir() })(child.pid, process.platform === "win32" ? "windows" : "linux");
+  }
+}
+
 /** 127.0.0.1 합성 Kubernetes API(ROUTES만 응답, 요청 경로 기록). */
 async function startFakeApi(): Promise<{ port: number; requests: string[]; close: () => void }> {
   const requests: string[] = [];
@@ -320,6 +423,8 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 Kubernetes tool conf
       // (선택) Codex 실제 MCP 연결·호출: OPENHUB_E2E_CODEX_EXEC=1일 때만. codex exec가 OpenHub가 쓴 프로젝트 .codex/config.toml로
       // 서버를 띄우고 모델이 tools/call을 하게 한다(로그인된 Codex 계정·모델 호출을 쓴다).
       if (process.env["OPENHUB_E2E_CODEX_EXEC"] === "1") await codexExecCheck({ scratch, projectRoot: h.projectRoot, kubeconfig, requests });
+      // (선택) Codex 프로젝트 설정 → 실제 MCP 실행·호출(모델 호출 0): OPENHUB_E2E_CODEX_APP_SERVER=1일 때만.
+      if (process.env["OPENHUB_E2E_CODEX_APP_SERVER"] === "1") await codexAppServerCheck({ scratch, projectRoot: h.projectRoot, kubeconfig, requests });
 
 
       const check = async (label: string) => {
