@@ -27,6 +27,8 @@ export interface PlanBuildInput {
   platform: RecommendPlatform;
   /** tool config Tool이면 scope별 현재 상태(v0.2.0, 승인 전 확인). */
   toolConfigs?: PlanAssemblyInput["toolConfigs"];
+  /** v0.2.1 uvx Prepare: 사용자 지정 패키지 index fingerprint(uvIndexFingerprint). null·생략이면 기본 index. */
+  uvIndex?: string | null;
 }
 
 export type PlanBuildResult =
@@ -93,7 +95,7 @@ export function buildInstallPlan(input: PlanBuildInput): PlanBuildResult {
         : { adapter: chosen.launchable.backend, selection: chosen.selection, skipped, probe: { ...(input.probes[chosen.launchable.backend] as ProbeSnapshot) } },
     artifact: chosen?.launchable.artifact ?? null,
     launch: chosen?.launchable.launch ?? null,
-    preparation: chosen?.launchable.preparation ?? [],
+    preparation: (chosen?.launchable.preparation ?? []).map((s) => (s.executable === "uvx" && input.uvIndex != null ? { ...s, index: { custom: true as const, digest: input.uvIndex } } : s)),
     targets: [...input.targets],
     blockers,
     ...(input.toolConfigs === undefined ? {} : { toolConfigs: input.toolConfigs }),

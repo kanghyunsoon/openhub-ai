@@ -19,6 +19,7 @@ import {
 import { executeLifecyclePreparation, type ExecSpawner, type IsolatedDir } from "../process/executor";
 import { createTreeKiller, runHealthCheck, type HealthCheckResult, type HealthRunOptions, type HealthRunReport, type HealthSpawner, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
 import type { BackendProbeReport } from "../process/probe";
+import { uvIndexFingerprint } from "../process/uvx-prepare";
 import type { RecommendPlatform } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
 import { replaceConfigEntry } from "./config-replace";
@@ -83,6 +84,8 @@ export interface LifecycleEnvironment {
   windowsNpx?: () => Promise<WindowsNpxLauncher | null>;
   /** npx Prepare의 npm 자식 process 환경(보통 npmChildEnv(process.env), CLI·Desktop이 넘긴다). 없으면 OS 기본 상속. */
   npmChildEnv?: () => Record<string, string>;
+  /** v0.2.1 uvx Prepare의 uv 자식 process 환경(보통 uvChildEnv(process.env)). 패키지 index fingerprint도 여기서 만든다. */
+  uvChildEnv?: () => Record<string, string>;
   /** Health 실행기(테스트 주입용). 기본 runHealthCheck. */
   runHealth?: (verified: VerifiedLifecyclePlan, options: HealthRunOptions) => Promise<HealthRunReport>;
   /** operation별 Plan 생성기 교체(테스트 주입용). 기본은 planLifecycle(update·rollback·health). */
@@ -111,6 +114,7 @@ export async function planLifecycleRequest(request: LifecycleRequest, env: Lifec
     ...(request.skipHealth === undefined ? {} : { skipHealth: request.skipHealth }),
     ...(env.fetch === undefined ? {} : { fetch: env.fetch }),
     ...(env.timeoutMs === undefined ? {} : { timeoutMs: env.timeoutMs }),
+    ...(env.uvChildEnv === undefined ? {} : { uvIndex: uvIndexFingerprint(env.uvChildEnv()) }),
     ...(env.configFs === undefined ? {} : { fs: env.configFs }),
     ...(env.toolConfigFs === undefined ? {} : { toolConfigFs: env.toolConfigFs }),
     ...(env.windowsNpx === undefined ? {} : { clientLauncher: env.windowsNpx }),
@@ -238,6 +242,7 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
 
   trace("prepare");
   const hasNpxPrepare = plan.steps.some((s) => s.kind === "run" && s.executable === "npx");
+  const hasUvxPrepare = plan.steps.some((s) => s.kind === "run" && s.executable === "uvx");
   const prep = await executeLifecyclePreparation(verified, {
     projectRoot: request.projectRoot,
     ...(env.spawner === undefined ? {} : { spawner: env.spawner }),
@@ -245,6 +250,7 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
     ...(hasNpxPrepare
       ? { npx: { platform: plan.platform, windowsNpx, killTree: env.killTree ?? createTreeKiller({ cwd: env.tempBase }), ...(env.npmChildEnv === undefined ? {} : { childEnv: env.npmChildEnv() }) } }
       : {}),
+    ...(hasUvxPrepare ? { uvx: { platform: plan.platform, killTree: env.killTree ?? createTreeKiller({ cwd: env.tempBase }), ...(env.uvChildEnv === undefined ? {} : { childEnv: env.uvChildEnv() }) } } : {}),
   });
   if (!prep.ok) return finalize({ planned: verified, status: "approval-required", code: prep.code, retryable: true });
   steps.push(...prep.steps);

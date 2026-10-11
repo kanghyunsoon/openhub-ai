@@ -158,7 +158,7 @@ export function npmToolArgv(tool: "npx" | "npm", args: readonly string[], platfo
   return { executable: launcher.node, args: [cli, ...args] };
 }
 
-interface Captured {
+export interface Captured {
   status: "done" | "failed";
   code?: string;
   exitCode: number | null;
@@ -176,7 +176,10 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  * argv 하나를 실행하고 출력을 모은다. timeout이면 tree 종료를 요청하고 자식의 종료(exit·close)를 기다린다.
  * 종료를 grace 안에 확인하지 못하면 terminated=false로 반환한다(그 경우 호출 측은 cache를 정리하지 않는다).
  */
-function capture(argv: Argv, cwd: string, timeoutMs: number, ctx: NpxPrepareContext): Promise<Captured> {
+/** capture가 쓰는 문맥(npx·uvx Prepare 공통). */
+export type CaptureContext = Pick<NpxPrepareContext, "platform" | "spawner" | "killTree" | "graceMs" | "childEnv">;
+
+export function capture(argv: Argv, cwd: string, timeoutMs: number, ctx: CaptureContext): Promise<Captured> {
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";

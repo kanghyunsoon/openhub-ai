@@ -15,15 +15,19 @@ import {
   type KernelPrompter,
   type KernelVerified,
 } from "../installer/approval-v1";
-import { BACKEND_ADAPTERS, DOCKER_PULL_TIMEOUT_MS, clientLaunchSpec, npxPrepareStepFor } from "../installer/backends";
+import { BACKEND_ADAPTERS, DOCKER_PULL_TIMEOUT_MS, clientLaunchSpec, npxPrepareStepFor, uvxBuildPolicyOf, uvxPrepareStepFor } from "../installer/backends";
 import { isPinnedArtifact, isValidDockerImage, npxArtifact, parseNpmSpec, tokenizeManifestCommand } from "../installer/command";
 import { parseNpxPrepareArgs } from "../process/npx-prepare";
+import type { UvxBuildPolicy } from "../process/uvx-prepare";
 import { configTargetFor, inspectConfigTarget, nodeConfigFs, readConfiguredEntry, type ConfigFs } from "../installer/config-writer";
 import {
   CONFIG_SCOPES,
   INSTALL_BACKENDS,
   INSTALL_CLIENTS,
   NPX_PREPARE_NOTICE,
+  UVX_CUSTOM_INDEX_NOTICE,
+  UVX_PREPARE_NOTICE,
+  UVX_SOURCE_BUILD_NOTICE,
   canonicalize,
   manifestDigest,
   registryDigestExcluding,
@@ -34,6 +38,7 @@ import {
   sha256Digest,
   toolConfigStepFor,
   toolConfigStepSchema,
+  uvxPrepareStepIssue,
   type ConfigScope,
   type InstallBackend,
   type InstallClient,
@@ -79,7 +84,7 @@ export const LIFECYCLE_PLAN_SCHEMA_VERSION = 1;
 export const LIFECYCLE_OPERATIONS = ["update", "rollback", "health", "repair"] as const;
 export type LifecycleOperation = (typeof LIFECYCLE_OPERATIONS)[number];
 export const LIFECYCLE_PLAN_STATUSES = ["ready", "up-to-date", "blocked", "unsupported"] as const;
-export const LIFECYCLE_APPROVAL_REQUIREMENTS = ["base", "health-execution", "user-scope-config", "environment-unverified", "health-gate-skipped", "rollback-to-previous", "tool-config"] as const;
+export const LIFECYCLE_APPROVAL_REQUIREMENTS = ["base", "health-execution", "user-scope-config", "environment-unverified", "health-gate-skipped", "rollback-to-previous", "tool-config", "source-build"] as const;
 export type LifecycleApprovalRequirement = (typeof LIFECYCLE_APPROVAL_REQUIREMENTS)[number];
 export const LIFECYCLE_PLAN_CHANGE_KINDS = [...PLAN_CHANGE_KINDS, "state", "resolution", "health-policy", "rollback-snapshot"] as const;
 export type LifecyclePlanChange = (typeof LIFECYCLE_PLAN_CHANGE_KINDS)[number];
@@ -105,6 +110,7 @@ export const LIFECYCLE_APPROVAL_MESSAGES: Readonly<Record<LifecycleApprovalRequi
   "health-gate-skipped": HEALTH_GATE_SKIP_NOTICE,
   "rollback-to-previous": "Version State에 남은 직전 버전으로 되돌립니다. 현재 버전 설정은 바뀝니다.",
   "tool-config": "OpenHub가 ~/.openhub/tool-config 아래에 검토된 서버 정책 파일을 만들거나 바꾸고, Client 설정이 그 파일을 쓰게 합니다.",
+  "source-build": UVX_SOURCE_BUILD_NOTICE,
 };
 
 const text = z.string().min(1).max(300);
@@ -205,6 +211,11 @@ export const lifecyclePlanSchema = z
       if (step.kind === "run" && step.executable === "npx" && (plan.backend !== "npx" || parseNpxPrepareArgs(step.args) === null)) {
         ctx.addIssue({ code: "custom", path: ["steps", i], message: "npx 준비 단계는 npx backend의 정확한 버전 spec만 받을 수 있습니다" });
       }
+      if (step.kind === "run" && step.index !== undefined && step.executable !== "uvx") ctx.addIssue({ code: "custom", path: ["steps", i, "index"], message: "index fingerprint는 uvx 준비 단계에만 있다" });
+      if (step.kind === "run" && step.executable === "uvx") {
+        const issue = uvxPrepareStepIssue(step, plan.backend, plan.target.clientSpec.args, plan.approvalRequirements);
+        if (issue !== undefined) ctx.addIssue({ code: "custom", path: ["steps", i], message: issue });
+      }
     });
     for (const found of strings(plan)) {
       const problem = containsAbsolutePath(found.value) ? "절대 경로" : URL_CREDENTIAL_PATTERN.test(found.value) ? "URL credential" : TOKEN_PATTERN.test(found.value) ? "token" : undefined;
@@ -257,6 +268,8 @@ export interface LifecyclePlanAssemblyInput {
   blockers: PlanBlocker[];
   /** tool config Tool(v0.2.0): 검토된 내용과 scope별 현재 상태. 있으면 update·rollback·repair가 tool-config 단계를 갖는다. */
   toolConfig?: { content: string; current: readonly { scope: ConfigScope; current: ToolConfigStateInput }[] };
+  /** v0.2.1 uvx Prepare: Manifest의 빌드 정책과 사용자 지정 index fingerprint(없으면 null). uvx backend에서만. */
+  uvPrepare?: { policy: UvxBuildPolicy; index: string | null };
 }
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -305,6 +318,11 @@ export function assembleLifecyclePlan(input: LifecyclePlanAssemblyInput): Planne
       const prepare = ref === null ? null : npxPrepareStepFor(backend, ref.spec, isPinnedArtifact("npx", ref));
       if (prepare !== null) steps.push(prepare);
     }
+    // v0.2.1 uvx Prepare: 정확한 버전 환경(--from·--with 모두 고정)이면 설정을 바꾸기 전에 uv cache에 준비한다.
+    if (backend === "uvx" && input.uvPrepare !== undefined) {
+      const prepare = uvxPrepareStepFor(input.target.launchArgs, input.uvPrepare.policy);
+      if (prepare !== null) steps.push(input.uvPrepare.index === null ? prepare : { ...prepare, index: { custom: true, digest: input.uvPrepare.index } });
+    }
     if (backend === "docker") {
       // update는 resolved digest, rollback은 직전 identity(없으면 직전 launch 인자의 image)를 받는다.
       const image = input.target.identity?.spec ?? input.target.launchArgs[input.target.launchArgs.length - 1]!;
@@ -342,6 +360,7 @@ export function assembleLifecyclePlan(input: LifecyclePlanAssemblyInput): Planne
     if (!healthRequired) approvalRequirements.add("health-gate-skipped");
     if (operation === "rollback") approvalRequirements.add("rollback-to-previous");
     if (steps.some((s) => s.kind === "tool-config")) approvalRequirements.add("tool-config");
+    if (steps.some((s) => s.kind === "run" && s.executable === "uvx" && s.args[0] !== "--no-build")) approvalRequirements.add("source-build");
   }
 
   const warnings: LifecyclePlanV1["warnings"] = blockers.map((b) => ({ code: b.code, message: b.message }));
@@ -349,6 +368,9 @@ export function assembleLifecyclePlan(input: LifecyclePlanAssemblyInput): Planne
     if (operation !== "health" && backend !== "docker") warnings.push({ code: "version-level-lock", message: VERSION_LEVEL_LOCK_NOTICE });
     if (operation === "rollback" && input.target.identity === null) warnings.push({ code: "rollback-artifact-unlocked", message: ROLLBACK_UNLOCKED_NOTICE });
     if (steps.some((s) => s.kind === "run" && s.executable === "npx")) warnings.push({ code: "npx-prepare", message: NPX_PREPARE_NOTICE });
+    if (steps.some((s) => s.kind === "run" && s.executable === "uvx")) warnings.push({ code: "uvx-prepare", message: UVX_PREPARE_NOTICE });
+    if (approvalRequirements.has("source-build")) warnings.push({ code: "uvx-source-build", message: UVX_SOURCE_BUILD_NOTICE });
+    if (steps.some((s) => s.kind === "run" && s.index !== undefined)) warnings.push({ code: "uvx-custom-index", message: UVX_CUSTOM_INDEX_NOTICE });
     if (backend === "docker") warnings.push({ code: "docker-daemon-unchecked", message: "docker 데몬 연결 여부는 확인하지 않았습니다. 데몬이 꺼져 있으면 준비·Health 단계가 실패합니다" });
     if (steps.some((s) => s.kind === "health")) {
       warnings.push({ code: "health-execution", message: HEALTH_EXECUTION_NOTICE });
@@ -424,6 +446,8 @@ export interface LifecyclePlanOptions {
   clientLauncher?: () => Promise<ClientLauncher | null>;
   /** 실행 경로 검사용 fs(v0.2.0, 테스트 주입용). */
   launcherCheckFs?: LauncherCheckFs;
+  /** v0.2.1 uvx Prepare: 사용자 지정 패키지 index fingerprint(uvIndexFingerprint). 생략·null이면 기본 index. */
+  uvIndex?: string | null;
 }
 
 export type LifecyclePlanErrorCode =
@@ -685,6 +709,17 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
     target = { requested: prev.artifact.requested, identity: prev.artifact.resolved, launchArgs: args };
   }
 
+  // v0.2.1 uvx Prepare: Manifest의 검토된 빌드 정책(D3)과 사용자 지정 index fingerprint(D8). health는 설정을 쓰지 않아 준비하지 않는다.
+  let uvPrepare: { policy: UvxBuildPolicy; index: string | null } | undefined;
+  if (backend === "uvx" && options.operation !== "health") {
+    const candidate = installCandidates(manifest).find((c) => c.step.adapter === "uvx");
+    if (candidate !== undefined) {
+      const policy = uvxBuildPolicyOf(candidate.step, "uvx");
+      if (!policy.ok) return { ok: false, code: "MANIFEST_COMMAND_REJECTED", message: policy.reason };
+      uvPrepare = { policy: policy.policy, index: options.uvIndex ?? null };
+    }
+  }
+
   return {
     ok: true,
     planned: assembleLifecyclePlan({
@@ -696,6 +731,7 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
       backend,
       platform: options.platform,
       ...(usesToolConfig && options.operation !== "health" ? { toolConfig: { content: manifest.toolConfig!.content, current: toolConfigCurrent } } : {}),
+      ...(uvPrepare === undefined ? {} : { uvPrepare }),
       current,
       target,
       targets,

@@ -28,6 +28,7 @@ export const APPROVAL_REQUIREMENT_MESSAGES: Readonly<Record<ApprovalRequirement,
   "floating-artifact": "원격 패키지 버전이 고정되어 있지 않습니다. 나중에 실행하면 다른 artifact가 내려올 수 있습니다.",
   "client-env-parse-risk": "Claude Code가 실행되는 환경에 필요한 환경변수를 직접 준비해야 합니다. OpenHub는 값이나 존재 여부를 확인하지 않습니다.",
   "tool-config": "OpenHub가 ~/.openhub/tool-config 아래에 검토된 서버 정책 파일을 만들거나 바꾸고, Client 설정이 그 파일을 쓰게 합니다.",
+  "source-build": "이 도구의 일부 패키지는 소스로만 제공되어 내 컴퓨터에서 빌드됩니다. 빌드 과정에서 제3자 빌드 코드가 실행됩니다. OpenHub는 이 도구의 의존성 목록은 검토했지만 빌드 코드 자체는 검토하지 않았습니다.",
 };
 
 // ---------------------------------------------------------------- 공통 kernel
