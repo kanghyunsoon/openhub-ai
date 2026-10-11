@@ -195,7 +195,7 @@ describe("REQ-040 LifecyclePlan v1·Approval·PLAN_STALE", () => {
     const pgOptions = options(pg, { toolId: "postgres-mcp" });
     const required = planned(await planLifecycle(pgOptions)).plan;
     expect(required.approvalRequirements).toEqual(["base", "health-execution", "environment-unverified"]);
-    expect(required.target.clientSpec).toEqual({ command: "uvx", args: ["postgres-mcp==0.3.0", "--access-mode=restricted"] });
+    expect(required.target.clientSpec).toEqual({ command: "uvx", args: ["--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"] });
     const skipped = planned(await planLifecycle({ ...pgOptions, skipHealth: true })).plan;
     expect(skipped.approvalRequirements).toEqual(["base", "environment-unverified", "health-gate-skipped"]);
     expect([skipped.healthPolicy.gate, skipped.steps.map((s) => s.kind)]).toEqual(["skipped-by-approval", ["config-replace", "state-commit"]]);

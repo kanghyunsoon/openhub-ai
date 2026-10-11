@@ -4,7 +4,7 @@ Postgres MCP Pro (postgres-mcp) 설치 계획
 검사 범위    프로젝트
 Backend      uvx
 준비 단계    없음 — OpenHub는 아무것도 실행하지 않고, Client가 처음 실행할 때 패키지를 받습니다(launch-on-demand)
-Client 실행 명령  uvx postgres-mcp --access-mode=restricted
+Client 실행 명령  uvx --from postgres-mcp --with mcp==1.30.0 postgres-mcp --access-mode=restricted
 
 변경 파일
   - .mcp.json (Claude Code, 프로젝트 범위) mcpServers.postgres 항목 추가 · 새 파일
@@ -25,4 +25,4 @@ Warnings
   - [floating-artifact] 원격 패키지 버전이 고정되어 있지 않습니다. 나중에 실행하면 다른 artifact가 내려올 수 있습니다.
   - [client-env-parse-risk] Claude Code가 실행되는 환경에 필요한 환경변수를 직접 준비해야 합니다. OpenHub는 값이나 존재 여부를 확인하지 않습니다.
 
-Plan digest  sha256:e0f060b3e5eabf45e58270b157162f211637615df2cd7c2de95615cd0b687931
+Plan digest  sha256:e3adb7c6cc70088fbc8136f2f13a5e6526cbbde1b9417016cacf5c3b7c525ab8

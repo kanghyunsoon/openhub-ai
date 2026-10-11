@@ -176,7 +176,7 @@ describe("REQ-044 MCP Health Check", () => {
 
     const uvx = fake();
     await uvx.run(await verifiedFor("postgres-mcp"));
-    expect(uvx.spawns[0]).toEqual(["uvx", "postgres-mcp", "--access-mode=restricted"]);
+    expect(uvx.spawns[0]).toEqual(["uvx", "--from", "postgres-mcp", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]);
     const docker = fake();
     await docker.run(await verifiedFor("github-mcp-server", "update"));
     expect(docker.spawns[0]).toEqual(["docker", "run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server@" + DIGEST]);

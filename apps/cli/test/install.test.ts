@@ -90,7 +90,7 @@ describe("REQ-034 CLI openhub install", () => {
     const linux = await install(["postgres-mcp", "--client", "claude-code", "--client", "codex"], { answers: ["n"] });
     expect(linux.code).toBe(1);
     const text = previewOf(linux);
-    for (const part of ["Backend      uvx", "Client 실행 명령  uvx postgres-mcp --access-mode=restricted", ".mcp.json (Claude Code, 프로젝트 범위)", ".codex/config.toml (Codex, 프로젝트 범위)", "DATABASE_URI", "충돌         없음", "Warnings", "설치 상태    프로젝트 범위 기준 미설치", "검사 범위    프로젝트", "Plan digest  sha256:"]) {
+    for (const part of ["Backend      uvx", "Client 실행 명령  uvx --from postgres-mcp --with mcp==1.30.0 postgres-mcp --access-mode=restricted", ".mcp.json (Claude Code, 프로젝트 범위)", ".codex/config.toml (Codex, 프로젝트 범위)", "DATABASE_URI", "충돌         없음", "Warnings", "설치 상태    프로젝트 범위 기준 미설치", "검사 범위    프로젝트", "Plan digest  sha256:"]) {
       expect(text).toContain(part);
     }
     await golden("preview-postgres-linux.txt", text);

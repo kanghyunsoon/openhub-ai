@@ -165,11 +165,19 @@
       "backend": "uvx",
       "launch": {
         "args": [
+          "--from",
+          "postgres-mcp",
+          "--with",
+          "mcp==1.30.0",
           "postgres-mcp",
           "--access-mode=restricted"
         ],
         "clientSpec": {
           "args": [
+            "--from",
+            "postgres-mcp",
+            "--with",
+            "mcp==1.30.0",
             "postgres-mcp",
             "--access-mode=restricted"
           ],
@@ -388,11 +396,19 @@
       "backend": "uvx",
       "launch": {
         "args": [
+          "--from",
+          "postgres-mcp",
+          "--with",
+          "mcp==1.30.0",
           "postgres-mcp",
           "--access-mode=restricted"
         ],
         "clientSpec": {
           "args": [
+            "--from",
+            "postgres-mcp",
+            "--with",
+            "mcp==1.30.0",
             "postgres-mcp",
             "--access-mode=restricted"
           ],

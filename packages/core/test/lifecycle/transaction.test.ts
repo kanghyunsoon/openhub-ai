@@ -265,7 +265,8 @@ describe("REQ-040 REQ-043 REQ-050 Update transaction", () => {
   it("AC-043-08 npx·uvx update는 config args의 패키지 token 교체와 state 갱신뿐이고 패키지 매니저 명령 spawn이 0건이다", async () => {
     for (const [toolId, before, after] of [
       ["memory-mcp", ["-y", "@modelcontextprotocol/server-memory"], ["-y", "@modelcontextprotocol/server-memory@1.2.3"]],
-      ["postgres-mcp", ["postgres-mcp", "--access-mode=restricted"], ["postgres-mcp==0.3.0", "--access-mode=restricted"]],
+      // v0.2.1: postgres Manifest는 mcp를 1.x로 고정한다(--with). update는 --from 값(artifact)만 바꾼다.
+      ["postgres-mcp", ["--from", "postgres-mcp", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"], ["--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]],
     ] as const) {
       const c = await setup(toolId);
       const original = JSON.parse((await c.file(".mcp.json")).toString("utf8"));

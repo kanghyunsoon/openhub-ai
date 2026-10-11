@@ -63,7 +63,7 @@ describe("REQ-043 Install 연계·Status·Drift", () => {
     const roots = { projectRoot: h.projectRoot, homeDir: h.homeDir };
     for (const e of entries) {
       expect(e.config.entryDigest).toBe(configEntryDigest(await readConfiguredEntry(e.target.client, e.target.scope, e.target.serverName, roots)));
-      expect(e.launch.clientSpec).toEqual({ command: "uvx", args: ["postgres-mcp", "--access-mode=restricted"] });
+      expect(e.launch.clientSpec).toEqual({ command: "uvx", args: ["--from", "postgres-mcp", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"] });
     }
     const codex = entries.find((e) => e.target.client === "codex")!;
     expect(codex.config.tomlBlockDigest).toBe(tomlBlockDigest("postgres", (await readConfiguredEntry("codex", "project", "postgres", roots)) as never));

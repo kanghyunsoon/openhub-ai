@@ -294,7 +294,7 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 Desktop Lifecycle", () => {
     expect(await handlers.get(LIFECYCLE_RUN_CHANNEL)?.({}, ID)).toMatchObject({ status: "done", result: { status: "updated" } });
     // resolver는 Plan 생성 1회 + 실행 직전 재생성 1회(D-018)만 호출된다.
     expect([life.fetched, life.healthRuns, life.spawned, life.dialogs]).toEqual([["https://pypi.org/pypi/postgres-mcp/json", "https://pypi.org/pypi/postgres-mcp/json"], 1, [], 1]);
-    expect(JSON.parse(await readFile(path.join(project, ".mcp.json"), "utf8")).mcpServers.postgres.args).toEqual(["postgres-mcp==9.9.9", "--access-mode=restricted"]);
+    expect(JSON.parse(await readFile(path.join(project, ".mcp.json"), "utf8")).mcpServers.postgres.args).toEqual(["--from", "postgres-mcp==9.9.9", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]);
     const main = await read("src/main.ts");
     expect(main).toContain('const smokeUpdate = smokeInstall === undefined ? undefined : process.env["OPENHUB_SMOKE_UPDATE"] || undefined;');
     expect(main).toContain("dialog: smokeLifecycle?.dialog ?? { showMessageBox: (options) => dialog.showMessageBox(options) }");

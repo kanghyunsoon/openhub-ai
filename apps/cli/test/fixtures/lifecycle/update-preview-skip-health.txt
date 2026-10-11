@@ -7,8 +7,8 @@ Backend      uvx
 요청 spec    postgres-mcp
 준비 단계    없음 — 패키지 매니저 명령을 실행하지 않고 Client 설정의 패키지 인자만 바꿉니다
 Client 실행 명령
-  현재  uvx postgres-mcp --access-mode=restricted
-  변경  uvx postgres-mcp==0.3.0 --access-mode=restricted
+  현재  uvx --from postgres-mcp --with mcp==1.30.0 postgres-mcp --access-mode=restricted
+  변경  uvx --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted
 
 대상
   - .mcp.json (Claude Code, 프로젝트 범위) mcpServers.postgres 항목 교체 · revision 1

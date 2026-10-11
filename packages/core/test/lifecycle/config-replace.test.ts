@@ -88,8 +88,8 @@ describe("REQ-040 Config 교체 writer", () => {
     const r = await replaceConfigEntry(step!, { ...roots(h), expectedBlockDigest: state.config.tomlBlockDigest });
     expect(r.ok).toBe(true);
     const after = await readFile(file, "utf8");
-    const oldBlock = '[mcp_servers.postgres]\ncommand = "uvx"\nargs = ["postgres-mcp", "--access-mode=restricted"]\nenv_vars = ["DATABASE_URI"]\n';
-    const newBlock = '[mcp_servers.postgres]\ncommand = "uvx"\nargs = ["postgres-mcp==0.3.0", "--access-mode=restricted"]\nenv_vars = ["DATABASE_URI"]\n';
+    const oldBlock = '[mcp_servers.postgres]\ncommand = "uvx"\nargs = ["--from", "postgres-mcp", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]\nenv_vars = ["DATABASE_URI"]\n';
+    const newBlock = '[mcp_servers.postgres]\ncommand = "uvx"\nargs = ["--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]\nenv_vars = ["DATABASE_URI"]\n';
     expect(before.endsWith(oldBlock)).toBe(true);
     expect(after).toBe(before.replace(oldBlock, newBlock));
     expect(after.startsWith(head)).toBe(true);
@@ -113,7 +113,7 @@ describe("REQ-040 Config 교체 writer", () => {
     const file = path.join(c.projectRoot, ".codex", "config.toml");
     const block = await readFile(file, "utf8");
     // 0회: 같은 의미지만 OpenHub가 쓴 byte가 아니다(줄 나눔).
-    await writeFile(file, block.replace('args = ["postgres-mcp", "--access-mode=restricted"]', 'args = [\n  "postgres-mcp",\n  "--access-mode=restricted",\n]'));
+    await writeFile(file, block.replace('args = ["--from", "postgres-mcp", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]', 'args = [\n  "--from",\n  "postgres-mcp",\n  "--with",\n  "mcp==1.30.0",\n  "postgres-mcp",\n  "--access-mode=restricted",\n]'));
     c.reset();
     const zero = await replaceConfigEntry(codexStep!, { ...roots(c), expectedBlockDigest: digest });
     expect(zero).toMatchObject({ ok: false, code: "CONFIG_DRIFT" });

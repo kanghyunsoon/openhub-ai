@@ -71,6 +71,10 @@
       "scope": "project",
       "value": {
         "args": [
+          "--from",
+          "postgres-mcp",
+          "--with",
+          "mcp==1.30.0",
           "postgres-mcp",
           "--access-mode=restricted"
         ],
@@ -92,6 +96,10 @@
       "scope": "project",
       "value": {
         "args": [
+          "--from",
+          "postgres-mcp",
+          "--with",
+          "mcp==1.30.0",
           "postgres-mcp",
           "--access-mode=restricted"
         ],
