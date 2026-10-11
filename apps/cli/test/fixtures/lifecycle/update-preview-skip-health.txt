@@ -5,7 +5,7 @@ Backend      uvx
 현재 버전    postgres-mcp==0.3.0
 목표 버전    postgres-mcp==0.3.1
 요청 spec    postgres-mcp==0.3.1
-준비 단계    uvx --no-build --compile-bytecode --from postgres-mcp==0.3.1 --with mcp==1.30.0 python -c pass — OpenHub가 실행합니다(네트워크·다운로드, 받은 image는 지우지 않습니다)
+준비 단계    uvx --no-build --compile-bytecode --from postgres-mcp==0.3.1 --with mcp==1.30.0 python -c pass — OpenHub가 설정을 바꾸기 전에 이 정확한 버전의 Python 패키지를 uv cache에 설치하고 네트워크 없이 다시 확인합니다(MCP 서버는 실행하지 않음, wheel만·빌드 없음)
 Client 실행 명령
   현재  uvx --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted
   변경  uvx --from postgres-mcp==0.3.1 --with mcp==1.30.0 postgres-mcp --access-mode=restricted

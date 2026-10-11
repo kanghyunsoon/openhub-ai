@@ -4,8 +4,9 @@ import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { floatingPostgresRegistry } from "./fixture-registry";
 import { afterAll, describe, expect, it } from "vitest";
-import { formatLifecyclePlanPreview, loadRegistry, planLifecycleRequest, probeBackends, type BackendProbeReport, type ExecChild, type ExecSpawner, type LifecycleEnvironment } from "@openhub/core";
+import { formatLifecyclePlanPreview, loadRegistry, planLifecycleRequest, probeBackends, uvxPrepareArgs, uvxVerifyArgs, type BackendProbeReport, type ExecChild, type ExecSpawner, type LifecycleEnvironment } from "@openhub/core";
 import { INSTALL_PLAN_CHANNEL, INSTALL_RUN_CHANNEL, InstallSession, registerInstall, smokeInstallDeps, type InstallRunResponse, type NativeDialogLike } from "../src/install";
 import {
   LIFECYCLE_CHECK_CHANNEL,
@@ -28,7 +29,8 @@ import { PROJECT_RECOMMEND_CHANNEL, RecommendSession, registerProjectRecommend }
 /** TASK-046 Desktop Lifecycle. Desktop 설치 흐름으로 만든 실제 설정·Version State 위에서 IPC를 호출한다. */
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const SEED_SNAPSHOT = path.join(ROOT, "packages/core/test/fixtures/recommendation/metadata.seed-synthetic.json");
-const REGISTRY = path.join(ROOT, "registry");
+// v0.2.1 #39: postgres-mcp만 버전 없는 형식으로 둔 Registry 사본(Desktop update 흐름 확인용, fixture-registry.ts 참고).
+const REGISTRY = await floatingPostgresRegistry(ROOT);
 const read = (rel: string) => readFile(path.resolve(import.meta.dirname, "..", rel), "utf8");
 const scratch = await mkdtemp(path.join(tmpdir(), "openhub-desktop-lifecycle-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));
@@ -293,7 +295,14 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 Desktop Lifecycle", () => {
     expect(((await handlers.get(LIFECYCLE_PLAN_CHANNELS.update)?.({}, ID)) as LifecyclePlanResponse).status).toBe("ok");
     expect(await handlers.get(LIFECYCLE_RUN_CHANNEL)?.({}, ID)).toMatchObject({ status: "done", result: { status: "updated" } });
     // resolver는 Plan 생성 1회 + 실행 직전 재생성 1회(D-018)만 호출된다.
-    expect([life.fetched, life.healthRuns, life.spawned, life.dialogs]).toEqual([["https://pypi.org/pypi/postgres-mcp/json", "https://pypi.org/pypi/postgres-mcp/json"], 1, [], 1]);
+    // v0.2.1: 정확한 버전(9.9.9)으로 바꾸므로 설정 교체 전에 uvx Prepare(준비 + offline 확인) 두 번만 실행한다(패키지 매니저 명령 없음).
+    const target = { from: "postgres-mcp==9.9.9", withPins: ["mcp==1.30.0"] };
+    expect([life.fetched, life.healthRuns, life.spawned, life.dialogs]).toEqual([
+      ["https://pypi.org/pypi/postgres-mcp/json", "https://pypi.org/pypi/postgres-mcp/json"],
+      1,
+      [["uvx", ...uvxPrepareArgs(target, "wheels-only")], ["uvx", ...uvxVerifyArgs(target, "wheels-only")]],
+      1,
+    ]);
     expect(JSON.parse(await readFile(path.join(project, ".mcp.json"), "utf8")).mcpServers.postgres.args).toEqual(["--from", "postgres-mcp==9.9.9", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]);
     const main = await read("src/main.ts");
     expect(main).toContain('const smokeUpdate = smokeInstall === undefined ? undefined : process.env["OPENHUB_SMOKE_UPDATE"] || undefined;');
