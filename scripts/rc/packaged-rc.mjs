@@ -128,9 +128,11 @@ async function connect(url) {
 }
 
 // ---------------------------------------------------------------- 앱 실행
-const PATCH_DIALOG = String.raw`(() => {
+const PATCH_DIALOG = String.raw`(async () => {
   const { dialog, app } = process.mainModule.require("electron");
   const fs = process.mainModule.require("node:fs");
+  // inspector는 앱이 준비되기 전에 붙을 수 있다(Linux에서 실측). 준비된 뒤에 대화상자를 바꾸고 언어를 읽는다.
+  await app.whenReady();
   globalThis.__rcDialogs = globalThis.__rcDialogs || [];
   globalThis.__rcAnswers = globalThis.__rcAnswers || [];
   dialog.showMessageBox = async (a, b) => {
@@ -151,15 +153,29 @@ async function launch(ctx, extraEnv = {}) {
   // userData도 작업 폴더 안(--user-data-dir)으로 격리한다(Windows는 APPDATA 환경 변수를 따르지 않는다).
   const args = [...ctx.extraArgs, "--user-data-dir=" + ctx.userDataDir, "--inspect=" + ctx.inspectPort, "--remote-debugging-port=" + ctx.cdpPort];
   const child = spawn(ctx.exe, args, { env, cwd: ctx.work, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  ctx.children.push(child);
   let log = "";
   child.stdout.on("data", (d) => (log += d.toString()));
   child.stderr.on("data", (d) => (log += d.toString()));
   const exited = new Promise((r) => child.on("close", (code) => r(code)));
-  const main = await connect(await targetsOf(ctx.inspectPort, "node"));
-  const info = await main.evaluate(PATCH_DIALOG);
-  const page = await connect(await targetsOf(ctx.cdpPort, "page"));
-  await page.evaluate("new Promise((r) => { const f = () => (window.__openhubReady !== undefined ? r(true) : setTimeout(f, 200)); f(); })");
-  const tools = await page.evaluate("Promise.resolve(window.__openhubReady)");
+  let main;
+  let page;
+  let info;
+  let tools;
+  try {
+    main = await connect(await targetsOf(ctx.inspectPort, "node"));
+    info = await main.evaluate(PATCH_DIALOG);
+    page = await connect(await targetsOf(ctx.cdpPort, "page"));
+    await page.evaluate("new Promise((r) => { const f = () => (window.__openhubReady !== undefined ? r(true) : setTimeout(f, 200)); f(); })");
+    tools = await page.evaluate("Promise.resolve(window.__openhubReady)");
+  } catch (error) {
+    // 붙지 못했으면 앱을 남기지 않는다(남으면 하네스가 끝나지 않는다).
+    child.kill();
+    main?.close();
+    page?.close();
+    ctx.logs.push(log.slice(-4000));
+    throw error;
+  }
   const quit = async () => {
     try {
       await main.evaluate('process.mainModule.require("electron").app.quit(), true', 5000);
@@ -272,6 +288,7 @@ async function run() {
     work,
     logs: [],
     extraArgs: opts("arg"),
+    children: [],
     userDataDir: path.join(work, "user-data"),
     inspectPort: 9339,
     cdpPort: 9333,
@@ -288,9 +305,11 @@ async function run() {
   const p = (rel) => path.join(project, rel);
   const read = (f) => readFile(f, "utf8").catch(() => null);
   const ev = (app, expr, t) => app.page.evaluate(expr, t);
+  const progress = (msg) => console.log("[rc " + new Date().toISOString().slice(11, 19) + "] " + msg);
   let app;
   try {
     // ---- 3 신규 사용자 첫 실행
+    progress("launch 1");
     app = await launch(ctx);
     results.environment = { userData: path.relative(work, app.info.userData).startsWith("..") ? "outside work dir (runner profile)" : "work/" + path.relative(work, app.info.userData).replace(/\\/gu, "/"), homeIsolated: path.resolve(app.info.home) === path.resolve(home) };
     const onboarding = await ev(app, "window.__openhubOnboarding()");
@@ -300,6 +319,7 @@ async function run() {
     step(3, app.tools > 0 && onboarding.visible && i18n0.locale === expectedLocale && i18n0.missingKeys.length === 0 && results.environment.homeIsolated ? "PASS" : "FAIL", { tools: app.tools, onboarding, locale: i18n0.locale, expectedLocale, systemLanguage: app.info.systemLanguages[0], missingKeys: i18n0.missingKeys.length, environment: results.environment });
 
     // ---- 4 분석·추천
+    progress("step 3 " + results.steps[3].status);
     const scanned = await ev(app, "window.__openhubScanProject()");
     const recCount = await ev(app, "window.__openhubRecommend()");
     const diag = await ev(app, "window.__openhubForYouDiagnosis()");
@@ -320,6 +340,7 @@ async function run() {
     await writeFile(p(".mcp.json"), PROJECT_MCP);
 
     // ---- 5·6·7 설치 승인(Claude Code 프로젝트), 기존 항목 보존
+    progress("reject/stale checks done");
     await ev(app, "window.__openhubRecommend()");
     const memInstall = await ev(app, "window.__openhubInstall('memory-mcp', ['claude-code'])", 900000);
     const mcpDoc = JSON.parse((await read(p(".mcp.json"))) ?? "{}");
@@ -339,6 +360,7 @@ async function run() {
     step(6, userOk ? "PASS" : "FAIL", { status: addUser.status, requirements: addUser.requirements, configChanges: addUser.configChanges, otherUserEntriesKept: cursorUser.theme === "dark" && codexUserAfter === CODEX_USER });
 
     // ---- Kubernetes(Codex 프로젝트), Client 검증 수준
+    progress("steps 6/7 " + results.steps[6].status + "/" + results.steps[7].status);
     await ev(app, "window.__openhubRecommend()");
     const k8s = await ev(app, "window.__openhubInstall('kubernetes-mcp-server', ['codex'])", 1200000);
     const choices = Object.fromEntries((k8s.choices ?? []).map((c) => [c.client, c.verification]));
@@ -353,6 +375,7 @@ async function run() {
     step(14, addUser.status === "succeeded" && again.status === "no-op" && addCodexUser.status === "succeeded" ? "PASS" : "FAIL", { addCursorUser: addUser.status, sameTarget: again.status, addCodexUser: addCodexUser.status, codexUserStillStartsWithOriginal: String(await read(path.join(home, ".codex", "config.toml"))).startsWith(CODEX_USER) });
 
     // ---- 8 실제 MCP Health
+    progress("steps 5/14 " + results.steps[5].status + "/" + results.steps[14].status);
     await ev(app, "window.__openhubUserScopeOff('memory-mcp')");
     const memHealth = await ev(app, "window.__openhubLifecycleRun('memory-mcp', 'health')", 600000);
     const k8sHealth = await ev(app, "window.__openhubLifecycleRun('kubernetes-mcp-server', 'health')", 600000);
@@ -380,6 +403,7 @@ async function run() {
     step(8, healthOk && mcpOk ? "PASS" : "FAIL", { memory: { status: memHealth.status, outcome: memHealth.outcome, lines: memHealth.lines }, kubernetes: { status: k8sHealth.status, outcome: k8sHealth.outcome, lines: k8sHealth.lines }, mcp });
 
     // ---- 9·10 Update(고정 안 됨 → npm latest 정확한 버전) → Rollback(이전 고정 안 된 항목) → Health
+    progress("step 8 " + results.steps[8].status);
     const memBefore = JSON.parse((await read(p(".mcp.json"))) ?? "{}").mcpServers?.memory;
     const upd = await ev(app, "window.__openhubLifecycle('memory-mcp')", 1200000);
     const memAfter = JSON.parse((await read(p(".mcp.json"))) ?? "{}").mcpServers?.memory;
@@ -394,6 +418,7 @@ async function run() {
     check("kubernetes-only-0.0.67", ["up-to-date", "not-updatable", "not-executable"].includes(k8sUpd.status) && codexToml.includes("kubernetes-mcp-server@0.0.67"), { update: k8sUpd.status });
 
     // ---- 11 Drift·Repair(프로젝트 tool config 삭제 → status drift → 승인 repair → 복구)
+    progress("steps 9/10 " + results.steps[9].status + "/" + results.steps[10].status);
     const projectToolConfig = walk(path.join(home, ".openhub", "tool-config", "project")).find((f) => f.endsWith("config.toml"));
     let repair = null;
     if (projectToolConfig) {
@@ -407,6 +432,7 @@ async function run() {
     results.notRun.push("11: Health failure compensation in the packaged app (needs a failing real MCP server; covered only by automated tests)");
 
     // ---- 12 English / Korean, 승인 대화상자 언어
+    progress("step 11 " + results.steps[11].status);
     await ev(app, "window.__openhubSetLanguage('ko')");
     await sleep(1500);
     await app.reloadReady();
@@ -424,6 +450,7 @@ async function run() {
     app = undefined;
 
     // ---- 13 재실행 후 유지(언어 ko, INSTALLED, Version State·설정 byte 그대로)
+    progress("step 12 " + results.steps[12].status + "; launch 2");
     app = await launch(ctx);
     const lang2 = await ev(app, "window.__openhubI18n()");
     await ev(app, "window.__openhubScanProject()");
@@ -438,6 +465,7 @@ async function run() {
     app = undefined;
 
     // ---- 4(빈 프로젝트 진단)
+    progress("step 13 " + results.steps[13].status + "; launch 3 (empty project)");
     app = await launch(ctx, { OPENHUB_SMOKE_PROJECT: empty });
     await ev(app, "window.__openhubScanProject()");
     const emptyCount = await ev(app, "window.__openhubRecommend()");
@@ -458,6 +486,7 @@ async function run() {
     results.errors.push(String(error instanceof Error ? error.stack ?? error.message : error));
   } finally {
     if (app) await app.quit();
+    for (const c of ctx.children) if (c.exitCode === null && c.signalCode === null) c.kill();
     api.close();
     results.finishedAt = new Date().toISOString();
     results.appLogTail = ctx.logs.map((l) => l.replace(new RegExp(TOKEN, "gu"), "<token>"));
@@ -469,6 +498,8 @@ async function run() {
     console.log(Object.entries(results.steps).map(([n, s]) => n + ":" + s.status).join(" "));
     for (const [n, c] of Object.entries(results.checks)) console.log("check " + n + ": " + c.status);
     for (const e of results.errors) console.error(e);
+    // 남은 핸들(WebSocket·자식 프로세스)이 있어도 끝낸다.
+    process.exit(0);
   }
 }
 
