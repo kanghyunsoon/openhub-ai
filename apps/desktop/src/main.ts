@@ -292,11 +292,21 @@ async function createWindow(): Promise<void> {
               ),
             );
       type ExactStep = { status: string; outcome?: string; message?: string; plan?: { from: string | null; to: string | null }; requirements?: string[]; after?: string[] };
+      type BridgeProbe = { status: string; results?: { value: string; plan: string; run: string }[] };
+      const counters = () => ({ dialogs: smokeLifecycle?.dialogs ?? 0, npm: smokeLifecycle?.spawned.length ?? 0, fetched: smokeLifecycle?.fetched.length ?? 0 });
+      const beforeBridge = counters();
       const exact =
         smokeUpdateVersions === undefined || smokeUpdate === undefined || install === undefined
           ? undefined
           : {
               invalid: (await win.webContents.executeJavaScript("window.__openhubLifecycleUpdateTo(" + JSON.stringify(smokeUpdate) + ', "latest", false)')) as ExactStep,
+              // 화면 입력의 공백은 고치지 않는다(invalid-version).
+              invalidSpaces: (await win.webContents.executeJavaScript("window.__openhubLifecycleUpdateTo(" + JSON.stringify(smokeUpdate) + ', " ' + smokeUpdateVersions[0] + ' ", false)')) as ExactStep,
+              // renderer → 실제 preload → main 경계: 잘못된 타입·값은 기본 Update로 바뀌지 않고 거절된다.
+              bridge: (await win.webContents.executeJavaScript(
+                "window.__openhubLifecycleBridgeProbe(" + JSON.stringify(smokeUpdate) + ', [" 1.2.3", "1.2.3 ", "   ", 42, [], {}, null, true, "latest", "^1.2.3", "https://registry.npmjs.org/x", "../1.2.3", "$(id)", "1.2.3-rc.1"])',
+              )) as BridgeProbe,
+              bridgeCounters: { before: beforeBridge, after: counters() },
               steps: [] as { version: string; result: ExactStep }[],
             };
       for (const version of exact === undefined ? [] : smokeUpdateVersions!) {
@@ -379,6 +389,11 @@ async function createWindow(): Promise<void> {
       const exactOk =
         exact === undefined ||
         (exact.invalid.status === "not-executable" &&
+          exact.invalidSpaces.status === "not-executable" &&
+          exact.bridge.status === "ok" &&
+          (exact.bridge.results ?? []).length === 14 &&
+          (exact.bridge.results ?? []).every((r) => r.plan === "invalid-version" && r.run === "no-plan") &&
+          JSON.stringify(exact.bridgeCounters.before) === JSON.stringify(exact.bridgeCounters.after) &&
           exact.steps.length === smokeUpdateVersions!.length &&
           exact.steps.every((s) => s.result.status === "updated" && s.result.outcome === "succeeded" && (s.result.plan?.to ?? "").endsWith("@" + s.version)));
       const rollbackOk = !smokeRollback || (rollbackChain !== undefined && rollbackChain.rollback.status === "rolled-back" && rollbackChain.health.status === "health-checked");

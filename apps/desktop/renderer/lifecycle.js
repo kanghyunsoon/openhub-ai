@@ -4,8 +4,9 @@
 // renderer는 state entry id 하나만 보낸다. Plan·digest·승인을 보내지 않는다. timer·polling이 없고
 // 업데이트 확인(network)은 버튼을 눌렀을 때만 한다. 모든 문자열은 textContent로만 넣는다.
 // skip된 Health는 Core 문장 그대로 "Health: Not verified"로 보인다.
-// 정확한 버전으로 Update(v0.2.0 RC): npx 항목(canChooseVersion)에만 목표 버전 입력이 보인다. 값은 계획·실행 때 문자열로만 보내고
-// 검증은 main이 한다. 입력을 바꾸면 보이던 계획을 지우고 main에도 계획 폐기(lifecycle:discard)를 알린다.
+// 정확한 버전으로 Update(v0.2.0 RC): npx 항목(canChooseVersion)에만 목표 버전 입력이 보인다. 입력값은 고치지 않고(공백 제거 없음)
+// 그대로 보내며 검증은 main이 한다(" 1.2.3"은 invalid-version). 완전히 빈 입력만 버전 미지정이다.
+// 입력을 바꾸면 보이던 계획을 지우고 main에도 계획 폐기(lifecycle:discard)를 알린다.
 (() => {
   const t = window.openhubI18n.t;
   function el(tag, className, text) {
@@ -30,10 +31,10 @@
     health: (id) => window.openhub.planLifecycleHealth(id),
     repair: (id) => window.openhub.planLifecycleRepair(id),
   };
-  /** entry id의 목표 버전 입력값(앞뒤 공백 제거). 입력이 없거나 비었으면 undefined(Registry 기본). */
+  /** entry id의 목표 버전 입력값 그대로. 입력란이 없거나 완전히 비었을 때만 undefined(Registry 기본). 공백만 있어도 그대로 보낸다. */
   function versionOf(id) {
     const input = [...list.querySelectorAll("input.lifecycle-version")].find((x) => x.dataset.entryId === id);
-    const value = input ? input.value.trim() : "";
+    const value = input ? input.value : "";
     return value === "" ? undefined : value;
   }
   const TITLE = { update: t("lifecycle.op.update"), rollback: t("lifecycle.op.rollback"), health: t("lifecycle.op.health"), repair: t("lifecycle.op.repair") };
@@ -374,6 +375,21 @@
       .filter((x) => x.dataset.toolId === toolId && x.dataset.scope === "user")
       .map((x) => ({ state: (response.items || []).find((i) => i.id === x.dataset.entryId)?.state || "", buttons: x.querySelectorAll("button").length, warning: x.querySelector(".entry-warning")?.textContent || "" }));
     return { pressed: userToggle.getAttribute("aria-pressed"), entries };
+  };
+
+  // 스모크·RC(경계 검사): toolId 항목에 대해 실제 preload 브리지로 values의 각 값을 버전 인자로 그대로 보내 계획·실행 응답 상태를 모은다.
+  // 화면 입력을 거치지 않는 잘못된 타입(숫자·배열·객체·null)이 main에서 거절되는지 본다.
+  window.__openhubLifecycleBridgeProbe = async (toolId, values) => {
+    await refresh();
+    const li = [...list.querySelectorAll("li.entry")].find((x) => x.dataset.toolId === toolId && x.querySelector(".lifecycle-update"));
+    if (!li) return { status: "no-update-button" };
+    const out = [];
+    for (const value of values) {
+      const plan = await window.openhub.planLifecycleUpdate(li.dataset.entryId, value);
+      const run = await window.openhub.runLifecycle(li.dataset.entryId, value);
+      out.push({ value: JSON.stringify(value) ?? "undefined", plan: plan.status, run: run.status });
+    }
+    return { status: "ok", results: out };
   };
 
   // 스모크·RC(정확한 버전 Update): toolId 항목의 목표 버전 입력에 version을 넣고(input 이벤트) [업데이트 계획] click → 승인 항목 checkbox

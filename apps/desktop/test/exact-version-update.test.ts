@@ -22,7 +22,7 @@ import {
   type LifecycleRunResponse,
   type LifecycleStatusResponse,
 } from "../src/lifecycle";
-import { PROJECT_SCAN_CHANNEL, fixedDirectory, registerProjectScan } from "../src/project-scan";
+import { PROJECT_SCAN_CHANNEL, registerProjectScan } from "../src/project-scan";
 import { PROJECT_RECOMMEND_CHANNEL, RecommendSession, registerProjectRecommend } from "../src/recommend";
 import { approveAll, createHarness, plannedOf } from "../../../packages/core/test/installer/harness";
 import { fakeNpmSpawner } from "../../../packages/core/test/process/fake-npm";
@@ -71,7 +71,8 @@ async function setup(o: Options = {}) {
   const call = (ch: string, ...a: unknown[]) => handlers.get(ch)!({}, ...a);
   const rs = new RecommendSession();
   const is = new InstallSession();
-  registerProjectScan(rs.observe(ipc), is.trackPicker(fixedDirectory(project)));
+  let pick = project;
+  registerProjectScan(rs.observe(ipc), is.trackPicker(async () => pick));
   registerProjectRecommend(ipc, rs, { registryDir: REGISTRY, metadataFile: SEED_SNAPSHOT, platform: "linux" });
   registerInstall(ipc, is, { registryDir: REGISTRY, metadataFile: SEED_SNAPSHOT, platform: "linux", homeDir: home, recommend: rs, dialog: install.dialog, probe: install.probe, spawner: install.spawner });
   const dialog: NativeDialogLike = { showMessageBox: async (opt) => (dialogs.push(opt), { response: await (o.dialog?.({ discard: async () => call(LIFECYCLE_DISCARD_CHANNEL) }) ?? 1) }) };
@@ -128,6 +129,12 @@ async function setup(o: Options = {}) {
     plan: (op: keyof typeof LIFECYCLE_PLAN_CHANNELS, ...a: unknown[]) => call(LIFECYCLE_PLAN_CHANNELS[op], ...a) as Promise<LifecyclePlanResponse>,
     run: (...a: unknown[]) => call(LIFECYCLE_RUN_CHANNEL, ...a) as Promise<LifecycleRunResponse>,
     discard: () => call(LIFECYCLE_DISCARD_CHANNEL),
+    /** 사용자가 다른 프로젝트를 고른다([프로젝트 선택]과 같은 경로). */
+    switchProject: async (dir: string) => {
+      pick = dir;
+      await call(PROJECT_SCAN_CHANNEL);
+    },
+    showUser: (on: boolean) => call(LIFECYCLE_STATUS_CHANNEL, { includeUser: on }) as Promise<LifecycleStatusResponse>,
   };
 }
 type Ctx = Awaited<ReturnType<typeof setup>>;
@@ -172,6 +179,21 @@ describe("정확한 버전 입력 검증(main)", () => {
     expect(c.fetches).toEqual([]);
     expect(c.npmCalls).toEqual([]);
     expect(c.dialogs).toEqual([]);
+    expect([await readFile(path.join(c.project, ".mcp.json"), "utf8"), await c.stateBytes()]).toEqual(before);
+  });
+
+  it("preload가 그대로 넘긴 잘못된 타입·공백 값(숫자·배열·객체·null·true·공백)도 main이 거절한다: 계획·resolver·npm·대화상자·쓰기 0", async () => {
+    const c = await withMemory();
+    const before = [await readFile(path.join(c.project, ".mcp.json"), "utf8"), await c.stateBytes()];
+    // preload: version이 undefined가 아니면 { version }으로 넘긴다. 아래는 renderer가 보낼 수 있는 값을 그 형태로 넣은 것이다.
+    for (const version of [" " + V1, V1 + " ", "   ", "\t" + V1, 42, [], [V1], {}, { version: V1 }, null, true]) {
+      expect(await c.plan("update", MEMORY, { version }), JSON.stringify(version)).toEqual({ status: "invalid-version", message: ko["life.version.invalid"] });
+      expect(await c.run(MEMORY, { version })).toEqual({ status: "no-plan" });
+    }
+    expect(c.fetches).toEqual([]);
+    expect(c.npmCalls).toEqual([]);
+    expect(c.dialogs).toEqual([]);
+    expect(c.healthRuns).toEqual([]);
     expect([await readFile(path.join(c.project, ".mcp.json"), "utf8"), await c.stateBytes()]).toEqual(before);
   });
 
@@ -298,6 +320,37 @@ describe("버전을 바꾸면 계획을 버린다", () => {
     expect([await readFile(path.join(c.project, ".mcp.json"), "utf8"), await c.stateBytes()]).toEqual(before);
     expect(await c.cached(PKG + "@" + V1)).toBe(false);
   });
+
+  it("D. 정확한 버전 계획을 만든 뒤 프로젝트를 바꾸면 project-changed(실행·쓰기 0)", async () => {
+    const c = await withMemory();
+    const other = path.join(path.dirname(c.project), "other");
+    await mkdir(other);
+    await writeFile(path.join(other, ".mcp.json"), '{ "mcpServers": {} }\n');
+    const before = [await readFile(path.join(c.project, ".mcp.json"), "utf8"), await c.stateBytes()];
+    expect((await c.plan("update", MEMORY, { version: V1 })).status).toBe("ok");
+    await c.switchProject(other);
+    expect((await c.run(MEMORY, { version: V1 })).status).toBe("project-changed");
+    expect(c.dialogs).toEqual([]);
+    expect(c.npmCalls).toEqual([]);
+    expect([await readFile(path.join(c.project, ".mcp.json"), "utf8"), await c.stateBytes()]).toEqual(before);
+  });
+
+  it("E. 프로젝트 항목의 정확한 버전 계획은 사용자 범위 보기를 켜고 꺼도 그대로 실행된다(기존 계약)", async () => {
+    const c = await withMemory();
+    expect((await c.plan("update", MEMORY, { version: V1 })).status).toBe("ok");
+    expect((await c.showUser(true)).status).toBe("ok");
+    expect((await c.showUser(false)).status).toBe("ok");
+    expect(await c.run(MEMORY, { version: V1 })).toMatchObject({ status: "done", result: { status: "updated" } });
+    expect((await c.mcp()).mcpServers.memory!.args).toContain(PKG + "@" + V1);
+  });
+
+  it("F. 실행이 끝난 계획은 다시 실행할 수 없다(no-plan)", async () => {
+    const c = await withMemory();
+    await updateTo(c, V1);
+    const dialogs = c.dialogs.length;
+    expect(await c.run(MEMORY, { version: V1 })).toEqual({ status: "no-plan" });
+    expect(c.dialogs).toHaveLength(dialogs);
+  });
 });
 
 describe("영어 승인 대화상자", () => {
@@ -363,10 +416,14 @@ describe("renderer·preload", () => {
     expect(js).toMatch(/if \(item\.canChooseVersion\) \{[\s\S]*input\.className = "lifecycle-version";/u);
     expect(js).toMatch(/input\.addEventListener\("input", \(\) => \{\s*\/\/[^\n]*\n\s*current = null;\s*show\(\[\]\);\s*void window\.openhub\.discardLifecyclePlan\(\);/u);
     expect(js).toContain("update: (id) => window.openhub.planLifecycleUpdate(id, versionOf(id)),");
+    // 입력값을 고치지 않는다(trim 없음). 완전히 빈 값만 버전 미지정이다.
+    expect(js).toContain('const value = input ? input.value : "";');
+    expect(js).toContain('return value === "" ? undefined : value;');
+    expect(js).not.toMatch(/versionOf[\s\S]{0,300}\.trim\(\)/u);
     expect(js).toContain('window.openhub.runLifecycle(id, operation === "update" ? versionOf(id) : undefined)');
     expect(js).not.toMatch(/\.(inner|outer)HTML\s*=|insertAdjacentHTML/u);
-    expect(preload).toContain('ipcRenderer.invoke("lifecycle:plan-update", String(id), typeof version === "string" ? { version } : undefined)');
-    expect(preload).toContain('ipcRenderer.invoke("lifecycle:run", String(id), typeof version === "string" ? { version } : undefined)');
+    expect(preload).toContain('ipcRenderer.invoke("lifecycle:plan-update", String(id), version === undefined ? undefined : { version })');
+    expect(preload).toContain('ipcRenderer.invoke("lifecycle:run", String(id), version === undefined ? undefined : { version })');
     expect(preload).toContain('discardLifecyclePlan: () => ipcRenderer.invoke("lifecycle:discard")');
     for (const key of ["lifecycle.version.label", "lifecycle.version.placeholder", "lifecycle.version.hint", "life.version.invalid", "life.version.notSupported", "life.version.changed", "dialog.version"] as const) {
       expect(en[key], key).toBeTruthy();

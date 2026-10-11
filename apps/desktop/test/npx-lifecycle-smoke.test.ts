@@ -150,6 +150,13 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || electronBin === null)("v0.
     expect(run.code, JSON.stringify(exact)).toBe(0);
     expect(exact.invalid.status).toBe("not-executable");
     expect(exact.invalid.message).toContain("1.2.3");
+    // 화면 입력의 앞뒤 공백은 고치지 않는다.
+    expect(exact.invalidSpaces.status).toBe("not-executable");
+    expect(exact.invalidSpaces.message).toContain("1.2.3");
+    // renderer → 실제 preload → main: 잘못된 타입·값 14개 모두 invalid-version, 실행 요청은 no-plan, 대화상자·npm·resolver 증가 0.
+    expect(exact.bridge.results).toHaveLength(14);
+    expect(exact.bridge.results.filter((r: { plan: string; run: string }) => r.plan !== "invalid-version" || r.run !== "no-plan")).toEqual([]);
+    expect(exact.bridgeCounters.after).toEqual(exact.bridgeCounters.before);
     expect(exact.steps.map((s: { version: string; result: { status: string; plan: { to: string } } }) => [s.version, s.result.status, s.result.plan.to])).toEqual([
       ["9.9.7", "updated", "@playwright/mcp@9.9.7"],
       ["9.9.8", "updated", "@playwright/mcp@9.9.8"],

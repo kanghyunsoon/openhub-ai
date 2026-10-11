@@ -144,7 +144,7 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 Desktop Lifecycle", () => {
     }
     // update 계획·실행은 정확한 버전(문자열일 때만)을 { version }으로 함께 보낸다. 경로는 보내지 않는다.
     for (const ch of ["lifecycle:plan-update", "lifecycle:run"]) {
-      expect(preload).toContain("(id: unknown, version?: unknown) => ipcRenderer.invoke(\"" + ch + "\", String(id), typeof version === \"string\" ? { version } : undefined)");
+      expect(preload).toContain("(id: unknown, version?: unknown) => ipcRenderer.invoke(\"" + ch + "\", String(id), version === undefined ? undefined : { version })");
     }
     expect(preload).toContain('discardLifecyclePlan: () => ipcRenderer.invoke("lifecycle:discard")');
   }, 30_000);

@@ -59,12 +59,13 @@ const lifecycleBridge = {
   lifecycleStatus: (options?: unknown) =>
     ipcRenderer.invoke("lifecycle:status", options !== null && typeof options === "object" && typeof (options as { includeUser?: unknown }).includeUser === "boolean" ? { includeUser: (options as { includeUser: boolean }).includeUser } : undefined),
   checkLifecycle: (id: unknown) => ipcRenderer.invoke("lifecycle:check", String(id)),
-  // 정확한 버전(선택)은 문자열일 때만 { version }으로 보낸다. 검증은 main이 한다.
-  planLifecycleUpdate: (id: unknown, version?: unknown) => ipcRenderer.invoke("lifecycle:plan-update", String(id), typeof version === "string" ? { version } : undefined),
+  // 정확한 버전(선택): 주지 않았을 때(undefined)만 버전 미지정이다. 그 밖의 값은 타입과 관계없이 { version }으로 넘겨
+  // main이 검증·거절한다(잘못된 값이 조용히 기본 Update로 바뀌지 않게).
+  planLifecycleUpdate: (id: unknown, version?: unknown) => ipcRenderer.invoke("lifecycle:plan-update", String(id), version === undefined ? undefined : { version }),
   planLifecycleRollback: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-rollback", String(id)),
   planLifecycleHealth: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-health", String(id)),
   planLifecycleRepair: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-repair", String(id)),
-  runLifecycle: (id: unknown, version?: unknown) => ipcRenderer.invoke("lifecycle:run", String(id), typeof version === "string" ? { version } : undefined),
+  runLifecycle: (id: unknown, version?: unknown) => ipcRenderer.invoke("lifecycle:run", String(id), version === undefined ? undefined : { version }),
   discardLifecyclePlan: () => ipcRenderer.invoke("lifecycle:discard"),
 };
 
