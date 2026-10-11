@@ -9,6 +9,7 @@ import { formatLifecyclePlanPreview, loadRegistry, planLifecycleRequest, probeBa
 import { INSTALL_PLAN_CHANNEL, INSTALL_RUN_CHANNEL, InstallSession, registerInstall, smokeInstallDeps, type InstallRunResponse, type NativeDialogLike } from "../src/install";
 import {
   LIFECYCLE_CHECK_CHANNEL,
+  LIFECYCLE_DISCARD_CHANNEL,
   LIFECYCLE_PLAN_CHANNELS,
   LIFECYCLE_RUN_CHANNEL,
   LIFECYCLE_STATUS_CHANNEL,
@@ -121,23 +122,31 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 Desktop Lifecycle", () => {
   it("AC-046-01 Lifecycle IPC 인자는 state entry id 하나뿐이고 경로·Plan·digest를 보내도 무시한다", async () => {
     const w = await installed();
     expect((await items(w)).map((i) => i.id)).toEqual([ID]);
-    const ok = await w.plan("update", ID, "C:/Windows/System32", { plan: { steps: [{ kind: "run", executable: "cmd" }] } }, "sha256:" + "0".repeat(64));
+    // v0.2.0: update 계획의 두 번째 인자는 { version }뿐이다(그 밖의 키는 무시). 문자열 등 다른 형태는 계획하지 않는다(fail-closed).
+    const ok = await w.plan("update", ID, { path: "C:/Windows/System32", plan: { steps: [{ kind: "run", executable: "cmd" }] }, digest: "sha256:" + "0".repeat(64) }, "sha256:" + "0".repeat(64));
     expect(ok.status).toBe("ok");
+    expect((await w.plan("update", ID, "C:/Windows/System32")).status).toBe("invalid-version");
+    expect((await w.plan("health", ID, "C:/Windows/System32", { plan: { steps: [{ kind: "run", executable: "cmd" }] } })).status).toBe("ok");
     for (const bad of ["../.mcp.json", "project:claude-code:memory", "user:cursor:postgres", 42, { id: ID }, w.project]) {
       for (const op of ["update", "rollback", "health"] as const) expect((await w.plan(op, bad)).status, op + " " + String(bad)).toBe("not-managed");
       expect((await w.check(bad)).status).toBe("not-managed");
       expect((await w.run(bad)).status).toBe("no-plan");
     }
     expect([...w.handlers.keys()].filter((c) => c.startsWith("lifecycle:")).sort()).toEqual(
-      [LIFECYCLE_STATUS_CHANNEL, LIFECYCLE_CHECK_CHANNEL, ...Object.values(LIFECYCLE_PLAN_CHANNELS), LIFECYCLE_RUN_CHANNEL].sort(),
+      [LIFECYCLE_STATUS_CHANNEL, LIFECYCLE_CHECK_CHANNEL, ...Object.values(LIFECYCLE_PLAN_CHANNELS), LIFECYCLE_RUN_CHANNEL, LIFECYCLE_DISCARD_CHANNEL].sort(),
     );
     const preload = await read("src/preload.ts");
     // v0.2.0 P0-3 C2: 상태 요청은 사용자 범위 보기 여부({ includeUser: boolean })만 넘긴다(경로 없음).
     expect(preload).toContain('ipcRenderer.invoke("lifecycle:status", options !== null && typeof options === "object"');
     expect(preload).toContain("? { includeUser: (options as { includeUser: boolean }).includeUser } : undefined");
-    for (const ch of ["lifecycle:check", "lifecycle:plan-update", "lifecycle:plan-rollback", "lifecycle:plan-health", "lifecycle:run"]) {
+    for (const ch of ["lifecycle:check", "lifecycle:plan-rollback", "lifecycle:plan-health"]) {
       expect(preload).toMatch(new RegExp("\\(id: unknown\\) => ipcRenderer\\.invoke\\(\"" + ch + "\", String\\(id\\)\\)", "u"));
     }
+    // update 계획·실행은 정확한 버전(문자열일 때만)을 { version }으로 함께 보낸다. 경로는 보내지 않는다.
+    for (const ch of ["lifecycle:plan-update", "lifecycle:run"]) {
+      expect(preload).toContain("(id: unknown, version?: unknown) => ipcRenderer.invoke(\"" + ch + "\", String(id), version === undefined ? undefined : { version })");
+    }
+    expect(preload).toContain('discardLifecyclePlan: () => ipcRenderer.invoke("lifecycle:discard")');
   }, 30_000);
 
   it("AC-046-02 renderer·main에 timer·polling이 0개이고 update 확인은 버튼 클릭 때만 resolver를 호출한다", async () => {
@@ -181,7 +190,8 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 Desktop Lifecycle", () => {
     const before = await readFile(path.join(cancel.project, ".mcp.json"));
     const state = await readFile(stateFile(cancel));
     await cancel.plan("update", ID);
-    expect(await cancel.run(ID, "sha256:" + "0".repeat(64), ["base"])).toEqual({ status: "rejected" });
+    // renderer가 digest·승인 항목을 보내도 쓰지 않는다(승인은 대화상자에서만).
+    expect(await cancel.run(ID, { digest: "sha256:" + "0".repeat(64), approved: ["base"] }, ["base"])).toEqual({ status: "rejected" });
     expect(cancel.dialogs).toHaveLength(1);
     expect(cancel.dialogs[0]).toMatchObject({ type: "warning", title: "OpenHub 업데이트 승인", buttons: ["취소", "승인"], defaultId: 0, cancelId: 0 });
     expect(cancel.dialogs[0]!.detail).toContain("[health-execution]");

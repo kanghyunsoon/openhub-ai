@@ -4,6 +4,9 @@
 // renderer는 state entry id 하나만 보낸다. Plan·digest·승인을 보내지 않는다. timer·polling이 없고
 // 업데이트 확인(network)은 버튼을 눌렀을 때만 한다. 모든 문자열은 textContent로만 넣는다.
 // skip된 Health는 Core 문장 그대로 "Health: Not verified"로 보인다.
+// 정확한 버전으로 Update(v0.2.0 RC): npx 항목(canChooseVersion)에만 목표 버전 입력이 보인다. 입력값은 고치지 않고(공백 제거 없음)
+// 그대로 보내며 검증은 main이 한다(" 1.2.3"은 invalid-version). 완전히 빈 입력만 버전 미지정이다.
+// 입력을 바꾸면 보이던 계획을 지우고 main에도 계획 폐기(lifecycle:discard)를 알린다.
 (() => {
   const t = window.openhubI18n.t;
   function el(tag, className, text) {
@@ -23,11 +26,17 @@
   const list = document.getElementById("lifecycle-list");
   const panel = document.getElementById("lifecycle-panel");
   const PLANNERS = {
-    update: (id) => window.openhub.planLifecycleUpdate(id),
+    update: (id) => window.openhub.planLifecycleUpdate(id, versionOf(id)),
     rollback: (id) => window.openhub.planLifecycleRollback(id),
     health: (id) => window.openhub.planLifecycleHealth(id),
     repair: (id) => window.openhub.planLifecycleRepair(id),
   };
+  /** entry id의 목표 버전 입력값 그대로. 입력란이 없거나 완전히 비었을 때만 undefined(Registry 기본). 공백만 있어도 그대로 보낸다. */
+  function versionOf(id) {
+    const input = [...list.querySelectorAll("input.lifecycle-version")].find((x) => x.dataset.entryId === id);
+    const value = input ? input.value : "";
+    return value === "" ? undefined : value;
+  }
   const TITLE = { update: t("lifecycle.op.update"), rollback: t("lifecycle.op.rollback"), health: t("lifecycle.op.health"), repair: t("lifecycle.op.repair") };
   let current = null;
   // 사용자 범위 보기(v0.2.0 P0-3 C2): 사용자가 켜거나 사용자 범위 설치를 마쳤을 때만 main이 사용자 설정을 읽는다.
@@ -62,6 +71,25 @@
     if (item.warning) li.append(el("p", "entry-warning", item.warning));
     const actions = el("div", "entry-actions");
     if (item.canUpdate) {
+      if (item.canChooseVersion) {
+        const label = el("label", "lifecycle-version-label");
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "lifecycle-version";
+        input.dataset.entryId = item.id;
+        input.maxLength = 64;
+        input.spellcheck = false;
+        input.autocomplete = "off";
+        input.placeholder = t("lifecycle.version.placeholder");
+        input.addEventListener("input", () => {
+          // 보이던 계획·진행 중인 계획은 이전 버전의 것이다. 화면에서 지우고 main도 버린다(열린 승인 대화상자의 승인도 쓰지 않는다).
+          current = null;
+          show([]);
+          void window.openhub.discardLifecyclePlan();
+        });
+        label.append(el("span", "", t("lifecycle.version.label")), input);
+        li.append(label, el("p", "entry-line lifecycle-version-hint", t("lifecycle.version.hint")));
+      }
       actions.append(button("lifecycle-check", t("lifecycle.check"), () => void check(item.id, li)));
       actions.append(button("lifecycle-update", t("lifecycle.planUpdate"), () => void open("update", item.id)));
     }
@@ -132,7 +160,8 @@
   async function run(operation, id) {
     const status = el("p", "todo", t("lifecycle.waiting"));
     panel.append(status);
-    const response = await window.openhub.runLifecycle(id);
+    // update는 지금 화면에 보이는 목표 버전을 함께 보낸다(계획의 버전과 다르면 main이 실행하지 않는다).
+    const response = await window.openhub.runLifecycle(id, operation === "update" ? versionOf(id) : undefined);
     if (response.status === "rejected") {
       status.textContent = t("lifecycle.rejected");
       status.dataset.runDone = "1";
@@ -155,6 +184,12 @@
 
   function renderPlan(view) {
     const nodes = [el("h3", "", t("lifecycle.planTitle", { name: view.displayName, operation: TITLE[view.operation] }))];
+    if (view.version) {
+      const versionLine = el("p", "lifecycle-plan-version", t("dialog.version", view.version));
+      versionLine.dataset.from = view.version.from;
+      versionLine.dataset.to = view.version.to;
+      nodes.push(versionLine);
+    }
     nodes.push(el("pre", "install-preview", view.previewLines.join("\n")));
     if (view.upToDate) {
       nodes.push(el("p", "todo", t("lifecycle.upToDate")));
@@ -340,6 +375,56 @@
       .filter((x) => x.dataset.toolId === toolId && x.dataset.scope === "user")
       .map((x) => ({ state: (response.items || []).find((i) => i.id === x.dataset.entryId)?.state || "", buttons: x.querySelectorAll("button").length, warning: x.querySelector(".entry-warning")?.textContent || "" }));
     return { pressed: userToggle.getAttribute("aria-pressed"), entries };
+  };
+
+  // 스모크·RC(경계 검사): toolId 항목에 대해 실제 preload 브리지로 values의 각 값을 버전 인자로 그대로 보내 계획·실행 응답 상태를 모은다.
+  // 화면 입력을 거치지 않는 잘못된 타입(숫자·배열·객체·null)이 main에서 거절되는지 본다.
+  window.__openhubLifecycleBridgeProbe = async (toolId, values) => {
+    await refresh();
+    const li = [...list.querySelectorAll("li.entry")].find((x) => x.dataset.toolId === toolId && x.querySelector(".lifecycle-update"));
+    if (!li) return { status: "no-update-button" };
+    const out = [];
+    for (const value of values) {
+      const plan = await window.openhub.planLifecycleUpdate(li.dataset.entryId, value);
+      const run = await window.openhub.runLifecycle(li.dataset.entryId, value);
+      out.push({ value: JSON.stringify(value) ?? "undefined", plan: plan.status, run: run.status });
+    }
+    return { status: "ok", results: out };
+  };
+
+  // 스모크·RC(정확한 버전 Update): toolId 항목의 목표 버전 입력에 version을 넣고(input 이벤트) [업데이트 계획] click → 승인 항목 checkbox
+  // click → 확인 click → 결과를 기다린다(사람과 같은 DOM 조작, timer 없음). 계획만 보려면 run=false.
+  window.__openhubLifecycleUpdateTo = async (toolId, version, run = true) => {
+    await refresh();
+    const li = [...list.querySelectorAll("li.entry")].find((x) => x.dataset.toolId === toolId && x.querySelector(".lifecycle-update"));
+    if (!li) return { status: "no-update-button" };
+    const input = li.querySelector("input.lifecycle-version");
+    if (!input) return { status: "no-version-input" };
+    input.value = version;
+    input.dispatchEvent(new Event("input"));
+    li.querySelector(".lifecycle-update").click();
+    // renderPlan은 한 번에 그린다: 미리보기(계획 있음) 또는 경고(계획 실패)가 보이면 끝난 것이다.
+    await waitFor(panel, () => panel.querySelector(".install-preview") || panel.querySelector(".install-warning"));
+    const settled = panel.querySelector(".lifecycle-confirm");
+    const versionLine = panel.querySelector(".lifecycle-plan-version");
+    const plan = { from: versionLine ? versionLine.dataset.from : null, to: versionLine ? versionLine.dataset.to : null, preview: (panel.querySelector(".install-preview")?.textContent || "").split("\n") };
+    if (!settled) return { status: "not-executable", message: (panel.querySelector(".install-warning") || panel.querySelector(".todo"))?.textContent || "", plan };
+    const requirements = [...panel.querySelectorAll('input[type="checkbox"]')].map((b) => b.dataset.requirement);
+    if (!run) return { status: "planned", plan, requirements };
+    for (const box of panel.querySelectorAll('input[type="checkbox"]')) box.click();
+    settled.click();
+    const done = await waitFor(panel, () => panel.querySelector(".lifecycle-outcome") || panel.querySelector('[data-run-done="1"]'));
+    const heading = panel.querySelector("h3");
+    const lines = [...panel.querySelectorAll(".install-change, .install-warning")].map((p) => p.textContent.trim());
+    const after = await refresh();
+    return {
+      status: done.classList.contains("lifecycle-outcome") && heading ? heading.dataset.status || "unknown" : "not-run",
+      outcome: done.classList.contains("lifecycle-outcome") ? [...done.classList].find((c) => c.startsWith("outcome-")).slice("outcome-".length) : done.textContent,
+      plan,
+      requirements,
+      lines,
+      after: after.items ? after.items.filter((i) => i.toolId === toolId).map((i) => i.state) : [],
+    };
   };
 })();
 

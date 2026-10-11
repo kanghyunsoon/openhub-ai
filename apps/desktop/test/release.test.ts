@@ -185,7 +185,7 @@ describe("REQ-045 REQ-041 REQ-042 REQ-032 Desktop Release·Impact·Pinokio", () 
 
   it("AC-057-08 기존 FOR YOU·설치·Lifecycle 흐름이 그대로이고 새 화면은 기존 브리지·화면을 바꾸지 않는다", async () => {
     const preload = await read("src/preload.ts");
-    for (const s of ["...projectBridge,", "...recommendBridge,", "...installBridge,", "...lifecycleBridge,", 'runLifecycle: (id: unknown) => ipcRenderer.invoke("lifecycle:run", String(id))']) expect(preload).toContain(s);
+    for (const s of ["...projectBridge,", "...recommendBridge,", "...installBridge,", "...lifecycleBridge,", 'runLifecycle: (id: unknown, version?: unknown) => ipcRenderer.invoke("lifecycle:run", String(id), version === undefined ? undefined : { version })']) expect(preload).toContain(s);
     const html = await read("renderer/index.html");
     for (const s of ['<script src="for-you.js"></script>', '<script src="install.js"></script>', '<script src="lifecycle.js"></script>', 'id="lifecycle-list"', 'id="for-you-list"']) expect(html).toContain(s);
     expect(html.indexOf('<script src="lifecycle.js"></script>')).toBeLessThan(html.indexOf('<script src="release.js"></script>'));
