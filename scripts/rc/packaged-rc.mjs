@@ -69,9 +69,10 @@ const PROJECT_MCP = JSON.stringify({ mcpServers: { notes: NOTES } }, null, 2) + 
 const MEMORY_PKG = "@modelcontextprotocol/server-memory";
 const MEMORY_V1 = "2026.7.4";
 const MEMORY_V2 = "2026.8.31";
-// Health 실패 보상(격리 환경의 합성 실패): 앱을 NODE_OPTIONS=--require=<이 파일>로 다시 띄운다. Health는 앱 환경을 상속하고
-// npx Prepare의 npm은 NODE_OPTIONS를 받지 않는다(허용 목록 환경). 이 파일은 memory 서버를 띄우는 Node 프로세스만 즉시 끝내고
-// 끝냈다는 표시를 남긴다. 그 밖의 프로세스(Electron main 포함)에서는 아무것도 하지 않는다.
+// Health 실패 보상(격리 환경의 합성 실패): 앱을 npm_config_node_options=--require=<이 파일>로 다시 띄운다. npm(npx)은 이 설정을
+// 자기가 실행하는 명령(npx -y <spec>이면 MCP 서버)의 NODE_OPTIONS로 넘긴다(npm 자신과 Electron에는 적용되지 않는다. 패키징된
+// Electron은 NODE_OPTIONS 대부분을 허용하지 않아 그 경로는 쓸 수 없다). Health는 앱 환경을 상속한다. npx Prepare도 npm_config_*를
+// 받지만 실행 명령이 "node --version"이라 이 파일이 아무것도 하지 않는다. 이 파일은 memory 서버 프로세스만 즉시 끝내고 표시를 남긴다.
 const HEALTH_FAIL_INJECTOR = String.raw`const argv = process.argv.slice(1).join(" ");
 if (argv.includes("server-memory") && !argv.includes("--package=") && !argv.includes("config get")) {
   try { require("node:fs").appendFileSync(process.env.OPENHUB_RC_INJECT_MARK, "health-launch-killed\n"); } catch {}
@@ -187,7 +188,7 @@ async function launch(ctx, extraEnv = {}) {
     tools = await settled(() => page.evaluate("Promise.resolve(window.__openhubReady)"));
   } catch (error) {
     // 붙지 못했으면 앱을 남기지 않는다(남으면 하네스가 끝나지 않는다).
-    child.kill();
+    killTree(child);
     main?.close();
     page?.close();
     ctx.logs.push(log.slice(-4000));
@@ -200,7 +201,7 @@ async function launch(ctx, extraEnv = {}) {
       // 이미 닫힘
     }
     const code = await Promise.race([exited, sleep(30000).then(() => "timeout")]);
-    if (code === "timeout") child.kill();
+    if (code === "timeout") killTree(child);
     main.close();
     page.close();
     ctx.logs.push(log.slice(-4000));
@@ -209,6 +210,19 @@ async function launch(ctx, extraEnv = {}) {
   const dialogs = () => main.evaluate("globalThis.__rcDialogs.splice(0)");
   const reloadReady = () => settled(() => page.evaluate("new Promise((r) => { const f = () => (document.readyState === 'complete' && window.__openhubReady !== undefined ? r(true) : setTimeout(f, 200)); f(); })"));
   return { page, main, info, tools, quit, answers, dialogs, reloadReady };
+}
+
+/** 앱 프로세스를 끝낸다. Windows는 Electron 하위 프로세스(renderer·GPU 등)까지 트리째 끝낸다(남으면 다음 실행의 디버깅 포트를 막는다). */
+function killTree(child) {
+  if (process.platform === "win32" && child.pid !== undefined) {
+    try {
+      spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+      return;
+    } catch {
+      // taskkill이 없으면 아래로
+    }
+  }
+  child.kill();
 }
 
 /**
@@ -563,7 +577,7 @@ async function run() {
     const injectMark = path.join(work, "rc-health-fail.log");
     await writeFile(injector, HEALTH_FAIL_INJECTOR);
     await rm(injectMark, { force: true });
-    app = await launch(ctx, { NODE_OPTIONS: "--require=" + JSON.stringify(injector), OPENHUB_RC_INJECT_MARK: injectMark });
+    app = await launch(ctx, { npm_config_node_options: "--require=" + JSON.stringify(injector), OPENHUB_RC_INJECT_MARK: injectMark });
     await ev(app, "window.__openhubScanProject()");
     const beforeFail = [await read(p(".mcp.json")), await read(lifecycleFile), ...(await otherConfigs())];
     const failed = await ev(app, "window.__openhubLifecycleUpdateTo('memory-mcp', " + JSON.stringify(MEMORY_V2) + ")", 1200000);
@@ -610,7 +624,7 @@ async function run() {
     results.errors.push(String(error instanceof Error ? error.stack ?? error.message : error));
   } finally {
     if (app) await app.quit();
-    for (const c of ctx.children) if (c.exitCode === null && c.signalCode === null) c.kill();
+    for (const c of ctx.children) if (c.exitCode === null && c.signalCode === null) killTree(c);
     api.close();
     results.finishedAt = new Date().toISOString();
     results.appLogTail = ctx.logs.map((l) => l.replace(new RegExp(TOKEN, "gu"), "<token>"));
