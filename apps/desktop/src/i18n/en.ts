@@ -247,6 +247,7 @@ export const en = {
   "life.warn.toolConfigDrift": "The tool config differs from what OpenHub recorded, so update, rollback and Health are blocked.",
   "life.warn.toolConfigRelocated": "This project was moved or copied. It has no tool config or record of its own yet.",
   "life.warn.clientLauncherInvalid": "The Node.js launch path recorded in the client config (node.exe, npx-cli.js) is no longer valid (reinstalled or moved). Health is blocked.",
+  "life.warn.interrupted": "A previous update, rollback or repair stopped midway. The configuration may be half-changed, so other operations are blocked. In a terminal, run openhub lifecycle recover followed by the tool ID to review and approve the recovery.",
   "life.warn.untrackedForeign": "OpenHub does not manage this configuration. It is not adopted automatically.",
   "life.warn.untrackedAdoptable": "Same as the OpenHub standard entry, but not in Version State. It cannot be updated or rolled back.",
   "life.warn.repairAvailable": " Review the changes under [Review repair plan] and approve to repair. Nothing is fixed automatically.",

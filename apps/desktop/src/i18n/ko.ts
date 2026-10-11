@@ -249,6 +249,7 @@ export const ko: Readonly<Record<keyof typeof en, string>> = {
   "life.warn.toolConfigDrift": "tool config가 OpenHub가 기록한 내용과 달라 업데이트·롤백·Health를 막았습니다.",
   "life.warn.toolConfigRelocated": "옮기거나 복사한 프로젝트입니다. 이 프로젝트용 tool config와 기록이 아직 없습니다.",
   "life.warn.clientLauncherInvalid": "Client 설정에 기록된 Node.js 실행 경로(node.exe·npx-cli.js)가 지금은 유효하지 않습니다(재설치·이동 등). Health를 막았습니다.",
+  "life.warn.interrupted": "이전 작업(업데이트·롤백·복구)이 중간에 끝났습니다. 설정이 바뀌다 만 상태일 수 있어 다른 작업을 막았습니다. 터미널에서 openhub lifecycle recover 뒤에 도구 ID를 붙여 실행해 확인하고 승인해 복구하세요.",
   "life.warn.untrackedForeign": "OpenHub가 관리하지 않는 설정입니다. 자동으로 편입하지 않습니다.",
   "life.warn.untrackedAdoptable": "OpenHub 표준 항목과 같지만 Version State에 없습니다. 업데이트·롤백 대상이 아닙니다.",
   "life.warn.repairAvailable": " [복구 계획 확인]에서 바뀔 내용을 보고 승인하면 복구합니다. 자동으로 고치지 않습니다.",

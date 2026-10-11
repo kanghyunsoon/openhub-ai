@@ -53,3 +53,5 @@ export * from "./packaging/paths";
 // 선택적 LLM 요약(CLI opt-in 표시 전용, D-023). 내부 모듈은 이 파일을 import하지 않는다.
 export * from "./release/summary-llm";
 export * from "./tool-config/index";
+export * from "./lifecycle/journal";
+export * from "./lifecycle/recovery";

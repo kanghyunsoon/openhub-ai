@@ -36,6 +36,7 @@ import {
 } from "@openhub/core";
 import { registryDirOf } from "./paths";
 import { createTtyPrompter, type InstallCommandIO, type InstallPrompter } from "./install";
+import { runRecover } from "./recover";
 import { updateImpactHeader } from "./release";
 
 /**
@@ -143,6 +144,7 @@ export async function runLifecycle(argv: readonly string[], io: LifecycleCommand
   if (sub === "status") return runStatus(rest, io, usage);
   if (sub === "health") return runLifecycleOperation("health", rest, io, usage);
   if (sub === "repair") return runLifecycleOperation("repair", rest, io, usage);
+  if (sub === "recover") return runRecover(rest, io, usage);
   io.err("알 수 없는 lifecycle 하위 명령: " + (sub ?? "(없음)") + "\n\n" + usage);
   return 2;
 }
