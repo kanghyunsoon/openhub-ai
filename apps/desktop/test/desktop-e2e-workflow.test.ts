@@ -95,6 +95,21 @@ describe("desktop-e2e 실행 대상 누락 방지", () => {
     return root;
   }
   const E2E = 'describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("x", () => {});\n';
+
+  it("(v0.2.1) 탐지: runIf·줄 중간·process.env.OPENHUB_E2E 형태도 E2E로 찾고, 문자열 안의 예시는 세지 않는다", async () => {
+    // 이 파일이 E2E로 잡히지 않도록 탐지 패턴을 소스에 그대로 쓰지 않고 이어 붙인다.
+    const gate = (head: string, env: string) => head + "If(" + env + ' === "1")';
+    const bracket = 'process.env["OPENHUB_E2E"]';
+    const dot = "process.env.OPENHUB_E2E";
+    const root = await fakeRoot({
+      "apps/desktop/test/a.test.ts": gate("describe.run", bracket) + '("x", () => {});\n',
+      "apps/desktop/test/b.test.ts": "const suite = " + gate("describe.skip", dot) + ';\nsuite("x", () => {});\n',
+      "apps/desktop/test/c.test.ts": "  " + gate("it.skip", bracket) + '("x", () => {});\n',
+      "apps/desktop/test/d.test.ts": "const example = '" + gate("describe.skip", bracket) + "';\nit('u', () => {});\n",
+      "apps/desktop/test/e.test.ts": "it('unit', () => { expect(" + dot + ").toBeUndefined(); });\n",
+    });
+    expect(lib.discoverElectronE2e(root)).toEqual(["apps/desktop/test/a.test.ts", "apps/desktop/test/b.test.ts", "apps/desktop/test/c.test.ts"]);
+  });
   const result = (root: string, file: string, over: Record<string, unknown> = {}) => JSON.stringify({ success: true, numPassedTests: 2, numFailedTests: 0, numPendingTests: 0, numTodoTests: 0, testResults: [{ name: path.join(root, file) }], ...over });
 
   it("check: 모두 실행·통과면 성공, 등록되지 않은 새 E2E 파일·결과 누락·건너뜀·todo·0개·실패는 실패", async () => {
