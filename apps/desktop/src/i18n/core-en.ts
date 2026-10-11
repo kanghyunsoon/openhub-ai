@@ -10,6 +10,7 @@ import {
   type LifecyclePlanV1,
   type LifecycleResultV1,
   type LifecycleToolStatus,
+  type PinokioApprovalRequirement,
   type PlannedInstall,
   type PlannedLifecycle,
   type TrendItem,
@@ -154,6 +155,24 @@ export interface WarningLineEn {
 /** 영어 문장이 없는 경고: 경고 ID와 Core 원문을 그대로 두고 미번역임을 표시한다(정보를 버리지 않는다). */
 export function untranslatedWarningEn(w: { code: string; message: string }): WarningLineEn {
   return { code: w.code === "" ? "no-code" : w.code, text: "(not translated) " + w.message, untranslated: true };
+}
+
+/**
+ * Pinokio 계획 미리보기(Desktop)의 영어 문장. 승인·실행은 CLI에서만 한다. 고지는 code로, 승인 요구는 ID로 옮긴다.
+ * 알 수 없는 code·파일 이름 같은 값이 Core 원문에만 있는 고지는 원문을 미번역 표시와 함께 그대로 둔다(정보를 버리지 않는다).
+ */
+export const PINOKIO_APPROVAL_EN: Readonly<Record<PinokioApprovalRequirement, string>> = {
+  base: "I reviewed the Pinokio plan above (full generated script content, app folder, versions, configuration targets) and agree to run it as shown.",
+  "pinokio-delegated-shell": "The shell.run commands in the generated scripts are run through a shell by Pinokio (pinokiod), not by OpenHub. I reviewed all of those commands.",
+  "health-execution": "After running, the app is started briefly to check loopback Health and is stopped with pterm stop.",
+  "user-scope-config": "This changes a user configuration file outside the project (in the home folder). It affects other projects too.",
+  "rollback-to-previous": "This returns to the previous commit. The venv and installed packages are not guaranteed to return exactly to their previous state.",
+};
+export function pinokioNoticeEn(n: { code: string; message: string }, plan: { health: { url: string } }): WarningLineEn {
+  if (n.code === "delegated-shell") return { code: n.code, text: "Pinokio (pinokiod), not OpenHub, runs the shell.run commands in the generated scripts through a shell. OpenHub pins the full script content and compares it again right before running." };
+  if (n.code === "health-required") return { code: n.code, text: "After running, OpenHub checks Health at " + plan.health.url + " and stops the app (OpenHub does not keep it running)." };
+  if (n.code === "venv-not-restored") return { code: n.code, text: "This returns to the previous commit, but the venv and installed packages are not guaranteed to return exactly to their previous state." };
+  return untranslatedWarningEn(n);
 }
 
 /** 문장 하나로 뜻이 정해지는 code. 같은 code의 경고가 서로 다른 원문을 가지면 이 문장으로 합치지 않는다. */

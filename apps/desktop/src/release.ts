@@ -1,5 +1,6 @@
 import { readFile, realpath, stat } from "node:fs/promises";
 import {
+  PINOKIO_APPROVAL_MESSAGES,
   SUMMARY_CATEGORIES,
   analyzeUpdateImpact,
   collectReleaseSnapshot,
@@ -22,6 +23,7 @@ import {
 } from "@openhub/core";
 import type { LifecycleSession } from "./lifecycle";
 import { formatDate, getDesktopLocale, tr } from "./i18n/index";
+import { PINOKIO_APPROVAL_EN, pinokioNoticeEn } from "./i18n/core-en";
 
 /**
  * Desktop Release·Impact·Pinokio Preview(TASK-057, D-022·D-024·D-027).
@@ -164,8 +166,15 @@ export async function pinokioPreviewForRenderer(deps: ReleaseDeps, toolId: unkno
       for (const step of body.run) lines.push("  - " + step.method + (typeof step.params["message"] === "string" ? ": " + step.params["message"] : ""));
     }
     lines.push("", tr("pinokio.lines.health", { url: plan.health.url, status: plan.health.expectStatus }));
-    for (const n of plan.notices) lines.push("[" + n.code + "] " + n.message);
-    lines.push(tr("pinokio.lines.approvals", { ids: plan.approvalRequirements.join(", ") }), "Plan digest " + r.planned.planDigest, "", tr("pinokio.lines.cli", { toolId: plan.toolId }));
+    // 보안 고지·승인 요구: English 모드는 code·ID로 만든 영어 문장, 한국어는 Core 문장 그대로(같은 정보).
+    const en = getDesktopLocale() === "en";
+    for (const n of plan.notices) {
+      const line = en ? pinokioNoticeEn(n, plan) : { code: n.code, text: n.message };
+      lines.push("[" + line.code + "] " + line.text);
+    }
+    lines.push(tr("pinokio.lines.approvals", { ids: plan.approvalRequirements.join(", ") }));
+    for (const id of plan.approvalRequirements) lines.push("  - [" + id + "] " + (en ? PINOKIO_APPROVAL_EN[id] : PINOKIO_APPROVAL_MESSAGES[id]));
+    lines.push("Plan digest " + r.planned.planDigest, "", tr("pinokio.lines.cli", { toolId: plan.toolId }));
     return { status: "ok", lines: lines.map((l) => clean(l, 400)) };
   } catch {
     return { status: "error", code: "pinokio-preview-failed", message: tr("pinokio.previewFailed") };
