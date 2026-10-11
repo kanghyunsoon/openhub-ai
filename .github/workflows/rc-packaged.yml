@@ -26,8 +26,8 @@ permissions:
   actions: read
 
 env:
-  # PR에서 실행할 때 쓰는 dry run(main a951ad6, run 38108687721).
-  RELEASE_RUN_ID: ${{ inputs.release_run_id || '38108687721' }}
+  # PR에서 실행할 때 쓰는 dry run(v0.2.0 산출물: main 4f7c3ba, run 38115277816).
+  RELEASE_RUN_ID: ${{ inputs.release_run_id || '38115277816' }}
   OPENHUB_RC_INJECT_FAILURE: ${{ inputs.inject_failure || 'none' }}
 
 jobs:

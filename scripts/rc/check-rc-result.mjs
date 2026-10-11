@@ -17,8 +17,6 @@ const STATUSES = new Set(["PASS", "FAIL", "NOT-RUN"]);
  */
 export const ALLOWED_NOT_RUN = Object.freeze({
   "korean-os-first-start": { step: 3, os: ["windows"], reason: "the Windows runner's OS display language cannot be switched" },
-  "exact-version-v1-v2-v1": { step: 9, os: ["windows", "linux"], reason: "the packaged app has no exact-version choice yet (option A, separate PR)" },
-  "health-failure-compensation": { step: 11, os: ["windows", "linux"], reason: "needs a failing real MCP server in the packaged app; covered by automated tests only" },
 });
 
 /**

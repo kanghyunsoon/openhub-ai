@@ -18,10 +18,10 @@ const pass = (os = "windows") => ({
 describe("checkRcResult", () => {
   it("A: 단계 3~14 모두 PASS, 허용된 NOT-RUN만 있으면 통과하고 NOT-RUN을 기록한다", () => {
     const r = pass("windows");
-    r.notRun.push({ id: "korean-os-first-start", step: 3 }, { id: "exact-version-v1-v2-v1", step: 9 }, { id: "health-failure-compensation", step: 11 });
+    r.notRun.push({ id: "korean-os-first-start", step: 3 });
     const v = checkRcResult(r, { os: "windows" });
     expect(v).toMatchObject({ ok: true, failures: [] });
-    expect(v.notRunRecorded.map((n) => n.id)).toEqual(["korean-os-first-start", "exact-version-v1-v2-v1", "health-failure-compensation"]);
+    expect(v.notRunRecorded.map((n) => n.id)).toEqual(["korean-os-first-start"]);
   });
 
   it("B: FAIL인 단계가 하나라도 있으면 실패", () => {
@@ -52,12 +52,11 @@ describe("checkRcResult", () => {
   it("F: 필수 단계가 NOT-RUN이면 실패(세부 항목 허용 목록과 별개)", () => {
     const r = pass();
     r.steps["9"] = { status: "NOT-RUN", evidence: "not reached" };
-    r.notRun.push({ id: "exact-version-v1-v2-v1", step: 9 });
     expect(checkRcResult(r)).toMatchObject({ ok: false, failures: ["step 9: NOT-RUN"] });
   });
 
-  it("G: 허용 목록 밖 NOT-RUN, 예전 문자열 형식, 다른 단계, 허용되지 않은 OS는 실패", () => {
-    for (const item of [{ id: "smartscreen", step: 2 }, "3: first start with a Korean OS language", { id: "health-failure-compensation", step: 8 }, { step: 11 }]) {
+  it("G: 허용 목록 밖 NOT-RUN(이제 실행하는 정확한 버전·Health 실패 보상 포함), 예전 문자열 형식, 다른 단계, 허용되지 않은 OS는 실패", () => {
+    for (const item of [{ id: "smartscreen", step: 2 }, "3: first start with a Korean OS language", { id: "korean-os-first-start", step: 8 }, { step: 11 }, { id: "exact-version-v1-v2-v1", step: 9 }, { id: "health-failure-compensation", step: 11 }]) {
       const r = pass();
       r.notRun.push(item);
       expect(checkRcResult(r).ok, JSON.stringify(item)).toBe(false);
@@ -83,8 +82,8 @@ describe("checkRcResult", () => {
     expect(checkRcResult(extra).ok).toBe(false);
   });
 
-  it("허용 목록은 세 항목으로 고정되어 있다(늘리려면 이 테스트와 RC 문서를 함께 바꾼다)", () => {
-    expect(Object.keys(ALLOWED_NOT_RUN).sort()).toEqual(["exact-version-v1-v2-v1", "health-failure-compensation", "korean-os-first-start"]);
+  it("허용 목록은 한 항목(Windows 한국어 OS 첫 실행)으로 고정되어 있다(늘리려면 이 테스트와 RC 문서를 함께 바꾼다)", () => {
+    expect(Object.keys(ALLOWED_NOT_RUN)).toEqual(["korean-os-first-start"]);
     expect(Object.isFrozen(ALLOWED_NOT_RUN)).toBe(true);
   });
 });
@@ -123,6 +122,13 @@ describe("RC workflow·하네스 배선", () => {
     expect(harness).not.toMatch(/process\.exit\(0\)/u);
     expect(harness.indexOf("await writeFile(out, text")).toBeLessThan(harness.indexOf("process.exit(verdict.ok ? 0 : 1);"));
     expect(harness).not.toMatch(/notRun\.push\("/u);
+    // 정확한 버전·Health 실패 보상은 더 이상 NOT-RUN으로 남기지 않는다.
+    expect(harness).not.toContain('id: "exact-version-v1-v2-v1"');
+    expect(harness).not.toContain('id: "health-failure-compensation"');
+    expect(harness).toContain('check(\n      "health-failure-compensation",');
+    expect(harness).toContain("window.__openhubLifecycleUpdateTo('memory-mcp', ");
+    // 테스트 Registry를 쓰지 않는다(OPENHUB_REGISTRY는 실행 전에 지운다).
+    expect(harness).toContain("delete env.OPENHUB_REGISTRY;");
   });
 
   it("Windows·Linux job 모두 독립 판정 단계(!cancelled)와 always 업로드가 있고 실패 주입 입력이 있다", () => {
