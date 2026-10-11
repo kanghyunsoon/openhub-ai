@@ -137,6 +137,23 @@ describe("RC workflow·하네스 배선", () => {
     expect(workflow.match(/name: "Verdict \(steps 3-14 result file, fail-closed\)"\n\s+if: \$\{\{ !cancelled\(\) \}\}/gu)?.length).toBe(2);
     expect(workflow.match(/uses: actions\/upload-artifact@v4\n\s+if: always\(\)/gu)?.length).toBe(2);
     expect(workflow).not.toContain("continue-on-error");
+  });
+
+  it("Windows 제거 단계: 종료 코드 ≠ 0·파일 잔존·설정 변경을 모아 실패하고, 실패해도 비교와 종료 코드 기록을 남긴다", () => {
+    const step = workflow.slice(workflow.indexOf('- name: "15 Uninstall (NSIS) and compare user settings"'), workflow.indexOf('- name: "Verdict', workflow.indexOf('- name: "15 Uninstall (NSIS)')));
+    expect(step).toContain("if: ${{ !cancelled() }}");
+    expect(step).toContain('if ($p.ExitCode -ne 0) { $errors += "uninstaller exit code $($p.ExitCode)" }');
+    expect(step).toContain('if ($exeLeft) { $errors += "program files remain after uninstall" }');
+    expect(step).toContain('if ($LASTEXITCODE -ne 0) { $errors += "user settings changed after uninstall" }');
+    expect(step).toContain('if ($errors.Count -gt 0) { throw ("step 15 failed: " + ($errors -join "; ")) }');
+    // 오류가 있어도 제거 후 snapshot·비교를 먼저 실행하고 마지막에 실패한다.
+    expect(step.indexOf("windows-after-uninstall.json")).toBeLessThan(step.indexOf("throw ("));
+    expect(step).toContain("Set-Content rc-out/windows-uninstall.txt");
+    // 실패 주입은 실제 프로세스의 종료 코드 3으로 확인한다.
+    expect(step).toContain('if ($env:OPENHUB_RC_INJECT_FAILURE -eq "uninstall-exit") {');
+    expect(step).toContain('"-NoProfile", "-Command", "exit 3"');
+    expect(workflow).toContain("options: [none, step-fail, check-fail, error, missing-step, not-run, uninstall-exit]");
+    expect(harness).toContain('if (kind === "uninstall-exit") return;');
     expect(workflow).toContain("OPENHUB_RC_INJECT_FAILURE: $" + "{{ inputs.inject_failure || 'none' }}");
   });
 });

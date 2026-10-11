@@ -19,7 +19,7 @@ on:
         description: "Force an RC failure to prove the job fails (none keeps the real result)"
         type: choice
         default: none
-        options: [none, step-fail, check-fail, error, missing-step, not-run]
+        options: [none, step-fail, check-fail, error, missing-step, not-run, uninstall-exit]
 
 permissions:
   contents: read
@@ -78,13 +78,27 @@ jobs:
         if: ${{ !cancelled() }}
         shell: pwsh
         run: |
+          # 제거 프로그램 종료 코드 ≠ 0, 프로그램 파일 잔존, 사용자 설정 변경을 모두 모은 뒤 하나라도 있으면 실패한다.
+          # 실패해도 제거 후 snapshot·비교·종료 코드 기록을 남긴다(artifact는 always 업로드).
+          $errors = @()
           node scripts/rc/packaged-rc.mjs snapshot --work "$env:RUNNER_TEMP/rc-work" --out rc-out/windows-before-uninstall.json
           $un = Join-Path $env:APP_DIR "Uninstall OpenHub AI.exe"
-          $p = Start-Process -FilePath $un -ArgumentList "/S", "_?=$env:APP_DIR" -Wait -PassThru
-          "uninstaller exit $($p.ExitCode); exe left: $(Test-Path $env:APP_EXE)"
-          if (Test-Path $env:APP_EXE) { throw "program files remain after uninstall" }
+          if ($env:OPENHUB_RC_INJECT_FAILURE -eq "uninstall-exit") {
+            # 실패 주입(Windows 전용): NSIS 제거 프로그램 자리에 종료 코드 3으로 끝나는 실제 프로세스를 쓴다.
+            $p = Start-Process -FilePath "pwsh" -ArgumentList "-NoProfile", "-Command", "exit 3" -Wait -PassThru
+          } else {
+            $p = Start-Process -FilePath $un -ArgumentList "/S", "_?=$env:APP_DIR" -Wait -PassThru
+          }
+          $exeLeft = Test-Path $env:APP_EXE
+          "uninstaller exit $($p.ExitCode); exe left: $exeLeft"
+          "uninstallerExitCode=$($p.ExitCode)", "exeLeft=$exeLeft", "inject=$env:OPENHUB_RC_INJECT_FAILURE" | Set-Content rc-out/windows-uninstall.txt
+          if ($p.ExitCode -ne 0) { $errors += "uninstaller exit code $($p.ExitCode)" }
+          if ($exeLeft) { $errors += "program files remain after uninstall" }
           node scripts/rc/packaged-rc.mjs snapshot --work "$env:RUNNER_TEMP/rc-work" --out rc-out/windows-after-uninstall.json
           node scripts/rc/packaged-rc.mjs compare rc-out/windows-before-uninstall.json rc-out/windows-after-uninstall.json
+          if ($LASTEXITCODE -ne 0) { $errors += "user settings changed after uninstall" }
+          if ($errors.Count -gt 0) { throw ("step 15 failed: " + ($errors -join "; ")) }
+          exit 0
       - name: "Verdict (steps 3-14 result file, fail-closed)"
         if: ${{ !cancelled() }}
         run: node scripts/rc/check-rc-result.mjs rc-out/windows.json --os windows

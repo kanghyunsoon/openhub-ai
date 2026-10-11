@@ -652,6 +652,8 @@ async function run() {
 /** CI에서 실패 전파를 확인하기 위한 주입. 값이 없거나 none이면 아무것도 바꾸지 않는다. */
 function injectFailure(results, kind) {
   if (kind === undefined || kind === "" || kind === "none") return;
+  // uninstall-exit은 workflow 단계 15(Windows 제거)가 처리한다. 단계 3~14 결과는 바꾸지 않는다.
+  if (kind === "uninstall-exit") return;
   results.injected = kind;
   if (kind === "step-fail") results.steps[14] = { status: "FAIL", evidence: "injected" };
   else if (kind === "check-fail") results.checks["injected"] = { status: "FAIL", evidence: "injected" };
