@@ -201,7 +201,8 @@ export interface LifecycleStatusOptions {
   launcherCheckFs?: LauncherCheckFs;
 }
 
-export type LifecycleStatusResult = { ok: true; items: LifecycleToolStatus[] } | { ok: false; code: StateErrorCode; message: string };
+/** journalsUnreadable(v0.2.1): 읽을 수 없는(손상된) 작업 기록 수. 0보다 크면 모든 lifecycle 작업이 JOURNAL_DAMAGED로 막힌다. */
+export type LifecycleStatusResult = { ok: true; items: LifecycleToolStatus[]; journalsUnreadable: number } | { ok: false; code: StateErrorCode; message: string };
 
 const order = (a: LifecycleToolStatus, b: LifecycleToolStatus) =>
   (a.scope === b.scope ? 0 : a.scope === "project" ? -1 : 1) || (a.serverName < b.serverName ? -1 : a.serverName > b.serverName ? 1 : 0) || (a.client < b.client ? -1 : a.client > b.client ? 1 : 0);
@@ -307,5 +308,5 @@ export async function lifecycleStatus(options: LifecycleStatusOptions): Promise<
       });
     }
   }
-  return { ok: true, items: items.sort(order) };
+  return { ok: true, items: items.sort(order), journalsUnreadable: journals.ok ? journals.unreadable : 0 };
 }

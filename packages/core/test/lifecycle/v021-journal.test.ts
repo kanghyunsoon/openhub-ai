@@ -1,3 +1,4 @@
+import { mkdirSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -10,10 +11,13 @@ import {
   readJournals,
   readLifecycleState,
   recordInstallInState,
+  removeJournal,
   requestLifecycleApproval,
   requestRecoveryApproval,
   runInstallTransaction,
   runLifecycleTransaction,
+  setJournalPhase,
+  withOperationLock,
   type InstallRequest,
   type LifecycleEnvironment,
   type LifecycleRequest,
@@ -22,7 +26,7 @@ import {
 import { approveAll, createHarness, plannedOf } from "../installer/harness";
 import { seedEntries } from "../recommendation/helpers";
 import { fakeNpmSpawner } from "../process/fake-npm";
-import { newScratch } from "./helpers";
+import { abandonOperationLock, newScratch } from "./helpers";
 
 /**
  * v0.2.1 P0-3 Journal + 승인 기반 Recovery(프로세스 생성 없음). "Health가 끝나지 않음"은 강제 종료 시점과 같은 디스크 상태를 만든다.
@@ -78,6 +82,7 @@ async function installed(scope: Scope = "project") {
     const inHealth = new Promise<void>((r) => (reached = r));
     void update(env(() => (reached(), new Promise(() => undefined))));
     await inHealth;
+    await abandonOperationLock(h.homeDir);
   };
   const files = async () => [await readFile(cursorFile, "utf8"), await readFile(stateFile, "utf8")] as const;
   const status = async () => {
@@ -240,5 +245,154 @@ describe("v0.2.1 P0-3 중단된 작업 감지와 승인 기반 Recovery", () => 
     const read = await readLifecycleState({ homeDir: c.h.homeDir });
     expect(read.ok).toBe(true);
     expect(await readdir(path.join(c.h.homeDir, ".openhub", "state"))).toEqual(expect.arrayContaining(["journal", "lifecycle.json"]));
+  });
+});
+
+const journalDirOf = (homeDir: string) => path.join(homeDir, ".openhub", "state", "journal");
+/** 지울 수 없는 장애물: 같은 작업 ID의 선점 이름을 가진 디렉터리(rm이 실패한다). */
+const OBSTACLE = (id: string) => id + ".claim-1-deadbeef.json";
+
+describe("v0.2.1 P0-3 보완: 잠금·손상 Journal·정리 확인·단계 갱신 실패", () => {
+  it("[A] 다른 OpenHub 작업이 진행 중이면 승인된 복구도 OPERATION_IN_PROGRESS이고 설정·Journal을 바꾸지 않는다. 끝난 뒤에는 복구된다", async () => {
+    const c = await installed();
+    await c.interrupt();
+    const killed = await c.files();
+    const { run } = await c.approveRecovery();
+    // 작업 잠금이 회수된 뒤(강제 종료 상태) 다른 작업이 진행 중인 동안 복구를 실행한다.
+    const busy = await withOperationLock({ homeDir: c.h.homeDir, purpose: "lifecycle-update" }, () => run());
+    expect(busy).toMatchObject({ ok: true, value: { status: "failed", error: { code: "OPERATION_IN_PROGRESS" } } });
+    expect(await c.files()).toEqual(killed);
+    expect(await c.journals()).toHaveLength(1);
+    const again = await c.approveRecovery();
+    expect(await again.run()).toMatchObject({ status: "recovered" });
+    expect(await c.status()).toEqual(["state-consistent"]);
+  });
+
+  it("[B] 읽을 수 없는 Journal이 있으면 복구·update·health·repair 계획을 막고(JOURNAL_DAMAGED) 그 파일을 지우지 않는다", async () => {
+    const c = await installed();
+    await c.interrupt();
+    const damaged = path.join(journalDirOf(c.h.homeDir), "0".repeat(32) + ".json");
+    await writeFile(damaged, "{ broken");
+    expect(await planRecovery(c.recoveryOptions())).toMatchObject({ ok: false, code: "JOURNAL_DAMAGED" });
+    expect(await planRecovery(c.recoveryOptions("discard"))).toMatchObject({ ok: false, code: "JOURNAL_DAMAGED" });
+    for (const operation of ["update", "health", "repair"] as const) {
+      const req: LifecycleRequest = { operation, toolId: "github-mcp-server", projectRoot: c.h.projectRoot, homeDir: c.h.homeDir, platform: "linux", includeUser: false, targets: [{ client: "cursor", scope: "project" }] };
+      const built = await planLifecycleRequest(req, c.env(healthy));
+      if (built.ok) {
+        expect(built.planned.plan.status).toBe("blocked");
+        expect(built.planned.plan.warnings.map((w) => w.code)).toContain("JOURNAL_DAMAGED");
+      } else expect(operation).toBe("repair"); // 이 도구는 tool config가 없어 repair 계획 자체가 없다
+    }
+    const s = await lifecycleStatus({ projectRoot: c.h.projectRoot, homeDir: c.h.homeDir, entries: seed, platform: "linux", includeUser: false });
+    expect(s.ok && s.journalsUnreadable).toBe(1);
+    expect(await readFile(damaged, "utf8")).toBe("{ broken");
+    // 사용자가 손상 파일을 치우면 정상 복구 경로로 돌아온다.
+    await rm(damaged);
+    expect(await (await c.approveRecovery()).run()).toMatchObject({ status: "recovered" });
+  });
+
+  it("[C] removeJournal은 지운 뒤 남은 파일이 있으면 false다(조용히 성공하지 않는다)", async () => {
+    const c = await installed();
+    await c.interrupt();
+    const [j] = await c.journals();
+    await mkdir(path.join(journalDirOf(c.h.homeDir), OBSTACLE(j!.transactionId)));
+    expect(await removeJournal(c.h.homeDir, j!.transactionId)).toBe(false);
+    await rm(path.join(journalDirOf(c.h.homeDir), OBSTACLE(j!.transactionId)), { recursive: true });
+    expect(await removeJournal(c.h.homeDir, j!.transactionId)).toBe(true);
+    expect(await c.journals()).toEqual([]);
+    expect(await removeJournal(c.h.homeDir, "not-an-id")).toBe(false);
+  });
+
+  it("[C] 복구가 설정을 되돌린 뒤 Journal을 지우지 못하면 recovered가 아니라 cleanup-failed이고, 현재 설정·남은 기록·다음 단계를 알린다", async () => {
+    const c = await installed();
+    await c.interrupt();
+    const [j] = await c.journals();
+    const opts = c.recoveryOptions();
+    const built = await planRecovery(opts);
+    if (!built.ok) throw new Error(built.code);
+    const o = await requestRecoveryApproval(built.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
+    if (o.status !== "approved") throw new Error(o.status);
+    const r = await executeRecovery(o.approval, { ...opts, regenerate: () => planRecovery(opts), trace: async (phase) => {
+      if (phase === "recover-cleanup") await mkdir(path.join(journalDirOf(c.h.homeDir), OBSTACLE(j!.transactionId)));
+    } });
+    expect(r).toMatchObject({ status: "cleanup-failed", error: { code: "JOURNAL_CLEANUP_FAILED" }, targets: [{ restored: true }] });
+    expect(r.nextActions.join(" ")).toContain("변경 전");
+    expect(r.nextActions.join(" ")).toContain("--discard");
+    expect(JSON.stringify(r).split('"').some((s) => containsAbsolutePath(s))).toBe(false);
+    const s = await lifecycleStatus({ projectRoot: c.h.projectRoot, homeDir: c.h.homeDir, entries: seed, platform: "linux", includeUser: false });
+    expect(s.ok && s.journalsUnreadable).toBe(1); // 남은 장애물은 손상 기록으로 보이고 계획을 막는다
+    await rm(path.join(journalDirOf(c.h.homeDir), OBSTACLE(j!.transactionId)), { recursive: true });
+    expect(await c.status()).toEqual(["state-consistent"]);
+  });
+
+  it("[C] 작업이 끝난 뒤 Journal을 지우지 못하면 결과에 journal-cleanup-failed 경고와 다음 단계를 남긴다", async () => {
+    const c = await installed();
+    const env = c.env(healthy, { trace: (phase) => {
+      if (phase !== "journal-cleanup") return;
+      const id = readdirSync(journalDirOf(c.h.homeDir)).find((n) => /^[0-9a-f]{32}\.json$/u.test(n))!.slice(0, 32);
+      mkdirSync(path.join(journalDirOf(c.h.homeDir), OBSTACLE(id)));
+    } });
+    const r = await c.update(env);
+    expect(r.status).toBe("updated");
+    expect(r.warnings.map((w) => w.code)).toContain("journal-cleanup-failed");
+    expect(r.nextActions.join(" ")).toContain("openhub lifecycle recover github-mcp-server");
+  });
+
+  it("[C] 작업이 Version State commit까지 끝나고 Journal만 남았으면 undo는 막고(OPERATION_COMPLETED) discard로 기록만 지운다", async () => {
+    const c = await installed();
+    // commit 뒤 정리 직전 강제 종료와 같은 디스크 상태를 만든다: 정리 직전 Journal 내용을 복사해 두고, 끝난 뒤 다시 둔다.
+    let copy: { name: string; body: string } | undefined;
+    const env = c.env(healthy, { trace: (phase) => {
+      if (phase !== "journal-cleanup") return;
+      const name = readdirSync(journalDirOf(c.h.homeDir)).find((n) => /^[0-9a-f]{32}\.json$/u.test(n))!;
+      copy = { name, body: readFileSync(path.join(journalDirOf(c.h.homeDir), name), "utf8") };
+    } });
+    expect((await c.update(env)).status).toBe("updated");
+    await writeFile(path.join(journalDirOf(c.h.homeDir), copy!.name), copy!.body);
+    expect((await c.journals()).map((j) => j.phase)).toEqual(["state-commit"]);
+    expect(await c.status()).toEqual(["interrupted-update"]);
+    const committed = await c.files();
+    const undo = await planRecovery(c.recoveryOptions());
+    expect(undo.ok && undo.planned.plan.status).toBe("blocked");
+    expect(undo.ok && undo.planned.plan.blockers.map((b) => b.code)).toEqual(["OPERATION_COMPLETED"]);
+    const discard = await c.approveRecovery("discard");
+    expect(discard.built.ok && discard.built.planned.plan).toMatchObject({ status: "ready", effects: { configWrites: 0 } });
+    expect(await discard.run()).toMatchObject({ status: "discarded" });
+    expect(await c.files()).toEqual(committed);
+    expect(await c.status()).toEqual(["state-consistent"]);
+  });
+
+  it("[D] 단계 갱신(setJournalPhase)이 실패하면 예외이고, Health 직전 실패는 설정을 되돌리고 JOURNAL_WRITE_FAILED다", async () => {
+    const c = await installed();
+    await expect(setJournalPhase(c.h.homeDir, { schemaVersion: 1 } as never, "health")).rejects.toThrow();
+    const before = await c.files();
+    let healthRan = false;
+    const env = c.env(async (...a) => ((healthRan = true), healthy(...a)), { trace: (phase) => {
+      if (phase !== "config-replaced") return;
+      const dir = journalDirOf(c.h.homeDir);
+      const name = readdirSync(dir).find((n) => /^[0-9a-f]{32}\.json$/u.test(n))!;
+      unlinkSync(path.join(dir, name));
+      mkdirSync(path.join(dir, name)); // 같은 이름 디렉터리: 다음 Journal rename이 실패한다
+    } });
+    const r = await c.update(env);
+    expect(r).toMatchObject({ status: "config-failed", code: "JOURNAL_WRITE_FAILED", compensated: true });
+    expect(healthRan).toBe(false);
+    expect(await c.files()).toEqual(before);
+  });
+
+  it("[D] Version State commit 직전 단계 갱신이 실패하면 commit하지 않고 설정을 되돌린다(state-commit-failed / JOURNAL_WRITE_FAILED)", async () => {
+    const c = await installed();
+    const before = await c.files();
+    const env = c.env(healthy, { trace: (phase) => {
+      if (phase !== "state-commit") return;
+      const dir = journalDirOf(c.h.homeDir);
+      const name = readdirSync(dir).find((n) => /^[0-9a-f]{32}\.json$/u.test(n))!;
+      unlinkSync(path.join(dir, name));
+      mkdirSync(path.join(dir, name));
+    } });
+    const r = await c.update(env);
+    expect(r).toMatchObject({ status: "state-commit-failed", code: "JOURNAL_WRITE_FAILED", compensated: true, stateCommitted: false });
+    expect(r.health?.status).toBe("healthy");
+    expect(await c.files()).toEqual(before);
   });
 });

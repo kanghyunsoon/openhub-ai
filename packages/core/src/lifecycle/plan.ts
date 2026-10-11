@@ -64,7 +64,7 @@ import { resolveArtifact, type ResolverErrorCode } from "./resolver";
 import { CLIENT_COMMANDS, artifactIdentitySchema, entryKeyOf, type ArtifactIdentity, type ToolState } from "./state";
 import { configEntryDigest, standardEntries } from "./status";
 import { projectKeyFor, readLifecycleState, type StateErrorCode } from "./store";
-import { pendingFor, readJournals } from "./journal";
+import { damagedJournalMessage, pendingFor, readJournals } from "./journal";
 
 /**
  * LifecyclePlan v1·Approval·PLAN_STALE 확장(TASK-040, D-020).
@@ -592,6 +592,8 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
   // repair(tool config 도구) 말고는 계획하지 않고 recover로 안내한다.
   const journals = await readJournals(options.homeDir);
   if (!journals.ok) blockers.push({ code: "JOURNAL_UNREADABLE", message: "작업 기록(Journal) 경로를 안전하게 읽지 못했습니다(" + journals.message + ")" });
+  // 손상된 Journal은 어느 도구의 중단인지 알 수 없다. 모든 작업(health·repair 포함)을 보수적으로 막고 안내한다(자동 삭제 없음).
+  else if (journals.unreadable > 0) blockers.push({ code: "JOURNAL_DAMAGED", message: damagedJournalMessage(journals.unreadable) });
   else if (options.operation !== "repair" && pendingFor(journals.journals, targets.map((t) => t.entryKey)).length > 0) {
     blockers.push({ code: "INTERRUPTED_OPERATION", message: "이 도구의 이전 작업이 중간에 끝났습니다(interrupted-update). openhub lifecycle recover " + options.toolId + "로 상태를 확인하고 승인해 복구하세요" });
   }

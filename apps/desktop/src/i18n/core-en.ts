@@ -63,6 +63,8 @@ const NOTICE_EN: Readonly<Record<string, string>> = {
   "health-gate-skipped": "This tool needs environment variables to run, but OpenHub does not check their values or whether they are set. If Health Check is skipped, whether the MCP server actually works after the update is not verified.",
   "health-not-verified": "Health: Not verified / Reason: Required environment is unchecked",
   "client-env-parse-risk": "You must prepare the required environment variables in the environment where Claude Code runs. OpenHub does not check their values or whether they exist; if they are missing, parsing .mcp.json may be affected.",
+  "journal-cleanup-failed": "The operation finished, but its operation record (journal) could not be removed. If the tool shows interrupted-update, check it with openhub lifecycle recover (use --discard to remove only the record when the operation is complete).",
+  "journal-update-failed": "The operation record (journal) phase could not be updated to compensation-failed. The record is still kept, so the tool still shows as interrupted.",
 };
 
 /** 대문자 code(차단·실행 불가 사유)의 영어 문장. 파일·서버 이름이 Core 문장 안에만 있는 경우는 일반 문장으로 쓴다. */
@@ -107,6 +109,9 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   CONFIG_RESTORE_FAILED: "The original configuration could not be fully restored. Check the configuration file before trying again.",
   INTERRUPTED_OPERATION: "A previous operation on this tool stopped midway (interrupted-update). Review and approve the recovery with openhub lifecycle recover first.",
   JOURNAL_UNREADABLE: "The operation journal folder could not be read safely, so nothing was planned.",
+  JOURNAL_DAMAGED: "Some operation records (journals) cannot be read (damaged, or a format this version cannot read), so nothing was planned. OpenHub does not delete them. Back up and move the files in ~/.openhub/state/journal, check your configuration with openhub lifecycle status, then try again.",
+  JOURNAL_CLEANUP_FAILED: "The operation record (journal) could not be removed. Check write access to ~/.openhub/state, then remove only the record with openhub lifecycle recover --discard.",
+  OPERATION_COMPLETED: "This operation finished completely (configuration and Version State were both applied); only removing its record is left. It is not undone. Use --discard to remove only the record.",
   JOURNAL_WRITE_FAILED: "The operation journal could not be written, so nothing was changed. Check write access to the OpenHub state folder.",
   JOURNAL_PATH_ESCAPE: "The operation journal folder is not a regular folder inside your home folder (symlink or junction), so it was not used.",
   NO_INTERRUPTED_OPERATION: "There is no interrupted operation to recover for this tool in this project.",

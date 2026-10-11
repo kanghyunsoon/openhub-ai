@@ -86,6 +86,11 @@ export class JournalError extends Error {
   readonly code = "JOURNAL_WRITE_FAILED";
 }
 
+/** 손상된 Journal 안내(경로는 논리 경로만). 계획·복구·status가 같은 문장을 쓴다. */
+export const damagedJournalMessage = (count: number) =>
+  "읽을 수 없는 작업 기록(Journal) " + String(count) + "개가 있어 아무것도 계획하지 않았습니다(손상되었거나 이 버전이 읽을 수 없는 형식). OpenHub는 이 파일을 지우지 않습니다. " +
+  "~/.openhub/state/journal 폴더에서 해당 파일을 확인해 다른 곳에 백업한 뒤 옮기고, openhub lifecycle status로 설정을 확인한 다음 다시 시도하세요";
+
 const isMissing = (e: unknown) => typeof e === "object" && e !== null && (e as { code?: string }).code === "ENOENT";
 
 /** Journal 디렉터리(없으면 만든다). home 밖·symlink·junction이면 JournalError. */
@@ -130,19 +135,34 @@ export async function writeJournal(homeDir: string, journal: JournalV1): Promise
   }
 }
 
+/** 진행 단계를 갱신한다. 쓰지 못하면 JournalError다(조용히 성공한 것처럼 넘어가지 않는다). */
 export async function setJournalPhase(homeDir: string, journal: JournalV1, phase: JournalPhase): Promise<JournalV1> {
   const next = { ...journal, phase };
-  await writeJournal(homeDir, next).catch(() => undefined);
+  await writeJournal(homeDir, next);
   return next;
 }
 
-export async function removeJournal(homeDir: string, transactionId: string): Promise<void> {
-  if (!/^[0-9a-f]{32}$/u.test(transactionId)) return;
-  const dir = await journalDir(homeDir, false).catch(() => null);
-  if (dir === null) return;
-  for (const name of await readdir(dir).catch(() => [] as string[])) {
-    if (name === transactionId + ".json" || (name.startsWith(transactionId + ".claim-") && name.endsWith(".json"))) await rm(path.join(dir, name), { force: true }).catch(() => undefined);
+const ofTransaction = (transactionId: string) => (name: string) => name === transactionId + ".json" || (name.startsWith(transactionId + ".claim-") && name.endsWith(".json"));
+
+/**
+ * 이 작업의 Journal(선점 파일 포함)을 지운다. 지운 뒤 다시 확인해 하나도 남지 않았을 때만 true다.
+ * 디렉터리를 읽지 못하거나 파일이 남으면 false(호출자가 정리 실패를 보고한다). Journal 디렉터리가 없으면 남은 것이 없으므로 true.
+ */
+export async function removeJournal(homeDir: string, transactionId: string): Promise<boolean> {
+  if (!/^[0-9a-f]{32}$/u.test(transactionId)) return false;
+  let dir: string | null;
+  try {
+    dir = await journalDir(homeDir, false);
+  } catch {
+    return false;
   }
+  if (dir === null) return true;
+  const match = ofTransaction(transactionId);
+  const names = await readdir(dir).catch(() => null);
+  if (names === null) return false;
+  for (const name of names.filter(match)) await rm(path.join(dir, name), { force: true }).catch(() => undefined);
+  const left = await readdir(dir).catch(() => null);
+  return left !== null && !left.some(match);
 }
 
 const JOURNAL_FILE = /^([0-9a-f]{32})(?:\.claim-(\d{1,10})-[0-9a-f]{8})?\.json$/u;
@@ -158,10 +178,14 @@ function alive(pid: number): boolean {
   }
 }
 
-/** 살아 있는 다른 복구가 선점한 Journal 파일 이름인가. 강제 종료된 복구가 남긴 선점은 false다(다시 선점할 수 있다). */
+/**
+ * 살아 있는 다른 프로세스의 복구가 선점한 Journal 파일 이름인가. 강제 종료된 복구가 남긴 선점은 false다(다시 선점할 수 있다).
+ * 이 프로세스의 선점도 false다: 복구 실행은 작업 잠금 안에서만 하므로 같은 프로세스에서 동시에 진행 중인 복구는 없다
+ * (정리에 실패해 남은 선점 때문에 오래 실행되는 Desktop이 같은 기록을 다시 다루지 못하는 일을 막는다).
+ */
 export function claimedByLiveRecovery(fileName: string): boolean {
   const pid = JOURNAL_FILE.exec(fileName)?.[2];
-  return pid !== undefined && alive(Number(pid));
+  return pid !== undefined && Number(pid) !== process.pid && alive(Number(pid));
 }
 
 export type JournalReadResult = { ok: true; journals: JournalV1[]; unreadable: number; files: ReadonlyMap<string, string> } | { ok: false; code: "JOURNAL_PATH_ESCAPE"; message: string };

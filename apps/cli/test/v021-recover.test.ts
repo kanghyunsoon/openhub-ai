@@ -7,7 +7,7 @@ import { memoryIO } from "./helpers";
 import { approveAll, createHarness, plannedOf } from "../../../packages/core/test/installer/harness";
 import { seedEntries } from "../../../packages/core/test/recommendation/helpers";
 import { fakeNpmSpawner } from "../../../packages/core/test/process/fake-npm";
-import { newScratch } from "../../../packages/core/test/lifecycle/helpers";
+import { abandonOperationLock, newScratch } from "../../../packages/core/test/lifecycle/helpers";
 
 /** v0.2.1 P0-3 CLI openhub lifecycle recover. Core harness로 "Health 중 끝난 Update" 상태를 만든 뒤 CLI로 복구한다(spawn·network 0). */
 const REPO = path.resolve(import.meta.dirname, "../../..");
@@ -44,6 +44,7 @@ async function interrupted() {
   if (o.status !== "approved") throw new Error(o.status);
   void runLifecycleTransaction(built.planned, o.approval, request, env);
   await inHealth;
+  await abandonOperationLock(h.homeDir); // 강제 종료가 남기는 잠금 상태(죽은 pid)
   return { h, file, original, changed: await readFile(file, "utf8") };
 }
 

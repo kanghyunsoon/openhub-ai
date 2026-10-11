@@ -5,11 +5,14 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   commitLifecycleState,
+  executeRecovery,
   lifecycleStatus,
   planLifecycleRequest,
+  planRecovery,
   readLifecycleState,
   recordInstallInState,
   requestLifecycleApproval,
+  requestRecoveryApproval,
   runInstallTransaction,
   runLifecycleTransaction,
   type InstallRequest,
@@ -19,7 +22,7 @@ import {
 import { approveAll, createHarness, plannedOf } from "../installer/harness";
 import { seedEntries } from "../recommendation/helpers";
 import { fakeNpmSpawner } from "../process/fake-npm";
-import { homeIn, newScratch, stateOf, toolState } from "./helpers";
+import { abandonOperationLock, homeIn, newScratch, stateOf, toolState } from "./helpers";
 
 /**
  * v0.2.1 B 영역 재현.
@@ -89,11 +92,10 @@ describe("v0.2.1 P0-4 Version State 동시 커밋", () => {
 
 describe("v0.2.1 P0-3 Update 중 강제 종료", () => {
   /**
-   * 현재 동작 기록(v0.2.1 결정 대기, 고치지 않음). 첫 Update의 Health 도중 강제 종료되면 config는 새 항목, Version State는 이전 항목으로 남는다.
-   * update·health는 CONFIG_DRIFT로 blocked, rollback은 previous가 없어 불가, repair는 tool config 도구 전용이라 불가하다.
-   * 복구 경로(작업 journal + 승인 복구)가 생기면 이 테스트를 그 동작으로 바꾼다.
+   * 첫 Update의 Health 도중 강제 종료되면 config는 새 항목, Version State는 이전 항목으로 남는다(작업 기록 Journal도 남는다).
+   * (v0.2.1 P0-3 수정 후) 상태는 interrupted-update이고 update·health는 INTERRUPTED_OPERATION으로 막히며, 승인 복구(recover)로 되돌릴 수 있다.
    */
-  it("config 교체 뒤 Health 도중 끝나면 config-drift가 남고 앱 안의 복구 경로가 없다(알려진 결함, 결정 대기)", async () => {
+  it("config 교체 뒤 Health 도중 끝나면 interrupted-update로 알아보고 update·health를 막으며, 승인 복구로 변경 전 상태가 된다", async () => {
     const h = await createHarness(scratch, { entries: seed });
     const targets: InstallRequest["targets"] = [{ client: "cursor", scope: "project" }];
     const install = h.request("github-mcp-server", targets);
@@ -134,23 +136,29 @@ describe("v0.2.1 P0-3 Update 중 강제 종료", () => {
     // Health가 끝나지 않는다 = 이 시점에 프로세스가 강제 종료된 것과 같은 디스크 상태.
     void approveRun("update", env(() => (reached(), new Promise(() => undefined))));
     await inHealth;
+    await abandonOperationLock(h.homeDir);
     const killed = [await readFile(cursorFile, "utf8"), await readFile(stateFile, "utf8")];
     expect(killed[0]).not.toBe(before[0]); // config는 이미 새 항목
     expect(killed[1]).toBe(before[1]); // Version State는 이전 그대로
     const status = await lifecycleStatus({ projectRoot: h.projectRoot, homeDir: h.homeDir, entries: seed, platform: "linux", includeUser: false });
-    expect(status.ok && status.items.map((i) => i.state)).toEqual(["config-drift"]);
+    expect(status.ok && status.items.map((i) => i.state)).toEqual(["interrupted-update"]);
 
     const healthy = async () => ({ ok: true as const, result: { status: "healthy" as const, reason: null, toolCount: 3, environmentUnverified: false, terminated: true, excerpt: null } });
-    const outcomes: Record<string, unknown> = {};
-    for (const op of ["update", "rollback", "health", "repair"] as const) {
+    for (const op of ["update", "health"] as const) {
       const b = await planLifecycleRequest(request(op), env(healthy));
-      outcomes[op] = b.ok ? { status: b.planned.plan.status, warnings: b.planned.plan.warnings.map((w) => w.code) } : { code: b.code };
+      expect(b.ok && b.planned.plan.status).toBe("blocked");
+      expect(b.ok && b.planned.plan.warnings.map((w) => w.code)).toContain("INTERRUPTED_OPERATION");
     }
-    expect(outcomes).toEqual({
-      update: { status: "blocked", warnings: ["CONFIG_DRIFT"] },
-      rollback: { code: "NO_ROLLBACK_TARGET" },
-      health: { status: "blocked", warnings: ["CONFIG_DRIFT"] },
-      repair: { code: "REPAIR_UNSUPPORTED" },
-    });
+    const opts = { toolId: "github-mcp-server", projectRoot: h.projectRoot, homeDir: h.homeDir, mode: "undo" as const };
+    const built = await planRecovery(opts);
+    if (!built.ok) throw new Error(built.code);
+    expect(built.planned.plan.status).toBe("ready");
+    const o = await requestRecoveryApproval(built.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
+    if (o.status !== "approved") throw new Error(o.status);
+    expect(await executeRecovery(o.approval, { ...opts, regenerate: () => planRecovery(opts) })).toMatchObject({ status: "recovered" });
+    expect(JSON.parse(await readFile(cursorFile, "utf8"))).toEqual(JSON.parse(before[0]!));
+    expect(await readFile(stateFile, "utf8")).toBe(before[1]);
+    const after = await lifecycleStatus({ projectRoot: h.projectRoot, homeDir: h.homeDir, entries: seed, platform: "linux", includeUser: false });
+    expect(after.ok && after.items.map((i) => i.state)).toEqual(["state-consistent"]);
   });
 });

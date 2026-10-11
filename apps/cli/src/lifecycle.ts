@@ -5,6 +5,7 @@ import {
   INSTALL_CLIENTS,
   LIFECYCLE_APPROVAL_MESSAGES,
   LIFECYCLE_STATE_LOGICAL_PATH,
+  damagedJournalMessage,
   defaultHostEnvironment,
   formatLifecyclePlanPreview,
   formatLifecycleResult,
@@ -193,9 +194,10 @@ async function runStatus(argv: readonly string[], io: LifecycleCommandIO, usage:
     }
   }
   if (values.json) {
-    io.out(JSON.stringify({ items: status.items, ...(values.check ? { checks } : {}) }, null, 2));
+    io.out(JSON.stringify({ items: status.items, ...(values.check ? { checks } : {}), ...(status.journalsUnreadable > 0 ? { journalsUnreadable: status.journalsUnreadable } : {}) }, null, 2));
     return 0;
   }
+  if (status.journalsUnreadable > 0) io.err("경고: " + damagedJournalMessage(status.journalsUnreadable));
   if (status.items.length === 0) io.out("OpenHub Version State에 기록된 도구가 없습니다(" + LIFECYCLE_STATE_LOGICAL_PATH + ").");
   for (const item of status.items) {
     for (const line of formatLifecycleStatusItem(item)) io.out(line);
