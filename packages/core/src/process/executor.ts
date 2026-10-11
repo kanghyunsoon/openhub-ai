@@ -8,6 +8,7 @@ import type { ConfigPatchStep, RunStep, ToolConfigStep } from "../installer/plan
 import { isVerifiedLifecyclePlan, type VerifiedLifecyclePlan } from "../lifecycle/plan";
 import { redactSensitive } from "../recommendation/index";
 import { nodeNpxSpawner, prepareNpxPackage, type NpxPrepareContext } from "./npx-prepare";
+import { prepareUvxPackage, type UvxPrepareContext } from "./uvx-prepare";
 
 /**
  * 공통 Process Executor(TASK-031, D-012). 프로세스를 실행하는 곳은 여기(와 read-only probe)뿐이다.
@@ -18,6 +19,7 @@ import { nodeNpxSpawner, prepareNpxPackage, type NpxPrepareContext } from "./npx
  * - cwd는 project root 또는 OpenHub가 만든 격리 임시 디렉터리뿐이다. symlink·junction으로 밖을 가리키면 거부한다.
  * - 준비 단계(run)가 모두 성공한 뒤에만 config-patch 단계를 onConfigStep으로 넘긴다. 실패하면 이후 단계는 skipped다.
  * - npx 준비 단계(npx Prepare)는 고정 인자만 받으며 process/npx-prepare.ts가 실행한다(executable "npx"를 그대로 spawn하지 않는다).
+ * - uvx 준비 단계(uvx Prepare, v0.2.1)도 고정 인자만 받으며 process/uvx-prepare.ts가 실행한다(허용 목록 환경·offline 확인).
  * - probe 모듈을 import하지 않는다.
  */
 
@@ -82,6 +84,8 @@ export interface ExecutorOptions {
   onToolConfigStep?: (step: ToolConfigStep) => Promise<StepOutcome>;
   /** npx Prepare 실행 문맥(플랫폼·Windows npx 경로·tree killer). 없으면 npx 준비 단계는 NPX_PREPARE_UNAVAILABLE로 실패한다. */
   npx?: Omit<NpxPrepareContext, "spawner" | "timeoutMs">;
+  /** uvx Prepare 실행 문맥(플랫폼·tree killer·uv 자식 환경). 없으면 uvx 준비 단계는 UVX_PREPARE_UNAVAILABLE로 실패한다. */
+  uvx?: Omit<UvxPrepareContext, "spawner" | "timeoutMs">;
 }
 
 export type ExecutionReport =
@@ -154,6 +158,11 @@ async function resolveCwd(kind: RunStep["cwd"], options: ExecutorOptions): Promi
 }
 
 async function runAnyStep(step: RunStep, cwd: string, spawner: ExecSpawner, options: ExecutorOptions): Promise<StepOutcome> {
+  if (step.executable === "uvx") {
+    if (options.uvx === undefined) return { id: step.id, status: "failed", code: "UVX_PREPARE_UNAVAILABLE", excerpt: "uvx 준비 단계를 실행할 문맥(플랫폼)이 없습니다" };
+    const outcome = await prepareUvxPackage(step.args, cwd, { ...options.uvx, spawner: spawner === nodeExecSpawner ? nodeNpxSpawner : spawner, timeoutMs: step.timeoutMs });
+    return { ...outcome, id: step.id, ...(outcome.excerpt === undefined ? {} : { excerpt: redactExcerpt(outcome.excerpt) }) };
+  }
   if (step.executable !== "npx") return runStep(step, cwd, spawner);
   if (options.npx === undefined) return { id: step.id, status: "failed", code: "NPX_PREPARE_UNAVAILABLE", excerpt: "npx 준비 단계를 실행할 문맥(플랫폼·실행 경로)이 없습니다" };
   // 기본 spawner이면 npx Prepare 전용 spawner(npm 자식 환경 허용 목록 적용)를 쓴다. 주입된 spawner(테스트·smoke)는 그대로 쓴다.

@@ -15,6 +15,7 @@ import {
   loadRegistry,
   locateWindowsNpxLauncher,
   npmChildEnv,
+  uvChildEnv,
   planLifecycleRequest,
   probeBackends,
   readLifecycleState,
@@ -115,6 +116,7 @@ function environment(io: LifecycleCommandIO, entries: Awaited<ReturnType<typeof 
     now: io.now ?? (() => new Date()),
     // npx Prepare의 npm 자식 process에는 허용 목록 환경만 넘긴다(API key·token·클라우드 자격증명 제외).
     npmChildEnv: () => npmChildEnv(process.env),
+    uvChildEnv: () => uvChildEnv(process.env),
     windowsNpx: async () => {
       const host = { ...defaultHostEnvironment(), ...(io.hostEnvironment ?? {}) };
       return locateWindowsNpxLauncher({ pathEnv: host.pathEnv, fs: host.fs });

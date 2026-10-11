@@ -1,15 +1,17 @@
 import type { InstallStep, Manifest } from "../manifest/index";
 import type { RecommendPlatform } from "../recommendation/index";
 import type { HealthResult, InstallContext, InstallPlan, InstallResult, InstallTarget, InstallerAdapter, Operation, UpdateResult, ValidationResult } from "./adapter";
-import { isPinnedArtifact, isValidDockerImage, npxArtifact, tokenizeManifestCommand, uvxArtifact } from "./command";
+import { isPinnedArtifact, isPinnedPythonSpec, isValidDockerImage, npxArtifact, tokenizeManifestCommand, uvxArtifact } from "./command";
 import type { InstallBackend, InstallPlanV1, RunStep } from "./plan";
 import { NPX_PREPARE_STEP_ID, NPX_PREPARE_TIMEOUT_MS, npxPrepareArgs } from "../process/npx-prepare";
+import { UVX_PREPARE_STEP_ID, UVX_PREPARE_TIMEOUT_MS, uvxPrepareArgs, uvxPrepareTarget, type UvxBuildPolicy } from "../process/uvx-prepare";
 import { NPX_CLI_PLACEHOLDER, TOOL_CONFIG_PLACEHOLDER, toolConfigIssues } from "../tool-config/index";
 
 /**
  * npx·uvx·docker Adapter(TASK-031, D-012·D-015). Adapter는 Plan 단계만 만들고 프로세스를 실행하지 않는다.
  * - npx·uvx: launch-on-demand. 준비 단계 0개, Client launch spec만 기록한다(persistent install 없음).
  *   단, 정확한 버전으로 고정된 npx 패키지는 npx Prepare 단계 1개(npm-cache)를 둔다(v0.2.0, docs/specs/npx-prepare.md).
+ *   정확한 버전(--from·--with 모두)으로 고정된 uvx 도구는 uvx Prepare 단계 1개(uv-cache)를 둔다(v0.2.1, docs/specs/uvx-prepare.md).
  * - docker: 준비 단계 docker pull <image> 1개, launch는 docker run -i --rm [-e NAME…] <image>(-e에는 이름만).
  * - 실제 실행은 VerifiedPlan을 받는 공통 Executor(src/process/executor.ts)만 한다.
  * - M1 InstallerAdapter 계약을 따르되 M1 승인·run-command 경로(plan·install)와 update·uninstall·healthCheck는 M4에서 실행하지 않는다.
@@ -108,17 +110,72 @@ function planLaunchOnDemand(manifest: Manifest, step: InstallStep, backend: "npx
   }
   const ref = backend === "npx" ? npxArtifact(args) : uvxArtifact(args);
   if (ref === null) return { ok: false, kind: "missing", reason: "패키지 token을 찾지 못했습니다" };
-  const pinned = isPinnedArtifact(backend, ref);
-  const prepare = npxPrepareStepFor(backend, ref.spec, pinned);
+  // uvx: --with 의존성도 정확한 버전이어야 환경이 고정된다(v0.2.1). 하나라도 떠 있으면 floating이다.
+  const pinned = isPinnedArtifact(backend, ref) && (backend !== "uvx" || uvxWithPinsExact(args));
+  const policy = uvxBuildPolicyOf(step, backend);
+  if (!policy.ok) return { ok: false, kind: "rejected", reason: policy.reason };
+  const prepare = backend === "npx" ? npxPrepareStepFor(backend, ref.spec, pinned) : uvxPrepareStepFor(args, policy.policy);
+  if (policy.policy === "source-build-reviewed" && prepare === null) return { ok: false, kind: "rejected", reason: "source-build-reviewed는 정확한 버전(--from pkg==X.Y.Z, --with dep==A.B.C)으로 고정된 uvx 명령에서만 씁니다" };
   return {
     ok: true,
     value: {
       backend,
-      artifact: { kind: backend === "npx" ? "npm-package" : "python-package", spec: ref.spec, pinned, preparation: prepare === null ? "launch-on-demand" : "npm-cache" },
+      artifact: { kind: backend === "npx" ? "npm-package" : "python-package", spec: ref.spec, pinned, preparation: prepare === null ? "launch-on-demand" : backend === "npx" ? "npm-cache" : "uv-cache" },
       launch: { platform, executable: backend, args, envNames: requiredEnvNames(manifest), clientSpec: clientLaunchSpec(platform, backend, args) },
       preparation: prepare === null ? [] : [prepare],
     },
   };
+}
+
+/** Manifest의 검토된 소스 빌드 패키지 한 줄(v0.2.1). */
+export interface UvxSourceBuildEntry {
+  package: string;
+  version: string;
+  source: "pypi-sdist";
+}
+export type UvxBuildPolicyResult = { ok: true; policy: UvxBuildPolicy; sourceBuild: UvxSourceBuildEntry[] } | { ok: false; reason: string };
+
+const PY_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
+const EXACT_VERSION = /^\d+\.\d+\.\d+$/u;
+
+/**
+ * install.options.prepare(v0.2.1, D3). 기본 wheels-only. source-build-reviewed는 소스 빌드할 패키지 목록(이름·정확한 버전·출처)이
+ * 반드시 있어야 하고, wheels-only에는 목록이 없어야 한다. 알 수 없는 key·uvx가 아닌 backend의 prepare는 거부한다.
+ */
+export function uvxBuildPolicyOf(step: InstallStep, backend: InstallBackend): UvxBuildPolicyResult {
+  const raw = step.options?.["prepare"];
+  if (raw === undefined) return { ok: true, policy: "wheels-only", sourceBuild: [] };
+  if (backend !== "uvx") return { ok: false, reason: "install.options.prepare는 uvx backend에서만 씁니다" };
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { ok: false, reason: "install.options.prepare 형식이 올바르지 않습니다" };
+  const doc = raw as Record<string, unknown>;
+  const unknown = Object.keys(doc).find((k) => k !== "build" && k !== "sourceBuild");
+  if (unknown !== undefined) return { ok: false, reason: "install.options.prepare에 알 수 없는 key(" + unknown + ")가 있습니다" };
+  const build = doc["build"] ?? "wheels-only";
+  if (build !== "wheels-only" && build !== "source-build-reviewed") return { ok: false, reason: "install.options.prepare.build는 wheels-only 또는 source-build-reviewed입니다" };
+  const list = doc["sourceBuild"];
+  if (build === "wheels-only") return list === undefined ? { ok: true, policy: "wheels-only", sourceBuild: [] } : { ok: false, reason: "wheels-only에는 sourceBuild 목록을 쓰지 않습니다" };
+  if (!Array.isArray(list) || list.length === 0) return { ok: false, reason: "source-build-reviewed에는 소스 빌드할 패키지 목록(sourceBuild)이 필요합니다" };
+  const entries: UvxSourceBuildEntry[] = [];
+  for (const item of list) {
+    const e = item as Record<string, unknown>;
+    if (typeof item !== "object" || item === null || Object.keys(e).some((k) => !["package", "version", "source"].includes(k))) return { ok: false, reason: "sourceBuild 항목 형식이 올바르지 않습니다" };
+    if (typeof e["package"] !== "string" || !PY_NAME.test(e["package"])) return { ok: false, reason: "sourceBuild 패키지 이름이 올바르지 않습니다" };
+    if (typeof e["version"] !== "string" || !EXACT_VERSION.test(e["version"])) return { ok: false, reason: "sourceBuild 버전은 정확한 버전(X.Y.Z)이어야 합니다" };
+    if (e["source"] !== "pypi-sdist") return { ok: false, reason: "sourceBuild 출처는 pypi-sdist만 지원합니다" };
+    entries.push({ package: e["package"], version: e["version"], source: "pypi-sdist" });
+  }
+  return { ok: true, policy: "source-build-reviewed", sourceBuild: entries };
+}
+
+/** 정확한 버전 환경의 uvx Prepare 단계(v0.2.1). 준비할 수 없는 형식이면 null(launch-on-demand 유지). */
+function uvxWithPinsExact(args: readonly string[]): boolean {
+  return args.every((a, i) => i === 0 || args[i - 1] !== "--with" || isPinnedPythonSpec(a));
+}
+
+export function uvxPrepareStepFor(launchArgs: readonly string[], policy: UvxBuildPolicy): RunStep | null {
+  const target = uvxPrepareTarget(launchArgs);
+  if (target === null) return null;
+  return { id: UVX_PREPARE_STEP_ID, kind: "run", executable: "uvx", args: uvxPrepareArgs(target, policy), cwd: "isolated", network: true, timeoutMs: UVX_PREPARE_TIMEOUT_MS };
 }
 
 /** 정확한 버전으로 고정된 npx 패키지의 Prepare 단계. 고정되지 않았거나 npx가 아니면 null(launch-on-demand 유지). */
