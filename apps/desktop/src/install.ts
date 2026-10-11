@@ -11,6 +11,7 @@ import {
   npmChildEnv,
   planInstall,
   probeBackends,
+  readLifecycleState,
   recordInstallInState,
   requestApproval,
   runInstallTransaction,
@@ -33,7 +34,7 @@ import {
 } from "@openhub/core";
 import type { DirectoryPicker } from "./project-scan";
 import { currentRecommendation, type RecommendSession } from "./recommend";
-import { installApprovalText, installNextActionTexts, installPreviewLines, installWarningTexts, installationStatusText } from "./i18n/core-text";
+import { installApprovalText, installNextActionTexts, installPreviewLines, installWarningTexts, installationStatusText, stateUnreadableText } from "./i18n/core-text";
 import { tr } from "./i18n/index";
 import { smokeNpmSpawner } from "./lifecycle";
 
@@ -443,6 +444,9 @@ export async function planForRenderer(session: InstallSession, deps: InstallDeps
     const chosen = parseClientSelection(selection, found.supported, found.detected);
     if (!chosen.ok) return { status: "error", code: "invalid-selection", message: tr("install.invalidSelection") };
     if (chosen.clients.length === 0) return { status: "no-client" };
+    // v0.2.1: Version State를 읽을 수 없으면 설치 뒤 기록할 수 없다. 승인 가능한 Plan을 만들지 않는다(파일은 고치거나 덮어쓰지 않는다).
+    const unreadable = await unreadableState(deps);
+    if (unreadable !== undefined) return unreadable;
     const request: InstallRequest = { toolId, projectRoot: dir, homeDir: deps.homeDir, targets: chosen.clients.map((client: InstallClient) => ({ client, scope: chosen.scope })), includeHost: false, platform };
     const { result } = await planInstall(request, environment(deps, found.entries));
     // 계획하는 동안 더 새 요청이 왔거나 프로젝트가 바뀌었으면 이 결과는 버린다(화면에도 보이지 않는다).
@@ -475,12 +479,18 @@ export async function runForRenderer(session: InstallSession, deps: InstallDeps,
     if (pending.planned.plan.status === "already-installed") {
       return { status: "done", result: buildInstallResultView(await runInstallTransaction(pending.planned, undefined, pending.request, env), pending.planned.plan) };
     }
+    // 계획한 뒤 Version State가 손상됐으면 승인을 묻지 않는다.
+    const before = await unreadableState(deps);
+    if (before !== undefined) return before;
     const outcome = await requestApproval(pending.planned, nativeDialogPrompter(deps.dialog));
     if (outcome.status !== "approved") return { status: "rejected" };
     // 대화상자가 열린 동안 다른 프로젝트를 골랐으면 방금 받은 승인도 쓰지 않는다.
     if (session.projectDir !== pending.request.projectRoot) return changed;
     // 대화상자가 열린 동안 Client 선택을 바꾸거나 새 계획을 요청했으면 이 승인은 이전 Plan의 것이다. 실행하지 않는다.
     if (!session.isCurrent(toolId, pending.ticket)) return { status: "plan-changed", message: tr("install.planChanged") };
+    // 대화상자가 열린 동안 손상됐어도 Client 설정을 쓰지 않는다(설정만 바뀌고 Version State 기록이 빠지는 상태를 만들지 않는다).
+    const after = await unreadableState(deps);
+    if (after !== undefined) return after;
     const result = await runInstallTransaction(pending.planned, outcome.approval, pending.request, env);
     const view = buildInstallResultView(result, pending.planned.plan);
     await recordDesktopInstall(pending.planned, result, pending.request, deps, view);
@@ -490,7 +500,13 @@ export async function runForRenderer(session: InstallSession, deps: InstallDeps,
   }
 }
 
-/** 설치가 succeeded이면 Version State에 기록한다(TASK-038). 기록 실패는 결과 화면 경고로만 보여 준다. */
+/** Version State를 읽을 수 없으면(손상·미지원 버전·경로 이탈) 고정 안내가 담긴 오류 응답. 읽을 수 있거나 파일이 없으면 undefined. 쓰기 0. */
+async function unreadableState(deps: InstallDeps): Promise<{ status: "error"; code: string; message: string } | undefined> {
+  const read = await readLifecycleState({ homeDir: deps.homeDir, ...(deps.configFs === undefined ? {} : { fs: deps.configFs }) });
+  return read.ok ? undefined : { status: "error", code: read.code, message: stateUnreadableText(read.code) };
+}
+
+/** 설치가 succeeded이면 Version State에 기록한다(TASK-038). 실행 직전에 읽기를 확인하므로 여기서 실패하는 경우는 그 사이 경쟁뿐이며 결과 화면 경고로 보여 준다. */
 async function recordDesktopInstall(planned: PlannedInstall, result: InstallResultV1, request: InstallRequest, deps: InstallDeps, view: InstallResultView): Promise<void> {
   const recorded = await recordInstallInState(planned, result, {
     projectRoot: request.projectRoot,
