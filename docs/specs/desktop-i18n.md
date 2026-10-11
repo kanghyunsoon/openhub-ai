@@ -55,7 +55,7 @@ The same rule applies to lifecycle result warnings and Adopt/Benchmark errors.
 
 | Area | What English mode shows | Needed change (Proposal, additive) |
 | --- | --- | --- |
-| Pinokio plan notices | Core notice text | Notice codes on `PinokioPlan` |
+| Pinokio plan notices | Translated by code in the Desktop preview (v0.2.0): `delegated-shell`, `health-required`, `venv-not-restored`; each approval ID is explained in English. Unknown codes keep the Core text marked "(not translated)". Approval and execution stay in the Korean-only CLI. | — |
 | Release impact reasons | Codes with level, e.g. `version-major (high)` | Reason parameters (`from`, `to`, `runtime`) |
 | Release summary items | Upstream release-note text (third-party, usually English) | None; third-party text is shown as is |
 | Registry Manifest summaries and validation issues | Authored Manifest text and Core issue sentences | Optional `summary.en` in Manifests; issue codes |

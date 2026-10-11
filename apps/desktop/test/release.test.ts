@@ -5,7 +5,8 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import type { BackendProbeReport, ExecChild, ExecSpawner, LifecycleEnvironment } from "@openhub/core";
+import { PINOKIO_APPROVAL_MESSAGES, type BackendProbeReport, type ExecChild, type ExecSpawner, type LifecycleEnvironment } from "@openhub/core";
+import { setDesktopLocale } from "../src/i18n/index";
 import { INSTALL_PLAN_CHANNEL, INSTALL_RUN_CHANNEL, InstallSession, registerInstall, type NativeDialogLike } from "../src/install";
 import { LIFECYCLE_PLAN_CHANNELS, LIFECYCLE_RUN_CHANNEL, LIFECYCLE_STATUS_CHANNEL, LifecycleSession, registerLifecycle, type LifecyclePlanResponse } from "../src/lifecycle";
 import { PROJECT_SCAN_CHANNEL, fixedDirectory, registerProjectScan } from "../src/project-scan";
@@ -190,5 +191,41 @@ describe("REQ-045 REQ-041 REQ-042 REQ-032 Desktop Release·Impact·Pinokio", () 
     expect(html.indexOf('<script src="lifecycle.js"></script>')).toBeLessThan(html.indexOf('<script src="release.js"></script>'));
     expect(await read("renderer/lifecycle.js")).toContain("window.__openhubLifecycle = async (toolId) => {");
   });
-});
 
+  it("v0.2.0 Pinokio Preview 보안 고지·승인 요구가 English에서는 영어, 한국어에서는 Core 문장이다(정보 누락 없음)", async () => {
+    const repo = path.join(scratch, "repo-pinokio-en");
+    await cp(REGISTRY, path.join(repo, "registry"), { recursive: true });
+    await writeFile(path.join(repo, "registry", "mcp", "local-llm-ui.yaml"), JSON.stringify(pinokioManifest(), null, 2));
+    const layout = await ptermLayout();
+    const pinokioHome = await newHome();
+    const fetch = async (url: string) => (url === "http://127.0.0.1:42000/pinokio/version" ? json({ pinokiod: "4.0.3", script: "4.0" }) : url === "http://127.0.0.1:42000/pinokio/home" ? json({ path: pinokioHome }) : new Response("missing", { status: 404 }));
+    const handlers = new Map<string, (...args: unknown[]) => unknown>();
+    const home = path.join(scratch, "home-pinokio-en");
+    await mkdir(home, { recursive: true });
+    registerRelease({ handle: (c, fn) => void handlers.set(c, fn) }, new LifecycleSession(() => undefined), { registryDir: path.join(repo, "registry"), homeDir: home, fetch, pinokioProbe: { pathEnv: layout.pathEnv, platform: process.platform, fs: realFs() } });
+    const preview = async () => {
+      const p = (await handlers.get(PINOKIO_PREVIEW_CHANNEL)?.({}, "local-llm-ui")) as PinokioPreviewResponse;
+      if (p.status !== "ok") throw new Error(p.code);
+      return p.lines;
+    };
+    try {
+      setDesktopLocale("en");
+      const enLines = await preview();
+      const notices = enLines.filter((l) => /^\[(delegated-shell|health-required)\] /u.test(l));
+      expect(notices).toHaveLength(2);
+      expect(notices[0]).toBe("[delegated-shell] Pinokio (pinokiod), not OpenHub, runs the shell.run commands in the generated scripts through a shell. OpenHub pins the full script content and compares it again right before running.");
+      expect(notices[1]).toMatch(/^\[health-required\] After running, OpenHub checks Health at http:\/\/127\.0\.0\.1:/u);
+      const approvals = enLines.filter((l) => l.startsWith("  - ["));
+      expect(approvals.map((l) => l.slice(5, l.indexOf("]")))).toEqual(["base", "pinokio-delegated-shell", "health-execution"]);
+      for (const l of [...notices, ...approvals]) expect(l).not.toMatch(/[\uac00-\ud7a3]/u);
+      setDesktopLocale("ko");
+      const koLines = await preview();
+      expect(koLines.filter((l) => l.startsWith("[delegated-shell] "))[0]).toContain("Pinokio(pinokiod)가 셸로 실행합니다");
+      expect(koLines.filter((l) => l.startsWith("  - [")).map((l) => l.slice(l.indexOf("]") + 2))).toEqual([PINOKIO_APPROVAL_MESSAGES.base, PINOKIO_APPROVAL_MESSAGES["pinokio-delegated-shell"], PINOKIO_APPROVAL_MESSAGES["health-execution"]]);
+      // 영어와 한국어 줄 수가 같다(고지·승인 요구가 언어 때문에 빠지지 않는다).
+      expect(koLines.length).toBe(enLines.length);
+    } finally {
+      setDesktopLocale("ko");
+    }
+  }, 30_000);
+});
