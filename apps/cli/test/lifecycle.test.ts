@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -288,6 +288,54 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 CLI lifecycle", () => {
       expect(await readFile(file, "utf8")).toBe(content);
       expect([s.writes, s.spawns, s.healthRuns]).toEqual([[], [], 0]);
     }
+  });
+});
+
+describe("v0.2.1 설치와 읽을 수 없는 Version State", () => {
+  const UNREADABLE = [
+    ["{ not json", "STATE_CORRUPT"],
+    ['{ "schemaVersion": 2, "kind": "openhub-lifecycle-state", "entries": {} }\n', "STATE_VERSION_UNSUPPORTED"],
+  ] as const;
+  const fixed = (code: string) => "Version State(~/.openhub/state/lifecycle.json)를 읽을 수 없습니다 (" + code + "). OpenHub는 이 파일을 자동으로 고치거나 덮어쓰지 않습니다. 파일과 백업(lifecycle.json.bak)을 확인하세요.";
+
+  it("설치 전에 Version State를 읽을 수 없으면 승인을 묻지 않고 exit 1이며 Client 설정·state 쓰기 0건이다", async () => {
+    for (const [content, code] of UNREADABLE) {
+      const s = await session();
+      const file = path.join(s.dirs.home, ".openhub", "state", "lifecycle.json");
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, content);
+      expect(await s.run(["install", "memory-mcp", "--client", "claude-code"])).toBe(1);
+      expect(lastStderr.join("\n")).toContain(fixed(code));
+      expect([s.writes, s.spawns, s.questions]).toEqual([[], [], []]);
+      expect(existsSync(path.join(s.dirs.project, ".mcp.json"))).toBe(false);
+      expect(await readFile(file, "utf8")).toBe(content);
+    }
+  });
+
+  it("승인 대화 중에 Version State가 손상되면 실행하지 않는다(설정 쓰기 0건, 손상 파일 그대로)", async () => {
+    for (const [content, code] of UNREADABLE) {
+      const s = await session();
+      const file = path.join(s.dirs.home, ".openhub", "state", "lifecycle.json");
+      const answer = (q: string) => {
+        if (q.includes("Tool ID")) {
+          writeFileSync(file, content);
+          return "memory-mcp";
+        }
+        return "y";
+      };
+      await mkdir(path.dirname(file), { recursive: true });
+      expect(await s.run(["install", "memory-mcp", "--client", "claude-code"], { answer })).toBe(1);
+      expect(lastStderr.join("\n")).toContain(fixed(code));
+      expect([s.writes, s.spawns]).toEqual([[], []]);
+      expect(existsSync(path.join(s.dirs.project, ".mcp.json"))).toBe(false);
+      expect(await readFile(file, "utf8")).toBe(content);
+    }
+  });
+
+  it("Version State 파일이 없으면 지금처럼 설치하고 새로 기록한다", async () => {
+    const s = await installed();
+    const state = await readLifecycleState({ homeDir: s.dirs.home });
+    expect(state.ok && Object.keys(state.state.entries).length).toBe(1);
   });
 });
 
