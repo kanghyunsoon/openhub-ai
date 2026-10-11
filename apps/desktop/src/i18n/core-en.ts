@@ -96,6 +96,7 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   MANIFEST_DRAFT: "This Manifest is a draft and cannot be installed.",
   NO_CANONICAL_ALIAS: "The Manifest has no canonical MCP server name.",
   CLIENT_UNSUPPORTED: "This client is not supported by the tool.",
+  PROJECT_TARGET_IS_USER_CONFIG: "This project folder's configuration file is the same file as your user-scope configuration (for example, the project folder is your home folder). Writing it as project scope would change your user settings without user-scope approval, so it is blocked. Install with user scope instead.",
   UNSUPPORTED_BACKEND: "No supported install backend is available.",
   CONFIG_KEY_EXISTS: "An entry with the same name already exists; OpenHub does not overwrite it.",
   PLAN_NOT_EXECUTABLE: "This plan cannot be executed.",

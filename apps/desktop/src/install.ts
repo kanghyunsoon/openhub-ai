@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import path from "node:path";
 import {
   INSTALL_CLIENTS,
   analyzeProject,
@@ -30,9 +31,10 @@ import {
   type InstallTargetChange,
   type IsolatedDir,
   type PlannedInstall,
+  type ProjectProfile,
   type RegistryEntry,
 } from "@openhub/core";
-import type { DirectoryPicker } from "./project-scan";
+import type { DirectoryPicker, ProjectSelectionHooks } from "./project-scan";
 import { currentRecommendation, type RecommendSession } from "./recommend";
 import { installApprovalText, installNextActionTexts, installPreviewLines, installWarningTexts, installationStatusText, stateUnreadableText } from "./i18n/core-text";
 import { tr } from "./i18n/index";
@@ -211,7 +213,7 @@ export function buildInstallResultView(result: InstallResultV1, plan?: InstallPl
 }
 
 /** 네이티브 확인 대화상자 prompter. 사람이 [설치 승인]을 누르면 나열한 요구를 모두 확인한 것이다. */
-export function nativeDialogPrompter(dialog: NativeDialogLike): ApprovalPrompter {
+export function nativeDialogPrompter(dialog: NativeDialogLike, projectName?: string): ApprovalPrompter {
   return {
     channel: "desktop-native-dialog",
     async confirm(request) {
@@ -226,7 +228,9 @@ export function nativeDialogPrompter(dialog: NativeDialogLike): ApprovalPrompter
         ...unchanged.map((t) => tr("install.dialog.targetUnchanged", { client: CLIENT_LABEL[t.client], scope: scopeText(t), file: t.file })),
       ];
       const userWarning = written.some((t) => t.scope === "user") ? [tr("install.dialog.userScopeWarning")] : [];
-      const detail = [...targetLines, ...userWarning, "", ...request.requirements.map((r) => tr("dialog.requirement", { id: r.id, message: installApprovalText(r.id) })), "", tr("dialog.digest", { digest: planDigest })].join("\n");
+      // 대상 프로젝트(폴더 이름, v0.2.1 P0-1). project 범위 파일은 이 폴더 안에 쓴다.
+      const projectLine = projectName === undefined ? [] : [tr("install.dialog.project", { name: projectName })];
+      const detail = [...projectLine, ...targetLines, ...userWarning, "", ...request.requirements.map((r) => tr("dialog.requirement", { id: r.id, message: installApprovalText(r.id) })), "", tr("dialog.digest", { digest: planDigest })].join("\n");
       const { response } = await dialog.showMessageBox({
         type: "warning",
         title: tr("install.dialog.title"),
@@ -257,23 +261,51 @@ export interface PlanTicket {
  */
 export class InstallSession {
   #dir: string | undefined;
+  #profile: ProjectProfile | undefined;
   #epoch = 0;
+  /** 폴더가 정해진 가장 최근 선택의 세대(v0.2.1). */
+  #selected = 0;
+  #nextSelection = 0;
   readonly #pending = new Map<string, { planned: PlannedInstall; request: InstallRequest; ticket: PlanTicket }>();
   readonly #generation = new Map<string, number>();
 
-  /** [프로젝트 선택] picker를 감싸 고른 폴더를 기억한다(결과는 바꾸지 않는다). */
+  /**
+   * [프로젝트 선택] picker를 감싸 선택 세대를 붙인다(v0.2.1 P0-1).
+   * - 폴더가 정해지면 분석이 끝날 때까지 현재 프로젝트가 없다(경로·Profile 없음, Pending Plan 폐기). 이전 프로젝트의 추천으로 설치할 수 없다.
+   * - 분석이 끝나면 그 선택이 최신일 때만 경로와 Profile을 한 번에 확정한다. 늦게 끝난 이전 선택·분석은 버린다.
+   * - 취소는 아무것도 바꾸지 않는다.
+   */
   trackPicker(pick: DirectoryPicker): DirectoryPicker {
-    return async () => {
-      const dir = await pick();
-      this.#dir = dir;
-      this.#epoch += 1;
-      this.#pending.clear();
-      return dir;
+    const selection: ProjectSelectionHooks = {
+      begin: () => ++this.#nextSelection,
+      picked: (generation) => {
+        if (generation < this.#selected) return false;
+        this.#selected = generation;
+        this.#change(undefined, undefined);
+        return true;
+      },
+      completed: (generation, dir, profile) => {
+        if (generation !== this.#selected) return false;
+        this.#change(profile === null ? undefined : dir, profile ?? undefined);
+        return true;
+      },
     };
+    return Object.assign(async () => pick(), { selection });
+  }
+
+  #change(dir: string | undefined, profile: ProjectProfile | undefined): void {
+    this.#dir = dir;
+    this.#profile = profile;
+    this.#epoch += 1;
+    this.#pending.clear();
   }
 
   get projectDir(): string | undefined {
     return this.#dir;
+  }
+  /** 현재 프로젝트를 분석한 Profile(경로와 함께 확정된 것). 분석 중이면 없다. */
+  get profile(): ProjectProfile | undefined {
+    return this.#profile;
   }
   /** 새 계획 요청(또는 선택 변경): 이전 Pending Plan을 버리고 새 표를 준다. */
   begin(toolId: string): PlanTicket {
@@ -338,6 +370,8 @@ async function recommendedTool(session: InstallSession, deps: InstallDeps, toolI
   const profile = deps.recommend.profile;
   const dir = session.projectDir;
   if (profile === undefined || dir === undefined) return { status: "no-project" as const };
+  // 추천 Profile이 지금 프로젝트 경로와 함께 확정된 Profile일 때만(v0.2.1 P0-1). 분석 중이거나 이전 프로젝트의 Profile이면 설치하지 않는다.
+  if (profile !== session.profile) return { status: "no-project" as const };
   if (typeof toolId !== "string") return { status: "not-recommended" as const };
   const current = await currentRecommendation(deps.recommend, { registryDir: deps.registryDir, metadataFile: deps.metadataFile, platform: deps.platform });
   if (current.status !== "ok") return { status: "not-recommended" as const };
@@ -435,7 +469,7 @@ export async function planForRenderer(session: InstallSession, deps: InstallDeps
   const ticket = session.begin(toolId);
   const profile = deps.recommend.profile;
   const dir = session.projectDir;
-  if (profile === undefined || dir === undefined) return { status: "no-project" };
+  if (profile === undefined || dir === undefined || profile !== session.profile) return { status: "no-project" };
   const platform = toRecommendPlatform(deps.platform);
   if (platform === undefined) return { status: "error", code: "platform-unsupported", message: tr("install.platformUnsupported") };
   try {
@@ -482,7 +516,7 @@ export async function runForRenderer(session: InstallSession, deps: InstallDeps,
     // 계획한 뒤 Version State가 손상됐으면 승인을 묻지 않는다.
     const before = await unreadableState(deps);
     if (before !== undefined) return before;
-    const outcome = await requestApproval(pending.planned, nativeDialogPrompter(deps.dialog));
+    const outcome = await requestApproval(pending.planned, nativeDialogPrompter(deps.dialog, path.basename(pending.request.projectRoot)));
     if (outcome.status !== "approved") return { status: "rejected" };
     // 대화상자가 열린 동안 다른 프로젝트를 골랐으면 방금 받은 승인도 쓰지 않는다.
     if (session.projectDir !== pending.request.projectRoot) return changed;

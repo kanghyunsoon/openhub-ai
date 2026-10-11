@@ -211,7 +211,7 @@ export const basicVerifier: InstallVerifier = async ({ verified, request, steps,
   return { verification: { prepared, configured, detected: "skipped" }, warnings: [], nextActions: [] };
 };
 
-const CONFIG_RETRYABLE: Readonly<Record<string, boolean>> = { CONFIG_WRITE_FAILED: true, CONFIG_KEY_EXISTS: false, CONFIG_PATH_ESCAPE: false, MANUAL_SETUP_REQUIRED: false, CONFIG_UNPARSEABLE: false, USER_SCOPE_NOT_APPROVED: false };
+const CONFIG_RETRYABLE: Readonly<Record<string, boolean>> = { CONFIG_WRITE_FAILED: true, CONFIG_KEY_EXISTS: false, CONFIG_PATH_ESCAPE: false, MANUAL_SETUP_REQUIRED: false, CONFIG_UNPARSEABLE: false, USER_SCOPE_NOT_APPROVED: false, PROJECT_TARGET_IS_USER_CONFIG: false };
 
 /** 승인된 Plan을 실행한다. 승인이 없거나 Plan이 바뀌었으면 아무것도 실행하지 않는다. */
 export async function runInstallTransaction(planned: PlannedInstall, approval: InstallApproval | undefined, request: InstallRequest, env: InstallEnvironment): Promise<InstallResultV1> {

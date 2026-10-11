@@ -18,6 +18,7 @@ import { CONFIG_SCOPES, INSTALL_BACKENDS, INSTALL_CLIENTS, canonicalize, manifes
 import { RECOMMEND_PLATFORMS, TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, type RecommendPlatform } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
 import { PROJECT_KEY_PATTERN, artifactIdentitySchema, entryKeyOf, type ToolState } from "../lifecycle/state";
+import { TOOL_CONFIG_PLACEHOLDER } from "../tool-config/index";
 import { configEntryDigest } from "../lifecycle/status";
 import { projectKeyFor, readLifecycleState, type StateErrorCode } from "../lifecycle/store";
 
@@ -143,6 +144,12 @@ export async function planBenchmark(options: BenchmarkPlanOptions): Promise<Benc
   const blockers: { code: BenchmarkBlockerCode; message: string }[] = [];
   if (manifest.healthCheck.type !== "mcp-handshake" || manifest.install.preferredAdapter === "pinokio") {
     blockers.push({ code: "BENCHMARK_UNSUPPORTED", message: "MCP stdio handshake로 확인하는 도구만 Benchmark할 수 있습니다(Pinokio·HTTP 등 제외)" });
+  }
+  // (v0.2.1) tool config(서버 정책 파일)를 쓰는 도구: Benchmark는 정책 파일을 확인·전달하지 않는다({toolConfig}가 그대로 남아 서버가 시작하지 못한다).
+  // 정책 파일이 바뀌었거나 없어도 승인 가능한 Plan이 되지 않도록 계획 단계에서 막는다.
+  const configArgs = state === undefined ? [] : argsOfClientSpec(state.launch.clientSpec);
+  if (manifest.toolConfig !== undefined || state?.toolConfig !== undefined || configArgs.includes(TOOL_CONFIG_PLACEHOLDER)) {
+    blockers.push({ code: "BENCHMARK_UNSUPPORTED", message: "서버 정책 파일(tool config)을 쓰는 도구는 Benchmark가 정책 파일을 확인해 전달하지 못해 지원하지 않습니다" });
   }
   let target: BenchmarkPlanV1["target"] = null;
   let stateOut: BenchmarkPlanV1["state"] = null;

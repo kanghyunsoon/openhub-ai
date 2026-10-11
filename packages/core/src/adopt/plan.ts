@@ -2,7 +2,7 @@ import path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
 import { containsAbsolutePath } from "../analyzer/index";
-import { artifactKeyFromEntry, buildFingerprintIndex, dockerImageArg, gradeServer, readConfiguredServers, FINGERPRINT_GRADES, FINGERPRINT_REASONS } from "../identity/fingerprint";
+import { artifactKeyFromEntry, artifactKeyFromLaunch, buildFingerprintIndex, dockerImageArg, gradeServer, readConfiguredServers, FINGERPRINT_GRADES, FINGERPRINT_REASONS } from "../identity/fingerprint";
 import {
   isKernelVerified,
   requestKernelApproval,
@@ -34,7 +34,7 @@ import {
 import { RECOMMEND_PLATFORMS, TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, type RecommendPlatform } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
 import { CLIENT_COMMANDS, PROJECT_KEY_PATTERN, artifactIdentitySchema, entryKeyOf } from "../lifecycle/state";
-import { configEntryDigest, identityFromPinnedArtifact, tomlBlockDigest } from "../lifecycle/status";
+import { configEntryDigest, identityFromPinnedArtifact, standardEntries, tomlBlockDigest } from "../lifecycle/status";
 import { projectKeyFor, readLifecycleState, type StateErrorCode } from "../lifecycle/store";
 
 /**
@@ -212,6 +212,39 @@ export function representAdoptEntry(client: InstallClient, entry: unknown, serve
 
 const KIND_OF: Record<InstallBackend, "npm-package" | "python-package" | "container-image"> = { npx: "npm-package", uvx: "python-package", docker: "container-image" };
 
+/** 실행 인자에서 artifact(package·image) token의 위치. 찾지 못하면 -1. */
+function artifactIndex(backend: InstallBackend, command: string, args: readonly string[]): number {
+  const offset = command === "cmd" ? 3 : 0;
+  const rest = args.slice(offset);
+  const spec = backend === "npx" ? npxArtifact(rest)?.spec : backend === "uvx" ? uvxArtifact(rest)?.spec : (dockerImageArg(rest) ?? undefined);
+  if (spec === undefined) return -1;
+  const i = rest.indexOf(spec);
+  return i === -1 ? -1 : i + offset;
+}
+
+/**
+ * (v0.2.1 P0-6) 설정 항목의 command·args가 Registry가 검토한 표준 실행 인자(standardEntries)와 같은지.
+ * artifact token 하나만 다를 수 있고 그것도 같은 package·image여야 한다. Manifest가 버전을 고정했으면 버전도 같아야 한다.
+ * 옵션 추가(--registry·--index-url·추가 인자)·누락(--readOnly·--read-only·--access-mode)·변경은 모두 불일치다. 값은 결과에 넣지 않는다.
+ */
+export function matchesReviewedLaunch(manifest: RegistryEntry["manifest"], client: InstallClient, rep: Extract<Representation, { ok: true }>, platform: RecommendPlatform): boolean {
+  // cmd wrapper 항목은 Windows 표준 형식과, 그 밖의 항목은 wrapper 없는 표준 형식과 비교한다(Windows에서도 npx를 직접 쓰는 항목이 있다).
+  const launchPlatform: RecommendPlatform = rep.clientSpec.command === "cmd" ? "windows" : platform === "windows" ? "linux" : platform;
+  const args = rep.clientSpec.args;
+  const at = artifactIndex(rep.backend, rep.clientSpec.command, args);
+  if (at === -1) return false;
+  const key = artifactKeyFromLaunch(rep.clientSpec.command, args);
+  return standardEntries(manifest, client, launchPlatform).some((std) => {
+    if (std.command !== rep.clientSpec.command || std.args.length !== args.length) return false;
+    if (artifactIndex(rep.backend, std.command, std.args) !== at) return false;
+    if (args.some((a, i) => i !== at && a !== std.args[i])) return false;
+    if (key === null || artifactKeyFromLaunch(std.command, std.args) !== key) return false;
+    const stdRest = std.command === "cmd" ? std.args.slice(3) : std.args;
+    const stdRef: ArtifactRef | null = rep.backend === "npx" ? npxArtifact(stdRest) : rep.backend === "uvx" ? uvxArtifact(stdRest) : { spec: std.args[at]!, unambiguous: true };
+    return !isPinnedArtifact(rep.backend, stdRef) || std.args[at] === args[at];
+  });
+}
+
 /**
  * config·Version State·Registry를 읽어 AdoptPlan을 만든다. 실행 직전 재생성도 같은 함수를 쓴다.
  * network·spawn·write 0회. 대상 항목이 없으면 Plan을 만들지 않는다(ADOPT_TARGET_NOT_FOUND).
@@ -290,6 +323,12 @@ export async function planAdopt(options: AdoptPlanOptions): Promise<AdoptPlanRes
     const rep = representAdoptEntry(options.client, value, name, fileText, eol);
     if (!rep.ok) blockers.push({ code: "ADOPT_ENTRY_UNSUPPORTED", message: rep.reason });
     else {
+      if (!matchesReviewedLaunch(manifest, options.client, rep, options.platform)) {
+        blockers.push({
+          code: "ADOPT_ENTRY_UNSUPPORTED",
+          message: "설정의 실행 인자가 Registry에서 검토한 인자와 다릅니다(옵션 추가·누락·변경, 다른 package 출처 또는 검토하지 않은 버전). 관리 대상으로 등록하지 않습니다",
+        });
+      }
       backend = rep.backend;
       launch = { platform: rep.clientSpec.command === "cmd" ? "windows" : options.platform, clientSpec: rep.clientSpec };
       const pinned = isPinnedArtifact(rep.backend, rep.ref);

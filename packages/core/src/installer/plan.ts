@@ -312,6 +312,13 @@ export interface PlanTargetInput {
   file: string;
   envReference: EnvReferenceStyle;
   precondition: { exists: boolean; fileDigest: string | null; keyAbsent: boolean; entryDigest?: string };
+  /** (v0.2.1) project 대상이 사용자 범위 설정 파일(userFile, 논리 경로)과 같은 파일이다. Plan에는 복사하지 않고 blocker로만 쓴다. */
+  userConfigOverlap?: { userFile: string };
+}
+
+/** (v0.2.1) project 대상이 사용자 범위 설정 파일과 같을 때의 안내(논리 경로만). */
+export function projectUserOverlapMessage(projectFile: string, userFile: string): string {
+  return projectFile + ": 이 프로젝트 폴더의 설정 파일이 사용자 범위 설정 파일(" + userFile + ")과 같은 파일입니다. 프로젝트 범위로 쓰면 승인 없이 사용자 설정이 바뀌므로 막았습니다. 사용자 범위(user-scope-config 승인)로 설치하세요";
 }
 
 export interface PlanAssemblyInput {
@@ -387,6 +394,7 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
 
   const blockers = [...input.blockers];
   if (alias === undefined) blockers.push({ code: "NO_CANONICAL_ALIAS", message: "Registry에 canonical MCP alias가 없어 Client 설정을 만들 수 없습니다" });
+  for (const t of input.targets) if (t.userConfigOverlap !== undefined) blockers.push({ code: "PROJECT_TARGET_IS_USER_CONFIG", message: projectUserOverlapMessage(t.file, t.userConfigOverlap.userFile) });
   const targets: PlanTarget[] = [...input.targets]
     .sort((a, b) => CLIENT_ORDER[a.client] - CLIENT_ORDER[b.client] || SCOPE_ORDER[a.scope] - SCOPE_ORDER[b.scope])
     .map((t) => ({ client: t.client, scope: t.scope, file: t.file, serverName: alias ?? toolId, precondition: { ...t.precondition }, envReference: t.envReference }));
@@ -402,7 +410,9 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
     else blockers.push({ code: "CONFIG_KEY_EXISTS", message: `${t.file}에 이미 ${t.serverName} 항목이 있습니다` });
   }
   const writable = targets.filter((t) => t.envReference !== "manual");
-  const writeTargets = writable.filter((t) => !unchanged.has(t.client + ":" + t.scope));
+  // (v0.2.1) 사용자 설정과 겹치는 project 대상은 쓰지 않는다(쓸 단계도 만들지 않는다). 이 대상이 있으면 "이미 설치됨"으로도 보지 않는다.
+  const overlapping = new Set(input.targets.filter((t) => t.userConfigOverlap !== undefined).map((t) => t.client + ":" + t.scope));
+  const writeTargets = writable.filter((t) => !unchanged.has(t.client + ":" + t.scope) && !overlapping.has(t.client + ":" + t.scope));
   // v0.2.0 tool config: 쓸 Client 설정의 scope마다 OpenHub 관리 파일 1개. 상태를 모르면 막는다(승인 전 확인 필수).
   const reviewed = REVIEWED_TOOL_CONFIGS[manifest.name];
   const usesToolConfig = manifest.toolConfig !== undefined && input.launch !== null && input.launch.args.includes(TOOL_CONFIG_PLACEHOLDER);
@@ -423,7 +433,7 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
   const toolConfigBroken = blockers.some((b) => b.code === "TOOL_CONFIG_UNREADABLE" || b.code === "TOOL_CONFIG_MISSING" || b.code === "TOOL_CONFIG_DRIFT");
   // 고른 대상이 모두 같은 항목으로 이미 설정돼 있으면 "이미 설치됨"이다(대상 단위). 도구 전체 설치 여부(Recommendation)로 판단하지 않는다.
   // tool config Tool은 그 관리 파일도 정상이어야 한다.
-  const installed = writable.length > 0 && writeTargets.length === 0 && !toolConfigBroken;
+  const installed = writable.length > 0 && writeTargets.length === 0 && !toolConfigBroken && overlapping.size === 0;
   if (usesToolConfig && writeTargets.length > 0) {
     // 실제로 쓸 대상의 scope만(변경 없는 대상의 tool config는 건드리지 않는다).
     const scopes = [...new Set(writeTargets.map((t) => t.scope))].sort((a, b) => SCOPE_ORDER[a] - SCOPE_ORDER[b]);
