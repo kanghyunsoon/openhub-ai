@@ -47,14 +47,16 @@ export const ADOPT_BLOCKER_EN: Readonly<Record<AdoptBlockerCode, string>> = {
   ADOPT_IDENTITY_UNRESOLVED: "OpenHub could not identify this entry as a Registry tool (unresolved).",
   ADOPT_IDENTITY_MISMATCH: "This entry is identified as a different Registry tool.",
   ADOPT_ALREADY_MANAGED: "This entry is already managed in Version State.",
-  ADOPT_ENTRY_UNSUPPORTED: "OpenHub cannot represent this entry for adopt (for example a file where OpenHub reads only server names, D-003).",
+  ADOPT_ENTRY_UNSUPPORTED:
+    "OpenHub cannot adopt this entry: either OpenHub cannot represent it (for example a file where OpenHub reads only server names, D-003), or its launch arguments differ from the arguments reviewed in the Registry (added, missing or changed options, another package source, or an unreviewed version).",
 };
 
 export const BENCHMARK_BLOCKER_EN: Readonly<Record<BenchmarkBlockerCode, string>> = {
   BENCHMARK_NOT_MANAGED: "There is no entry managed in Version State. Install or adopt the tool before running Benchmark.",
   BENCHMARK_ARTIFACT_UNLOCKED: "The artifact is not pinned (artifact-unlocked), so repeated runs are not guaranteed to use the same artifact. Pin it with update first.",
   BENCHMARK_CONFIG_DRIFT: "The configuration entry differs from Version State (config-drift or missing-config).",
-  BENCHMARK_UNSUPPORTED: "Only tools checked with an MCP stdio handshake can be benchmarked (Pinokio, HTTP and similar are excluded).",
+  BENCHMARK_UNSUPPORTED:
+    "This tool cannot be benchmarked: only tools checked with an MCP stdio handshake are supported (Pinokio, HTTP and similar are excluded), and tools that use an OpenHub server policy file (tool config) are not supported because Benchmark does not verify and pass that file.",
   BENCHMARK_ARTIFACT_MISMATCH: "The launch arguments do not contain the artifact pinned in Version State.",
 };
 

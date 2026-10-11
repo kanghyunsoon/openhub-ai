@@ -1,6 +1,7 @@
 // v0.2.0 RC 결과 판정기. packaged-rc.mjs run이 쓴 결과 JSON을 읽어 RC 통과 여부를 정한다(fail-closed).
 // - 필수 단계(3~14)는 모두 PASS여야 한다. 단계 1·2·15는 workflow 단계가 직접 실패를 낸다.
 // - FAIL인 단계·check, errors 항목, 빠진 단계, 알 수 없는 상태, 실패 주입 흔적은 모두 실패다.
+// - (v0.2.1) 필수 check ID 집합(OS별)이 정확히 있어야 한다. 빈 checks, 빠진 필수 check, 모르는 이름(오타 포함)은 모두 실패다.
 // - NOT-RUN 단계는 실패다. 세부 NOT-RUN 항목(notRun[])은 아래 허용 목록에 있는 id·단계·OS일 때만 허용하고 기록한다.
 // 사용: node scripts/rc/check-rc-result.mjs <result.json> [--os windows|linux]
 import { readFileSync } from "node:fs";
@@ -9,6 +10,16 @@ import { fileURLToPath } from "node:url";
 
 export const REQUIRED_STEPS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
 const STATUSES = new Set(["PASS", "FAIL", "NOT-RUN"]);
+
+/**
+ * 하네스(packaged-rc.mjs)가 OS마다 반드시 기록하는 check ID. 하네스에 check를 더하거나 빼면 이 표와 테스트를 함께 바꾼다.
+ * Linux만 OS 언어를 바꿀 수 있어 한국어 첫 실행 check가 있다(Windows는 NOT-RUN 허용 목록).
+ * @type {Readonly<Record<"windows" | "linux", readonly string[]>>}
+ */
+export const REQUIRED_CHECKS = Object.freeze({
+  windows: Object.freeze(["reject-writes-nothing", "plan-stale-blocks-and-keeps-external-change", "kubernetes-secret-denied-configmap-read-no-token", "kubernetes-reviewed-tool-config", "kubernetes-only-0.0.67", "health-failure-compensation"]),
+  linux: Object.freeze(["reject-writes-nothing", "plan-stale-blocks-and-keeps-external-change", "kubernetes-secret-denied-configmap-read-no-token", "kubernetes-reviewed-tool-config", "kubernetes-only-0.0.67", "health-failure-compensation", "first-start-follows-os-korean"]),
+});
 
 /**
  * 실제로 수행할 수 없어 기록만 하는 세부 항목. 여기에 없는 NOT-RUN은 RC 실패다.
@@ -21,7 +32,7 @@ export const ALLOWED_NOT_RUN = Object.freeze({
 
 /**
  * @param {unknown} result packaged-rc.mjs run 결과(JSON.parse 값)
- * @param {{ os?: string; requiredSteps?: readonly number[]; allowedNotRun?: typeof ALLOWED_NOT_RUN }} [options]
+ * @param {{ os?: string; requiredSteps?: readonly number[]; allowedNotRun?: typeof ALLOWED_NOT_RUN; requiredChecks?: typeof REQUIRED_CHECKS }} [options]
  * @returns {{ ok: boolean; failures: string[]; notRunRecorded: { id: string; step: number; reason: string }[] }}
  */
 export function checkRcResult(result, options = {}) {
@@ -31,6 +42,7 @@ export function checkRcResult(result, options = {}) {
   const notRunRecorded = [];
   const requiredSteps = options.requiredSteps ?? REQUIRED_STEPS;
   const allowed = options.allowedNotRun ?? ALLOWED_NOT_RUN;
+  const requiredChecks = options.requiredChecks ?? REQUIRED_CHECKS;
   if (!isRecord(result)) return { ok: false, failures: ["result is not an object"], notRunRecorded };
   const os = result["os"];
   if (os !== "windows" && os !== "linux") failures.push("os: expected windows or linux, got " + JSON.stringify(os));
@@ -51,7 +63,14 @@ export function checkRcResult(result, options = {}) {
 
   const checks = result["checks"];
   if (!isRecord(checks)) failures.push("checks: missing");
-  else for (const [name, c] of Object.entries(checks)) if (!isRecord(c) || c["status"] !== "PASS") failures.push("check " + name + ": " + (isRecord(c) ? String(c["status"]) : "malformed"));
+  else {
+    const expected = os === "windows" || os === "linux" ? requiredChecks[os] : [];
+    for (const name of expected) if (!Object.hasOwn(checks, name)) failures.push("check " + name + ": missing");
+    for (const [name, c] of Object.entries(checks)) {
+      if (!expected.includes(name)) failures.push("check " + name + ": unknown check id");
+      else if (!isRecord(c) || c["status"] !== "PASS") failures.push("check " + name + ": " + (isRecord(c) ? String(c["status"]) : "malformed"));
+    }
+  }
 
   const errors = result["errors"];
   if (!Array.isArray(errors)) failures.push("errors: missing");

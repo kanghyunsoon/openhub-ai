@@ -317,6 +317,7 @@ export const en = {
   "install.configChange.none": "not written",
   "install.dialog.title": "OpenHub install approval",
   "install.dialog.message": "Approve the {name} install plan?",
+  "install.dialog.project": "Project: {name} (project-scope files are written in this folder)",
   "install.dialog.approve": "Approve install",
   "install.platformUnsupported": "Installation is not supported on this operating system",
   "install.manifestRejected": "The Manifest did not pass the install policy",

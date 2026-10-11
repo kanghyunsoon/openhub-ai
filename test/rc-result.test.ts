@@ -3,14 +3,15 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { ALLOWED_NOT_RUN, REQUIRED_STEPS, checkRcResult } from "../scripts/rc/check-rc-result.mjs";
+import { ALLOWED_NOT_RUN, REQUIRED_CHECKS, REQUIRED_STEPS, checkRcResult } from "../scripts/rc/check-rc-result.mjs";
 
 /** v0.2.0 RC 결과 판정기(fail-closed). 예전 하네스는 FAIL이 있어도 종료 코드 0이었다. */
 const ROOT = path.resolve(import.meta.dirname, "..");
-const pass = (os = "windows") => ({
+const pass = (os: "windows" | "linux" = "windows") => ({
   os,
   steps: Object.fromEntries(REQUIRED_STEPS.map((n) => [String(n), { status: "PASS", evidence: {} }])),
-  checks: { "reject-writes-nothing": { status: "PASS", evidence: {} } } as Record<string, unknown>,
+  // 하네스가 그 OS에서 기록하는 필수 check 전부(v0.2.1).
+  checks: Object.fromEntries(REQUIRED_CHECKS[os].map((id) => [id, { status: "PASS", evidence: {} }])) as Record<string, unknown>,
   notRun: [] as unknown[],
   errors: [] as unknown[],
 });
@@ -32,8 +33,40 @@ describe("checkRcResult", () => {
 
   it("C: FAIL인 check가 있으면 실패", () => {
     const r = pass();
-    r.checks["plan-stale"] = { status: "FAIL", evidence: {} };
-    expect(checkRcResult(r)).toMatchObject({ ok: false, failures: ["check plan-stale: FAIL"] });
+    r.checks["plan-stale-blocks-and-keeps-external-change"] = { status: "FAIL", evidence: {} };
+    expect(checkRcResult(r)).toMatchObject({ ok: false, failures: ["check plan-stale-blocks-and-keeps-external-change: FAIL"] });
+  });
+
+  it("C2 (v0.2.1): 빈 checks, 빠진 필수 check, 오타·모르는 check 이름은 Windows·Linux 모두 실패", () => {
+    for (const os of ["windows", "linux"] as const) {
+      expect(checkRcResult({ ...pass(os), checks: {} }, { os }).failures, os).toEqual(REQUIRED_CHECKS[os].map((id) => "check " + id + ": missing"));
+      const missing = pass(os);
+      delete missing.checks["health-failure-compensation"];
+      expect(checkRcResult(missing, { os }).failures).toEqual(["check health-failure-compensation: missing"]);
+      const typo = pass(os);
+      delete typo.checks["reject-writes-nothing"];
+      typo.checks["reject-writes-nothin"] = { status: "PASS" };
+      expect(checkRcResult(typo, { os }).failures).toEqual(["check reject-writes-nothing: missing", "check reject-writes-nothin: unknown check id"]);
+      const extra = pass(os);
+      extra.checks["something-else"] = { status: "PASS" };
+      expect(checkRcResult(extra, { os }).failures).toEqual(["check something-else: unknown check id"]);
+      expect(checkRcResult({ ...pass(os), checks: undefined }, { os }).failures).toEqual(["checks: missing"]);
+    }
+    // 한국어 첫 실행 check는 Linux 필수, Windows에서는 기록되지 않는다(NOT-RUN 허용 목록).
+    const linux = pass("linux");
+    delete linux.checks["first-start-follows-os-korean"];
+    expect(checkRcResult(linux, { os: "linux" }).failures).toEqual(["check first-start-follows-os-korean: missing"]);
+    const windows = pass("windows");
+    windows.checks["first-start-follows-os-korean"] = { status: "PASS" };
+    expect(checkRcResult(windows, { os: "windows" }).failures).toEqual(["check first-start-follows-os-korean: unknown check id"]);
+    expect(REQUIRED_CHECKS.windows).toEqual(["reject-writes-nothing", "plan-stale-blocks-and-keeps-external-change", "kubernetes-secret-denied-configmap-read-no-token", "kubernetes-reviewed-tool-config", "kubernetes-only-0.0.67", "health-failure-compensation"]);
+    expect(REQUIRED_CHECKS.linux).toEqual([...REQUIRED_CHECKS.windows, "first-start-follows-os-korean"]);
+  });
+
+  it("C3 (v0.2.1): 필수 check 목록은 하네스가 실제로 기록하는 check 이름과 같다", () => {
+    const harness = readFileSync(path.join(ROOT, "scripts/rc/packaged-rc.mjs"), "utf8");
+    const recorded = [...harness.matchAll(/\bcheck\(\s*"([a-z0-9.-]+)"/gu)].map((m) => m[1]);
+    expect([...new Set(recorded)].sort()).toEqual([...REQUIRED_CHECKS.linux].sort());
   });
 
   it("D: 오류가 기록되어 있으면 실패", () => {

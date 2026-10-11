@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { mkdir, rm, stat } from "node:fs/promises";
+import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -71,6 +71,30 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || electronBin === null)("v0.
     const race = await launch("en-US", "cursor", "claude-code");
     expect(race.code).toBe(0);
     expect(race.install).toMatchObject({ status: "succeeded", dialogs: 1, targets: [".cursor/mcp.json · cursor · project scope"], configChanges: [".cursor/mcp.json (project scope): written"] });
+  }, 120_000);
+
+  it("v0.2.1 P0-1: [프로젝트 선택](B) 직후 B 분석이 끝나기 전 A 추천의 설치를 진행해도 A·B 모두 쓰기 0, 대화상자 0, 현재 프로젝트는 B", async () => {
+    const b = path.join(scratch, "project-b-src");
+    await mkdir(b, { recursive: true });
+    await writeFile(path.join(b, "README.md"), "# notes only\n");
+    await writeFile(path.join(b, ".mcp.json"), '{ "mcpServers": {} }\n');
+    const out = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+      const env: Record<string, string> = { ...(process.env as Record<string, string>), OPENHUB_SMOKE_USER_DATA: path.join(scratch, "ud-switch-race"), OPENHUB_SMOKE_SYSTEM_LOCALE: "en-US", OPENHUB_SMOKE_PROJECT: path.join(ROOT, "examples", "demo-project"), OPENHUB_SMOKE_INSTALL: "serena", OPENHUB_SMOKE_SWITCH_RACE: "serena", OPENHUB_SMOKE_PROJECT_B: b };
+      for (const k of ["ELECTRON_RUN_AS_NODE", "OPENHUB_SMOKE_UPDATE", "OPENHUB_SMOKE_REPAIR", "OPENHUB_SMOKE_RELEASE", "OPENHUB_SMOKE_ADOPT", "OPENHUB_SMOKE_HOME", "OPENHUB_SMOKE_I18N_SWITCH", "OPENHUB_SCREENSHOT", "OPENHUB_SMOKE_INSTALL_CLIENTS", "OPENHUB_SMOKE_INSTALL_RACE", "OPENHUB_SMOKE_USER_SCOPE"]) delete env[k];
+      const child = spawn(electronBin!, [".", "--smoke"], { cwd: DESKTOP, env, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
+      child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+      child.on("close", (code) => resolve({ code, stdout, stderr }));
+    });
+    const line = out.stdout.split("\n").find((l) => l.startsWith("OPENHUB_SMOKE "));
+    if (line === undefined) throw new Error("smoke 결과 없음: " + out.stderr.slice(-1500));
+    const race = (JSON.parse(line.slice("OPENHUB_SMOKE ".length)) as { switchRace: { install: string; aUnchanged: boolean; bUnchanged: boolean; currentIsB: boolean; dialogs: number; staleDuring: boolean; staleAfter: boolean; projectName: string } }).switchRace;
+    expect(out.code, JSON.stringify(race)).toBe(0);
+    expect(race).toMatchObject({ aUnchanged: true, bUnchanged: true, currentIsB: true, dialogs: 0, staleDuring: true, staleAfter: false, projectName: "project-b" });
+    expect(race.install).not.toBe("succeeded");
+    console.log("switch race: " + JSON.stringify(race));
   }, 120_000);
 });
 
