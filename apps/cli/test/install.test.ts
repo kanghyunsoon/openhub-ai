@@ -90,7 +90,7 @@ describe("REQ-034 CLI openhub install", () => {
     const linux = await install(["postgres-mcp", "--client", "claude-code", "--client", "codex"], { answers: ["n"] });
     expect(linux.code).toBe(1);
     const text = previewOf(linux);
-    for (const part of ["Backend      uvx", "Client 실행 명령  uvx --from postgres-mcp --with mcp==1.30.0 postgres-mcp --access-mode=restricted", ".mcp.json (Claude Code, 프로젝트 범위)", ".codex/config.toml (Codex, 프로젝트 범위)", "DATABASE_URI", "충돌         없음", "Warnings", "설치 상태    프로젝트 범위 기준 미설치", "검사 범위    프로젝트", "Plan digest  sha256:"]) {
+    for (const part of ["Backend      uvx", "Client 실행 명령  uvx --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted", "uv cache에 설치하고 네트워크 없이 다시 확인합니다", ".mcp.json (Claude Code, 프로젝트 범위)", ".codex/config.toml (Codex, 프로젝트 범위)", "DATABASE_URI", "충돌         없음", "Warnings", "설치 상태    프로젝트 범위 기준 미설치", "검사 범위    프로젝트", "Plan digest  sha256:"]) {
       expect(text).toContain(part);
     }
     await golden("preview-postgres-linux.txt", text);
@@ -123,7 +123,8 @@ describe("REQ-034 CLI openhub install", () => {
   });
 
   it("AC-035-03 추가 승인 항목마다 따로 y/N을 묻고 하나라도 거절하면 중단한다", async () => {
-    const r = await install(["postgres-mcp", "--client", "claude-code"], { answers: ["y", "n"] });
+    // v0.2.1: postgres-mcp가 정확한 버전으로 고정돼 floating 항목이 없으므로, floating + 필수 env인 github-mcp-server(docker tag)로 확인한다.
+    const r = await install(["github-mcp-server", "--client", "claude-code"], { answers: ["y", "n"] });
     expect(r.code).toBe(1);
     expect(r.questions).toHaveLength(2);
     expect(r.questions.every((q) => q.includes("(y/N)"))).toBe(true);
@@ -184,7 +185,8 @@ describe("REQ-034 CLI openhub install", () => {
   it("AC-035-08 출력에 env 값·절대 경로가 0건이다", async () => {
     const secret = "postgresql://admin:Sup3r-Secret@db.internal:5432/app";
     vi.stubEnv("DATABASE_URI", secret);
-    const r = await install(["postgres-mcp", "--client", "claude-code", "--client", "cursor"], { answers: ["y", "y", "postgres-mcp"] });
+    // v0.2.1: postgres-mcp는 정확한 버전이라 floating 승인 없이 client-env-parse-risk 하나만 묻는다.
+    const r = await install(["postgres-mcp", "--client", "claude-code", "--client", "cursor"], { answers: ["y", "postgres-mcp"] });
     expect(r.code).toBe(0);
     for (const line of [...r.stdout, ...r.stderr]) {
       expect(line).not.toContain("Sup3r-Secret");
@@ -209,11 +211,12 @@ describe("REQ-034 CLI openhub install", () => {
   });
 
   it("AC-035-10 floating 고지문과 env 안내문을 표시하고 floating-artifact·client-env-parse-risk를 각각 따로 확인받는다", async () => {
-    const r = await install(["postgres-mcp", "--client", "claude-code"], { answers: ["y", "y", "postgres-mcp"] });
+    // v0.2.1: floating + 필수 env 예시는 github-mcp-server(docker tag)다(postgres-mcp는 정확한 버전으로 고정됨).
+    const r = await install(["github-mcp-server", "--client", "claude-code"], { answers: ["y", "y", "github-mcp-server"] });
     expect(r.code).toBe(0);
     const out = r.stdout.join("\n");
     expect(out).toContain("이 설치 계획은 실행 명령과 설정을 고정하지만, 원격 패키지 내용 자체는 고정하지 않습니다. 동일한 계획을 나중에 실행하면 다른 artifact가 내려올 수 있습니다.");
-    expect(out).toContain("이 도구는 실행 시 DATABASE_URI 환경변수가 필요합니다. OpenHub는 값이나 설정 여부를 확인하거나 저장하지 않습니다.");
+    expect(out).toContain("이 도구는 실행 시 GITHUB_PERSONAL_ACCESS_TOKEN 환경변수가 필요합니다. OpenHub는 값이나 설정 여부를 확인하거나 저장하지 않습니다.");
     expect(r.questions.filter((q) => q.includes("(y/N)"))).toHaveLength(2);
     expect(r.stdout.filter((l) => l.startsWith("[floating-artifact]") || l.startsWith("[client-env-parse-risk]"))).toHaveLength(2);
     expect(out).toContain("status: unchecked");

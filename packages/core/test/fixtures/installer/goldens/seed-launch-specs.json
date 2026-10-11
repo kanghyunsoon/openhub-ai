@@ -166,7 +166,7 @@
       "launch": {
         "args": [
           "--from",
-          "postgres-mcp",
+          "postgres-mcp==0.3.0",
           "--with",
           "mcp==1.30.0",
           "postgres-mcp",
@@ -175,7 +175,7 @@
         "clientSpec": {
           "args": [
             "--from",
-            "postgres-mcp",
+            "postgres-mcp==0.3.0",
             "--with",
             "mcp==1.30.0",
             "postgres-mcp",
@@ -195,14 +195,14 @@
       "launch": {
         "args": [
           "--from",
-          "serena-agent",
+          "serena-agent==1.7.0",
           "serena",
           "start-mcp-server"
         ],
         "clientSpec": {
           "args": [
             "--from",
-            "serena-agent",
+            "serena-agent==1.7.0",
             "serena",
             "start-mcp-server"
           ],
@@ -397,7 +397,7 @@
       "launch": {
         "args": [
           "--from",
-          "postgres-mcp",
+          "postgres-mcp==0.3.0",
           "--with",
           "mcp==1.30.0",
           "postgres-mcp",
@@ -406,7 +406,7 @@
         "clientSpec": {
           "args": [
             "--from",
-            "postgres-mcp",
+            "postgres-mcp==0.3.0",
             "--with",
             "mcp==1.30.0",
             "postgres-mcp",
@@ -426,14 +426,14 @@
       "launch": {
         "args": [
           "--from",
-          "serena-agent",
+          "serena-agent==1.7.0",
           "serena",
           "start-mcp-server"
         ],
         "clientSpec": {
           "args": [
             "--from",
-            "serena-agent",
+            "serena-agent==1.7.0",
             "serena",
             "start-mcp-server"
           ],

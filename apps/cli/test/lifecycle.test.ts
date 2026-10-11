@@ -189,7 +189,8 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 CLI lifecycle", () => {
     expect(await windows.run(["update", "memory-mcp"], { answer: () => "n", platform: "win32" })).toBe(1);
     await golden("update-preview-windows.txt", preview(lastStdout));
     const pg = await installed("postgres-mcp", ["claude-code"]);
-    expect(await pg.run(["update", "postgres-mcp", "--skip-health"], { answer: () => "n" })).toBe(1);
+    // v0.2.1: postgres Manifest는 0.3.0으로 고정돼 있어 새 정확한 버전을 지정한다(--to).
+    expect(await pg.run(["update", "postgres-mcp", "--to", "0.3.1", "--skip-health"], { answer: () => "n" })).toBe(1);
     await golden("update-preview-skip-health.txt", preview(lastStdout));
   });
 
@@ -262,10 +263,10 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 CLI lifecycle", () => {
     const s = await installed("postgres-mcp", ["claude-code", "codex"]);
     s.out.length = 0;
     expect(await s.run(["lifecycle", "status", "--check"])).toBe(0);
-    expect(await s.run(["update", "postgres-mcp"])).toBe(0);
+    expect(await s.run(["update", "postgres-mcp", "--to", "0.3.1"])).toBe(0);
     expect(await s.run(["lifecycle", "health", "postgres-mcp"])).toBe(0);
     expect(await s.run(["rollback", "postgres-mcp"], { health: "unhealthy" })).toBe(1);
-    expect(await s.run(["update", "postgres-mcp", "--json"], { tty: false })).toBe(0);
+    expect(await s.run(["update", "postgres-mcp", "--to", "0.3.1", "--json"], { tty: false })).toBe(0);
     for (const line of s.out) {
       expect(line).not.toContain("Cli-Lifecycle-Secret");
       expect(containsAbsolutePath(line), line).toBe(false);

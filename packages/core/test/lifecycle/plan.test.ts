@@ -192,13 +192,14 @@ describe("REQ-040 LifecyclePlan v1·Approval·PLAN_STALE", () => {
 
     const pg = await createHarness(scratch, { entries: seed });
     await installed(pg, "postgres-mcp", [{ client: "claude-code", scope: "project" }]);
-    const pgOptions = options(pg, { toolId: "postgres-mcp" });
+    // v0.2.1: postgres Manifest가 0.3.0으로 고정돼 있어 새 정확한 버전을 지정한다(--to). 정확한 버전이라 uvx Prepare(run)가 앞에 온다.
+    const pgOptions = options(pg, { toolId: "postgres-mcp", to: "0.3.1" });
     const required = planned(await planLifecycle(pgOptions)).plan;
     expect(required.approvalRequirements).toEqual(["base", "health-execution", "environment-unverified"]);
-    expect(required.target.clientSpec).toEqual({ command: "uvx", args: ["--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"] });
+    expect(required.target.clientSpec).toEqual({ command: "uvx", args: ["--from", "postgres-mcp==0.3.1", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"] });
     const skipped = planned(await planLifecycle({ ...pgOptions, skipHealth: true })).plan;
     expect(skipped.approvalRequirements).toEqual(["base", "environment-unverified", "health-gate-skipped"]);
-    expect([skipped.healthPolicy.gate, skipped.steps.map((s) => s.kind)]).toEqual(["skipped-by-approval", ["config-replace", "state-commit"]]);
+    expect([skipped.healthPolicy.gate, skipped.steps.map((s) => s.kind)]).toEqual(["skipped-by-approval", ["run", "config-replace", "state-commit"]]);
     expect(skipped.warnings).toContainEqual({ code: "health-gate-skipped", message: HEALTH_GATE_SKIP_NOTICE });
 
     const user = await createHarness(scratch, { entries: seed });

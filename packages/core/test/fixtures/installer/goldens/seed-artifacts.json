@@ -43,14 +43,14 @@
   },
   "postgres-mcp": {
     "kind": "python-package",
-    "pinned": false,
-    "preparation": "launch-on-demand",
-    "spec": "postgres-mcp"
+    "pinned": true,
+    "preparation": "uv-cache",
+    "spec": "postgres-mcp==0.3.0"
   },
   "serena": {
     "kind": "python-package",
-    "pinned": false,
-    "preparation": "launch-on-demand",
-    "spec": "serena-agent"
+    "pinned": true,
+    "preparation": "uv-cache",
+    "spec": "serena-agent==1.7.0"
   }
 }

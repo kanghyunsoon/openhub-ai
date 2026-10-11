@@ -136,10 +136,10 @@ describe("REQ-036 Agent Client Config Writer", () => {
     const before = Buffer.from(original, "utf8");
     expect(after.subarray(0, before.length).equals(before)).toBe(true);
     const doc = parseToml(after.toString("utf8")) as Record<string, any>;
-    expect(doc["mcp_servers"]["postgres"]).toEqual({ command: "uvx", args: ["--from", "postgres-mcp", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"], env_vars: ["DATABASE_URI"] });
+    expect(doc["mcp_servers"]["postgres"]).toEqual({ command: "uvx", args: ["--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"], env_vars: ["DATABASE_URI"] });
     expect(doc["mcp_servers"]["other"]).toEqual({ command: "node", args: ["a.js"] });
     expect(doc["profiles"]).toEqual({ fast: { model_reasoning_effort: "low" } });
-    expect(after.subarray(before.length).toString("utf8")).toBe('\n\n[mcp_servers.postgres]\ncommand = "uvx"\nargs = ["--from", "postgres-mcp", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]\nenv_vars = ["DATABASE_URI"]\n');
+    expect(after.subarray(before.length).toString("utf8")).toBe('\n\n[mcp_servers.postgres]\ncommand = "uvx"\nargs = ["--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]\nenv_vars = ["DATABASE_URI"]\n');
   });
 
   it("AC-032-03 덧붙인 TOML이 기존 형식과 충돌하면 쓰지 않는다", async () => {

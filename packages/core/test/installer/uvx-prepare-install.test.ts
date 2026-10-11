@@ -70,9 +70,9 @@ describe("uvx Prepare: 설치 계획", () => {
     expect(HEALTH_TIMEOUTS.startupMs).toBe(20_000);
   });
 
-  it("고정되지 않은 uvx(현재 Registry), --with가 떠 있는 경우, 다른 uv 플래그가 앞에 있는 경우는 준비하지 않는다", async () => {
+  it("고정되지 않은 uvx(v0.2.0 Manifest), --with가 떠 있는 경우, 다른 uv 플래그가 앞에 있는 경우는 준비하지 않는다", async () => {
     for (const [entries, pinnedExpected] of [
-      [seed, false],
+      [withPostgres({ command: "uvx postgres-mcp --access-mode=restricted" }), false],
       [withPostgres({ command: "uvx --from postgres-mcp==0.3.0 --with mcp postgres-mcp" }), false],
       [withPostgres({ command: "uvx --python 3.12 --from postgres-mcp==0.3.0 postgres-mcp" }), false],
     ] as const) {

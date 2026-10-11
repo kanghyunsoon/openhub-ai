@@ -52,7 +52,7 @@
       "installationStatus": "not-installed",
       "primaryCapability": null
     },
-    "registryDigest": "sha256:f1ed7a173826e98a8294250b652d9255809aa596e99223432048e07c6ec2135d"
+    "registryDigest": "sha256:f87f779a587e11799f4c9945031270f76b1ecfa1baaafd2baf4aba47d8d274c7"
   },
   "status": "installable",
   "steps": [

@@ -13,7 +13,14 @@ requirements:
 install:
   preferredAdapter: uvx
   options:
-    command: "uvx --from serena-agent serena start-mcp-server"
+    # v0.2.1: 검토한 정확한 버전으로 고정해 uvx Prepare를 켠다(docs/specs/uvx-prepare.md D2·D3).
+    # 의존성 proxy-tools 0.1.0은 PyPI에 wheel이 없어(Windows·Linux 실측) 소스 빌드가 필요하다. 그 한 패키지만 검토된 목록에 적고,
+    # 설치 계획은 source-build 승인과 제3자 빌드 코드 고지를 요구한다. 목록에 없는 소스 빌드는 하지 않는다(--no-build 기본, 자동 전환 없음).
+    command: "uvx --from serena-agent==1.7.0 serena start-mcp-server"
+    prepare:
+      build: source-build-reviewed
+      sourceBuild:
+        - { package: proxy-tools, version: 0.1.0, source: pypi-sdist }
   fallback:
     - adapter: uv
       package: serena-agent

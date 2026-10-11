@@ -12,14 +12,23 @@ afterAll(() => rm(scratch, { recursive: true, force: true }));
 afterEach(() => vi.unstubAllGlobals());
 
 describe("REQ-035 Post-install Verification", () => {
-  it("AC-034-01 Prepared: npx·uvx는 spawn 0회로 launch-on-demand, docker는 pull 성공 시 pulled", async () => {
-    for (const toolId of ["memory-mcp", "serena"]) {
+  it("AC-034-01 Prepared: floating npx는 spawn 0회로 launch-on-demand, 정확한 버전 uvx는 uvx Prepare 뒤 cached, docker는 pull 성공 시 pulled", async () => {
+    {
       const h = await createHarness(scratch, { entries: seed });
-      const request = h.request(toolId, [{ client: "claude-code", scope: "project" }]);
+      const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
       const p = await plannedOf(h, request);
       const result = await runInstallTransaction(p, await approveAll(p), request, h.env);
-      expect(result.verification?.prepared, toolId).toBe("launch-on-demand");
+      expect(result.verification?.prepared).toBe("launch-on-demand");
       expect(h.spawns).toEqual([]);
+    }
+    {
+      // v0.2.1: serena는 serena-agent==1.7.0으로 고정돼 uvx Prepare(검토된 소스 빌드)와 offline 확인 뒤 설정을 쓴다.
+      const h = await createHarness(scratch, { entries: seed });
+      const request = h.request("serena", [{ client: "claude-code", scope: "project" }]);
+      const p = await plannedOf(h, request);
+      const result = await runInstallTransaction(p, await approveAll(p), request, h.env);
+      expect(result.verification?.prepared).toBe("cached");
+      expect(h.spawns.map((s) => s[0])).toEqual(["uvx", "uvx"]);
     }
     const h = await createHarness(scratch, { entries: seed });
     const request = h.request("github-mcp-server", [{ client: "cursor", scope: "project" }]);

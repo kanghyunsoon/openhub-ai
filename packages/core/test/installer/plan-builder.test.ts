@@ -162,7 +162,8 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     const uvx = planned(buildInstallPlan({ toolId: "postgres-mcp", entries: seed, report: reportFor(postgresProfile(), seed), probes: ALL_AVAILABLE, targets: [target("claude-code"), target("codex")], platform: "linux" })).plan;
     const docker = planned(build("github-mcp-server", { targets: [target("cursor")] })).plan;
     expect(npx.steps.map((s) => s.kind)).toEqual(["config-patch"]);
-    expect(uvx.steps.map((s) => s.kind)).toEqual(["config-patch", "config-patch"]);
+    // v0.2.1: postgres-mcp는 정확한 버전이라 uvx Prepare(run) 뒤에 설정을 쓴다.
+    expect(uvx.steps.map((s) => s.kind)).toEqual(["run", "config-patch", "config-patch"]);
     expect(docker.steps.map((s) => s.kind)).toEqual(["run", "config-patch"]);
     await expectInstallerGolden("representative-steps.json", json({ npx: npx.steps, uvx: uvx.steps, docker: docker.steps }));
   });
@@ -204,8 +205,9 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     expect(Object.values(seedArtifacts).every((a) => a !== null)).toBe(true);
     // v0.2.0 P0-2: mongodb-mcp-server는 npx pkg@X.Y.Z로 고정한 첫 seed다(npx Prepare 대상). 나머지 7개는 그대로 floating이다.
     // v0.2.0 P0-3: kubernetes-mcp-server도 kubernetes-mcp-server@0.0.67로 고정한다(검토된 toolConfig 버전).
+    // v0.2.1: postgres-mcp(0.3.0 + mcp 1.30.0)·serena(serena-agent 1.7.0)를 검토된 정확한 버전으로 고정한다(uvx Prepare 대상).
     const pinnedIds = SEED_IDS.filter((id) => seedArtifacts[id]!.pinned);
-    expect(pinnedIds).toEqual(["kubernetes-mcp-server", "mongodb-mcp-server"]);
+    expect(pinnedIds).toEqual(["kubernetes-mcp-server", "mongodb-mcp-server", "postgres-mcp", "serena"]);
     for (const id of SEED_IDS) {
       const requirements = planned(build(id)).plan.approvalRequirements;
       if (pinnedIds.includes(id)) expect(requirements, id).not.toContain("floating-artifact");
