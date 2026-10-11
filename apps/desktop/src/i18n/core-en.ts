@@ -111,6 +111,8 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   STATE_PATH_ESCAPE: "The Version State path points outside the OpenHub state directory.",
   STATE_WRITE_FAILED: "Version State could not be written. The previous state was kept.",
   STATE_CONFLICT: "Version State was changed by another process, so it was not overwritten.",
+  OPERATION_IN_PROGRESS: "Another OpenHub operation is in progress (for example an update waiting for Health). Nothing was changed. Try again when it finishes.",
+  OPERATION_LOCK_FAILED: "OpenHub could not create its operation lock in the state folder, so nothing was run or changed.",
   UP_TO_DATE: "The tool is already at the target version.",
 };
 

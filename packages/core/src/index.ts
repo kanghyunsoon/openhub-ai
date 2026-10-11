@@ -23,6 +23,7 @@ export * from "./installer/verify";
 export * from "./installer/preview";
 export * from "./lifecycle/state";
 export * from "./lifecycle/store";
+export * from "./lifecycle/lock";
 export * from "./lifecycle/status";
 export * from "./lifecycle/resolver";
 export * from "./lifecycle/plan";

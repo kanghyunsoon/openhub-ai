@@ -12,6 +12,7 @@ import { canonicalize, type ConfigPatchStep, type ConfigScope, type InstallClien
 import { buildInstallPlan, type PlanBuildResult } from "./plan-builder";
 import { installResultSchema, preparedStateOf, type InstallResultV1, type InstallVerification } from "./result";
 import { projectKeyFromRealpath } from "../lifecycle/state";
+import { withOperationLock } from "../lifecycle/store";
 import {
   ToolConfigError,
   inspectToolConfig,
@@ -213,8 +214,19 @@ export const basicVerifier: InstallVerifier = async ({ verified, request, steps,
 
 const CONFIG_RETRYABLE: Readonly<Record<string, boolean>> = { CONFIG_WRITE_FAILED: true, CONFIG_KEY_EXISTS: false, CONFIG_PATH_ESCAPE: false, MANUAL_SETUP_REQUIRED: false, CONFIG_UNPARSEABLE: false, USER_SCOPE_NOT_APPROVED: false };
 
-/** 승인된 Plan을 실행한다. 승인이 없거나 Plan이 바뀌었으면 아무것도 실행하지 않는다. */
+/**
+ * 승인된 Plan을 실행한다. 승인이 없거나 Plan이 바뀌었으면 아무것도 실행하지 않는다.
+ * (v0.2.1 B) 승인이 있는 실행은 작업 잠금(operation.lock) 안에서 한다. 다른 OpenHub 작업(update의 Health 대기 등)이 진행 중이면
+ * 아무것도 바꾸지 않고 failed / OPERATION_IN_PROGRESS다.
+ */
 export async function runInstallTransaction(planned: PlannedInstall, approval: InstallApproval | undefined, request: InstallRequest, env: InstallEnvironment): Promise<InstallResultV1> {
+  if (approval === undefined || planned.plan.status === "already-installed") return runInstallLocked(planned, approval, request, env);
+  const locked = await withOperationLock({ homeDir: request.homeDir, purpose: "install", ...(env.configFs === undefined ? {} : { fs: env.configFs }) }, () => runInstallLocked(planned, approval, request, env));
+  if (locked.ok) return locked.value;
+  return notExecuted(planned, "failed", locked.code, locked.code === "OPERATION_IN_PROGRESS", { nextActions: [locked.message] });
+}
+
+async function runInstallLocked(planned: PlannedInstall, approval: InstallApproval | undefined, request: InstallRequest, env: InstallEnvironment): Promise<InstallResultV1> {
   const trace = env.trace ?? (() => undefined);
   trace("approval-check");
   if (planned.plan.status === "already-installed") {

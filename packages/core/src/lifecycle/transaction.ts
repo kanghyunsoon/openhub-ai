@@ -37,7 +37,7 @@ import { lifecycleResultSchema, type LifecycleResultStatus, type LifecycleResult
 import { entryKeyOf, type LastHealth, type ToolState, type ToolStateCore } from "./state";
 import type { LifecycleStateFile } from "./state";
 import { configEntryDigest, tomlBlockDigest } from "./status";
-import { LIFECYCLE_STATE_LOGICAL_PATH, commitLifecycleState, projectKeyFor, readLifecycleState } from "./store";
+import { LIFECYCLE_STATE_LOGICAL_PATH, commitLifecycleState, projectKeyFor, readLifecycleState, withOperationLock } from "./store";
 
 /**
  * Update transaction(TASK-043, D-019·D-020). 순서:
@@ -185,8 +185,21 @@ const healthOf = (r: HealthCheckResult, at: Date | null): NonNullable<LifecycleR
   checkedAt: at === null ? null : at.toISOString(),
 });
 
-/** 승인된 LifecyclePlan을 실행한다. 승인이 없거나 Plan이 바뀌었으면 아무것도 실행하지 않는다. */
+/**
+ * 승인된 LifecyclePlan을 실행한다. 승인이 없거나 Plan이 바뀌었으면 아무것도 실행하지 않는다.
+ * (v0.2.1 B) 승인이 있는 실행은 작업 잠금(operation.lock) 안에서 실행 직전 재검증부터 Version State commit까지 한다.
+ * 다른 OpenHub 작업(다른 Tool의 install·health 포함)이 진행 중이면 아무것도 바꾸지 않고 OPERATION_IN_PROGRESS다.
+ */
 export async function runLifecycleTransaction(planned: PlannedLifecycle, approval: LifecycleApproval | undefined, request: LifecycleRequest, env: LifecycleEnvironment): Promise<LifecycleResultV1> {
+  if (approval === undefined || approval.planDigest !== planned.planDigest || planned.plan.status === "up-to-date") return runLocked(planned, approval, request, env);
+  const locked = await withOperationLock({ homeDir: request.homeDir, purpose: "lifecycle-" + planned.plan.operation, ...(env.configFs === undefined ? {} : { fs: env.configFs }) }, () =>
+    runLocked(planned, approval, request, env),
+  );
+  if (locked.ok) return locked.value;
+  return finalize({ planned, status: "config-failed", code: locked.code, retryable: locked.code === "OPERATION_IN_PROGRESS", nextActions: [locked.message] });
+}
+
+async function runLocked(planned: PlannedLifecycle, approval: LifecycleApproval | undefined, request: LifecycleRequest, env: LifecycleEnvironment): Promise<LifecycleResultV1> {
   const trace = env.trace ?? (() => undefined);
   trace("approval-check");
   if (planned.plan.status === "up-to-date") return finalize({ planned, status: "up-to-date", code: "UP_TO_DATE", retryable: false, nextActions: ["이미 같은 버전입니다. 바꾼 것이 없습니다"] });

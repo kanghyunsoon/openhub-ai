@@ -1,8 +1,9 @@
+import { randomBytes } from "node:crypto";
 import { readFile, rm, utimes, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
-  STATE_LOCK_STALE_MS,
   commitLifecycleState,
   lifecycleStatus,
   planLifecycleRequest,
@@ -30,6 +31,8 @@ const scratch = await newScratch("v021-state-concurrency");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 
 const named = (serverName: string) => toolState({ target: { client: "claude-code", scope: "project", file: ".mcp.json", serverName, projectName: "demo", projectKey: "0123456789abcdef" } });
+/** 이 머신에 없는 pid(프로세스 번호 상한 근처). process.kill(pid, 0)이 ESRCH다. */
+const DEAD_PID = 2_147_483_000;
 
 describe("v0.2.1 P0-4 Version State 동시 커밋", () => {
   it("같은 digest로 동시에 커밋하면 정확히 하나만 성공하고 나머지는 STATE_CONFLICT이며 성공한 내용이 파일에 남는다", async () => {
@@ -58,22 +61,28 @@ describe("v0.2.1 P0-4 Version State 동시 커밋", () => {
     expect([a.ok, b.ok].filter(Boolean).length).toBe(names.length);
   });
 
-  it("강제 종료로 남은 오래된 잠금은 회수하고, 새 잠금은 기다린 뒤 STATE_CONFLICT로 포기한다(쓰기 0)", async () => {
+  it("죽은 pid가 남긴 잠금은 회수하고, 살아 있는 소유자의 잠금은 오래됐어도 지우지 않고 STATE_CONFLICT로 포기한다(쓰기 0)", async () => {
     const home = await homeIn(scratch);
     const first = await commitLifecycleState(stateOf(), null, { homeDir: home });
     if (!first.ok) throw new Error(first.code);
     const lock = path.join(home, ".openhub", "state", "lifecycle.json.lock");
-    await writeFile(lock, "99999 2026-10-01T00:00:00.000Z\n");
-    const old = new Date(Date.now() - STATE_LOCK_STALE_MS - 5_000);
-    await utimes(lock, old, old);
+    const record = (pid: number, host = os.hostname()) => JSON.stringify({ token: randomBytes(16).toString("hex"), pid, host, purpose: "state-commit", startedAt: new Date().toISOString() }) + "\n";
+    // 존재하지 않는 pid(강제 종료로 남은 잠금): 방금 만든 잠금이어도 회수한다.
+    await writeFile(lock, record(DEAD_PID));
     const stale = await commitLifecycleState(stateOf(named("after-stale")), first.digest, { homeDir: home });
     expect(stale.ok).toBe(true);
 
-    const before = await readFile(path.join(home, ".openhub", "state", "lifecycle.json"), "utf8");
-    await writeFile(lock, "1 now\n");
-    const busy = await commitLifecycleState(stateOf(named("busy")), stale.ok ? stale.digest : null, { homeDir: home });
-    expect(busy).toMatchObject({ ok: false, code: "STATE_CONFLICT" });
-    expect(await readFile(path.join(home, ".openhub", "state", "lifecycle.json"), "utf8")).toBe(before);
+    const stateFile = path.join(home, ".openhub", "state", "lifecycle.json");
+    const before = await readFile(stateFile, "utf8");
+    const hour = new Date(Date.now() - 3_600_000);
+    for (const [why, content] of [["살아 있는 pid, 1시간 전", record(process.pid)], ["다른 host", record(DEAD_PID, "another-host.invalid")]] as const) {
+      await writeFile(lock, content);
+      await utimes(lock, hour, hour);
+      const busy = await commitLifecycleState(stateOf(named("busy")), stale.ok ? stale.digest : null, { homeDir: home });
+      expect(busy, why).toMatchObject({ ok: false, code: "STATE_CONFLICT" });
+      expect(await readFile(stateFile, "utf8"), why).toBe(before);
+      expect(await readFile(lock, "utf8"), why).toBe(content); // 남의 잠금은 그대로
+    }
     await rm(lock);
   }, 30_000);
 });
