@@ -4,7 +4,7 @@ import path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { WINDOWS_CMD_EXTRA_METACHARACTERS, tokenizeManifestCommand } from "./command";
 import { NPX_CLI_PLACEHOLDER, TOOL_CONFIG_PLACEHOLDER, planFormOfEntry } from "../tool-config/index";
-import { canonicalize, entryPlanDigest, type ApprovalRequirement, type ConfigPatchStep, type ConfigScope, type EnvReferenceStyle, type InstallClient, type PlanTargetInput, type ServerEntry } from "./plan";
+import { canonicalize, entryPlanDigest, projectUserOverlapMessage, type ApprovalRequirement, type ConfigPatchStep, type ConfigScope, type EnvReferenceStyle, type InstallClient, type PlanTargetInput, type ServerEntry } from "./plan";
 
 /**
  * Agent Client Config Writer(TASK-032, D-013·D-014).
@@ -100,7 +100,7 @@ export interface ConfigRoots {
   fs?: ConfigFs;
 }
 
-export type ConfigErrorCode = "MANUAL_SETUP_REQUIRED" | "CONFIG_KEY_EXISTS" | "CONFIG_UNPARSEABLE" | "CONFIG_PATH_ESCAPE" | "CONFIG_WRITE_FAILED" | "USER_SCOPE_NOT_APPROVED";
+export type ConfigErrorCode = "MANUAL_SETUP_REQUIRED" | "CONFIG_KEY_EXISTS" | "CONFIG_UNPARSEABLE" | "CONFIG_PATH_ESCAPE" | "CONFIG_WRITE_FAILED" | "USER_SCOPE_NOT_APPROVED" | "PROJECT_TARGET_IS_USER_CONFIG";
 
 export class ConfigWriteError extends Error {
   constructor(
@@ -118,8 +118,46 @@ const sameOrInside = (child: string, parent: string) => {
 };
 const isMissing = (error: unknown) => typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";
 
+/** 실제 위치: 가장 가까운 존재하는 상위 경로를 realpath로 풀고 나머지를 붙인다(없는 파일도 같은 규칙). Windows는 대소문자를 구분하지 않는다. */
+async function physicalPath(file: string, fs: ConfigFs): Promise<string | null> {
+  let current = path.resolve(file);
+  const rest: string[] = [];
+  for (;;) {
+    try {
+      const real = await fs.realpath(current);
+      const full = path.join(real, ...rest.reverse());
+      return process.platform === "win32" ? full.toLowerCase() : full;
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return null;
+      rest.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+/**
+ * (v0.2.1) project 범위 대상 파일이 같은 Client의 사용자 범위 설정 파일과 실제로 같은 파일인가(프로젝트 폴더가 home이거나 home을 가리키는
+ * symlink·junction일 때). 그렇다면 project 범위로 쓰면 user-scope-config 승인 없이 사용자 설정이 바뀐다. Claude Code는 project(.mcp.json)와
+ * user(~/.claude.json, OpenHub가 쓰지 않음) 파일이 달라 겹치지 않는다.
+ */
+export async function projectTargetIsUserConfig(client: InstallClient, roots: Pick<ConfigRoots, "projectRoot" | "homeDir">, fs: ConfigFs): Promise<boolean> {
+  const project = configTargetFor(client, "project");
+  const user = configTargetFor(client, "user");
+  if (!project.writable || !user.writable) return false;
+  const [a, b] = await Promise.all([
+    physicalPath(path.join(path.resolve(roots.projectRoot), ...project.relative.split("/")), fs),
+    physicalPath(path.join(path.resolve(roots.homeDir), ...user.relative.split("/")), fs),
+  ]);
+  return a !== null && a === b;
+}
+
 /** root 기준 절대 경로와, 대상·상위 디렉터리가 root 밖으로 해석되지 않는지 확인한다. */
 export async function resolveInside(target: WritableTarget, roots: ConfigRoots, fs: ConfigFs): Promise<{ file: string; root: string }> {
+  // project 범위 쓰기가 사용자 설정 파일을 가리키면(home = 프로젝트 등) 어떤 경로로도 쓰지 않는다(계획 단계에서 막히지만 실행 단계에서도 다시 막는다).
+  if (target.scope === "project" && (await projectTargetIsUserConfig(target.client, roots, fs))) {
+    throw new ConfigWriteError("PROJECT_TARGET_IS_USER_CONFIG", projectUserOverlapMessage(target.logical, configTargetFor(target.client, "user").logical));
+  }
   const root = path.resolve(target.scope === "user" ? roots.homeDir : roots.projectRoot);
   const file = path.join(root, ...target.relative.split("/"));
   let realRoot: string;
@@ -208,6 +246,10 @@ export async function inspectConfigTarget(client: InstallClient, scope: ConfigSc
   const target = configTargetFor(client, scope);
   if (!target.writable) return { client, scope, file: target.logical, envReference: "manual", precondition: { exists: false, fileDigest: null, keyAbsent: true } };
   const fs = roots.fs ?? nodeConfigFs;
+  // 사용자 설정과 겹치는 project 대상은 읽지 않고 표시만 한다(계획이 PROJECT_TARGET_IS_USER_CONFIG로 막는다).
+  if (scope === "project" && (await projectTargetIsUserConfig(client, roots, fs))) {
+    return { client, scope, file: target.logical, envReference: target.envReference, precondition: { exists: false, fileDigest: null, keyAbsent: true }, userConfigOverlap: { userFile: configTargetFor(client, "user").logical } };
+  }
   const { file } = await resolveInside(target, roots, fs);
   const bytes = await readOptional(fs, file);
   let keyAbsent = true;

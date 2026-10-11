@@ -112,8 +112,22 @@ const smokeUserScope =
           },
         },
       });
-/** 스모크 사용자 범위의 프로젝트 이동: OPENHUB_SMOKE_PROJECT_B가 있으면 두 번째 [프로젝트 선택]부터 그 폴더를 고른다. */
-const smokeProjectB = smokeUserScopeTool === undefined ? undefined : process.env["OPENHUB_SMOKE_PROJECT_B"] || undefined;
+/**
+ * 스모크 프로젝트 전환 경쟁(v0.2.1 P0-1): --smoke + 스모크 설치 + OPENHUB_SMOKE_SWITCH_RACE(toolId) + OPENHUB_SMOKE_PROJECT_B.
+ * 실제 창에서 [프로젝트 선택](B)을 누르고 B 분석이 끝나기 전에 화면에 남은 A 추천의 설치 흐름을 진행한다. A·B 모두 쓰기 0이어야 한다.
+ * B도 임시 복사본을 쓴다(가짜 probe·executor·자동 확인 대화상자는 스모크 설치와 같다).
+ */
+const smokeSwitchRace = smokeInstall === undefined ? undefined : process.env["OPENHUB_SMOKE_SWITCH_RACE"] || undefined;
+/** 스모크 프로젝트 이동: OPENHUB_SMOKE_PROJECT_B가 있으면 두 번째 [프로젝트 선택]부터 그 폴더를 고른다(사용자 범위 스모크·전환 경쟁 스모크). */
+const smokeProjectBSource = smokeUserScopeTool === undefined && smokeSwitchRace === undefined ? undefined : process.env["OPENHUB_SMOKE_PROJECT_B"] || undefined;
+const smokeProjectB =
+  smokeProjectBSource === undefined || smokeSwitchRace === undefined || smokeProject === undefined
+    ? smokeProjectBSource
+    : (() => {
+        const copy = path.join(path.dirname(smokeProject), "project-b");
+        cpSync(smokeProjectBSource, copy, { recursive: true });
+        return copy;
+      })();
 let smokePicks = 0;
 const smokePicker = smokeProject === undefined ? undefined : smokeProjectB === undefined ? fixedDirectory(smokeProject) : async () => (smokePicks++ === 0 ? smokeProject : smokeProjectB);
 registerProjectScan(recommendSession.observe(ipcMain), installSession.trackPicker(smokePicker ?? electronDirectoryPicker(dialog)));
@@ -263,7 +277,7 @@ async function createWindow(): Promise<void> {
       // 추천 진단(v0.2.0 C3): FOR YOU 화면에 실제로 그려진 진단·검증 문장을 기록한다.
       const forYou = recommendations === undefined ? undefined : ((await win.webContents.executeJavaScript("window.__openhubForYouDiagnosis()")) as { status: string; emptyReason: string; lines: string[]; verification: string[] });
       const install =
-        smokeInstall === undefined || recommendations === undefined
+        smokeInstall === undefined || recommendations === undefined || smokeSwitchRace !== undefined
           ? undefined
           : ((await win.webContents.executeJavaScript(
               "window.__openhubInstall(" +
@@ -360,6 +374,28 @@ async function createWindow(): Promise<void> {
               const hidden = (await js("window.__openhubUserScopeOff(" + JSON.stringify(smokeUserScopeTool) + ")")) as { pressed: string; entries: { state: string; buttons: number; warning: string }[] };
               return { install, health1, corrupted, repairFailed, compensated, repair, health2, moved, hidden, dialogs: smokeUserScopeDialogs, healthRuns: smokeUserScope?.healthRuns ?? 0 };
             })();
+      // 스모크 프로젝트 전환 경쟁(v0.2.1 P0-1): [프로젝트 선택](B) 클릭과 동시에 A 추천의 설치 흐름을 진행한다(사람의 클릭과 같은 경로).
+      const switchRace =
+        smokeSwitchRace === undefined || smokeProject === undefined || smokeProjectB === undefined || recommendations === undefined
+          ? undefined
+          : await (async () => {
+              const files = async () => Promise.all([smokeProject, smokeProjectB].map((d) => readFile(path.join(d, ".mcp.json"), "utf8").catch(() => null)));
+              const before = await files();
+              const dialogsBefore = smokeDeps?.dialogs ?? 0;
+              const r = (await win.webContents.executeJavaScript(
+                "(async () => { const reselect = window.__openhubReselectProject(); const staleDuring = document.getElementById('for-you').classList.contains('project-stale'); const res = await window.__openhubInstall(" +
+                  JSON.stringify(smokeSwitchRace) +
+                  ", null); await reselect; return { install: res.status, staleDuring, staleAfter: document.getElementById('for-you').classList.contains('project-stale'), projectName: (document.querySelector('#project-body .project-name') || {}).textContent || '' }; })()",
+              )) as { install: string; staleDuring: boolean; staleAfter: boolean; projectName: string };
+              const after = await files();
+              return {
+                ...r,
+                aUnchanged: after[0] === before[0],
+                bUnchanged: after[1] === before[1],
+                currentIsB: installSession.projectDir === smokeProjectB,
+                dialogs: (smokeDeps?.dialogs ?? 0) - dialogsBefore,
+              };
+            })();
       const release =
         smokeReleaseTool === undefined || update === undefined
           ? undefined
@@ -385,6 +421,7 @@ async function createWindow(): Promise<void> {
         await writeFile(screenshot, (await win.webContents.capturePage()).toPNG());
       }
       const installOk = install === undefined || install.status === "succeeded";
+      const switchRaceOk = switchRace === undefined || (switchRace.install !== "succeeded" && switchRace.aUnchanged && switchRace.bUnchanged && switchRace.currentIsB && switchRace.dialogs === 0 && switchRace.staleDuring && !switchRace.staleAfter);
       const updateOk = update === undefined || update.status === "updated";
       const exactOk =
         exact === undefined ||
@@ -424,6 +461,7 @@ async function createWindow(): Promise<void> {
           onboarding,
           ...(project === undefined ? {} : { project, recommendations, forYou }),
           ...(install === undefined ? {} : { install: { ...install, spawned: smokeDeps?.spawned.length ?? 0, dialogs: smokeDeps?.dialogs ?? 0, configFiles } }),
+          ...(switchRace === undefined ? {} : { switchRace }),
           ...(update === undefined ? {} : { update: { ...update, fetched: smokeLifecycle?.fetched.length ?? 0, healthRuns: smokeLifecycle?.healthRuns ?? 0, spawned: smokeLifecycle?.spawned.length ?? 0, dialogs: smokeLifecycle?.dialogs ?? 0 } }),
           ...(exact === undefined ? {} : { exact: { ...exact, fetched: smokeLifecycle?.fetched.length ?? 0, healthRuns: smokeLifecycle?.healthRuns ?? 0, dialogs: smokeLifecycle?.dialogs ?? 0 } }),
           ...(rollbackChain === undefined ? {} : { rollbackChain: { ...rollbackChain, healthRuns: smokeLifecycle?.healthRuns ?? 0, npmCalls: (smokeLifecycle?.spawned ?? []).map((c) => c.slice(1).join(" ")), installNpmCalls: (smokeDeps?.spawned ?? []).map((c) => c.slice(1).join(" ")) } }),
@@ -436,7 +474,7 @@ async function createWindow(): Promise<void> {
           i18n,
         })}\n`,
         // pipe로 받는 쪽(release dry-run)이 결과 줄을 놓치지 않도록 stdout에 다 쓴 뒤에 종료한다(TASK-072, Linux AppImage에서 확인).
-        () => app.exit(count > 0 && (project === undefined || project > 0) && repairOk && adoptOk && userScopeOk && rollbackOk && exactOk && i18nOk && installOk && updateOk && releaseOk && onboardingOk && discoverOk ? 0 : 1),
+        () => app.exit(count > 0 && (project === undefined || project > 0) && repairOk && adoptOk && userScopeOk && rollbackOk && exactOk && switchRaceOk && i18nOk && installOk && updateOk && releaseOk && onboardingOk && discoverOk ? 0 : 1),
       );
     } catch (error) {
       process.stderr.write(`OPENHUB_SMOKE_FAILED ${String(error)}\n`);
