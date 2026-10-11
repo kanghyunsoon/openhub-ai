@@ -105,6 +105,7 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   USER_SCOPE_NOT_APPROVED: "The user-scope configuration change (user-scope-config) was not approved.",
   CONFIG_WRITE_FAILED: "The configuration file could not be changed. The original file was kept.",
   CONFIG_RESTORE_FAILED: "The original configuration could not be fully restored. Check the configuration file before trying again.",
+  MANIFEST_UNAVAILABLE: "The Registry Manifest could not be read, so Health was not run. Changed configuration was restored and Version State was not changed. Check the OpenHub installation and approve a new plan.",
   RESOLUTION_INVALID: "The exact artifact version could not be resolved.",
   STATE_INVALID: "Version State has an invalid format.",
   STATE_CORRUPT: "Version State could not be read (the file is damaged). OpenHub does not overwrite it.",

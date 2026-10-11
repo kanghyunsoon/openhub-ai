@@ -180,12 +180,22 @@ describe("REQ-051 Registry CI", () => {
     expect(md).not.toContain("someone");
   });
 
-  it("AC-054-08 remote workflow는 workflow_dispatch·schedule만 trigger이고 실패가 PR required check가 아니다", async () => {
-    const wf = parseYaml(await readFile(path.join(REPO_ROOT, ".github/workflows/registry-remote.yml"), "utf8")) as { on: Record<string, unknown>; jobs: Record<string, { "continue-on-error"?: boolean; steps: { run?: string; env?: Record<string, string> }[] }> };
+  it("AC-054-08(v0.2.1 개정) remote workflow는 workflow_dispatch·schedule만 trigger이고 PR required check가 아니다. sandbox job은 실패를 숨기지 않고 remote job만 참고성 검사다", async () => {
+    const wf = parseYaml(await readFile(path.join(REPO_ROOT, ".github/workflows/registry-remote.yml"), "utf8")) as {
+      on: Record<string, unknown>;
+      jobs: Record<string, { "continue-on-error"?: boolean; steps: { run?: string; if?: string; env?: Record<string, string>; uses?: string; with?: Record<string, string> }[] }>;
+    };
     expect(Object.keys(wf.on).sort()).toEqual(["schedule", "workflow_dispatch"]);
-    for (const job of Object.values(wf.jobs)) expect(job["continue-on-error"]).toBe(true);
+    expect(wf.jobs["remote"]!["continue-on-error"]).toBe(true);
+    expect(wf.jobs["sandbox"]!["continue-on-error"]).toBeUndefined();
     const sandbox = wf.jobs["sandbox"]!.steps.find((s) => s.env?.["OPENHUB_E2E"] === "1");
     expect(sandbox?.run).toContain("sandbox.e2e.test.ts");
+    // 의도한 실패는 수동 입력 inject_failure=true일 때만(일정 실행·기본 수동 실행에서는 빈 값).
+    expect(sandbox?.env?.["OPENHUB_E2E_INJECT_FAILURE"]).toBe("${{ inputs.inject_failure == true && '1' || '' }}");
+    // 실패해도 보고서는 남긴다.
+    const reportSteps = wf.jobs["sandbox"]!.steps.filter((s) => s.run?.includes("sandbox-report.ts") || s.with?.["name"] === "sandbox-report");
+    expect(reportSteps.length).toBe(2);
+    for (const s of reportSteps) expect(s.if).toBe("always()");
     const ci = await readFile(path.join(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
     expect(ci).not.toContain("registry:remote");
     expect(ci).not.toContain("OPENHUB_E2E");
