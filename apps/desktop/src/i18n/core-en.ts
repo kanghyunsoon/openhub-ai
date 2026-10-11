@@ -73,7 +73,8 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   TOOL_CONFIG_MISSING: "The tool config is missing (tool-config-missing). Recreate it with repair.",
   TOOL_CONFIG_DRIFT: "The tool config differs from what OpenHub recorded (tool-config-drift). Recreate it with repair.",
   TOOL_CONFIG_REJECTED: "The tool config was rejected by OpenHub's reviewed policy.",
-  TOOL_CONFIG_UNKNOWN: "This tool config is not on OpenHub's reviewed list.",
+  // 설치 계획에서만 쓰인다: 쓸 scope의 tool config 현재 상태를 안전하게 확인하지 못했다(위치·link·권한). "검토 목록에 없음"이 아니다.
+  TOOL_CONFIG_UNKNOWN: "The current state of the tool config could not be checked safely, so the plan is blocked. Nothing was written.",
   TOOL_CONFIG_VERSION_UNREVIEWED: "The target version has no reviewed tool config, so it is blocked.",
   NOTHING_TO_REPAIR: "The tool config and client configuration match Version State; there is nothing to repair.",
   REPAIR_UNSUPPORTED: "Repair is only for tools that use an OpenHub-managed tool config.",
@@ -171,6 +172,13 @@ function perItemEn(plan: AnyPlan, code: string): string[] | null | undefined {
   if (code === "required-env" || code === "environment-unverified") return requiredNames(plan).map((n) => requiredEnvEn([n]));
   if (code === "manual-setup-required") return plan.targets.filter((x) => "envReference" in x && x.envReference === "manual").map((t) => clientName(t.client) + " " + t.scope + " configuration (" + t.file + ") is not written by OpenHub. Set it up yourself.");
   if (code === "CONFIG_KEY_EXISTS") return isInstall(plan) ? plan.targets.filter((x) => installTargetChange(plan, x) === "conflict").map((t) => t.file + " already has a " + t.serverName + " entry; OpenHub does not overwrite it.") : null;
+  if (code === "TOOL_CONFIG_UNKNOWN") {
+    // Core는 쓸 대상의 scope마다(project → user) 상태를 확인하지 못한 scope 하나씩 경고를 만든다(그 scope에는 tool-config 단계가 없다).
+    if (!isInstall(plan)) return null;
+    const withStep = new Set(plan.steps.filter((s) => s.kind === "tool-config").map((s) => (s.kind === "tool-config" ? s.scope : "")));
+    const scopes = (["project", "user"] as const).filter((sc) => plan.targets.some((t) => t.scope === sc && installTargetChange(plan, t) === "add") && !withStep.has(sc));
+    return scopes.map((sc) => "The current state of the " + sc + "-scope tool config could not be checked safely, so the plan is blocked. Nothing was written.");
+  }
   if (code === "client-launch-unverified" || code === "platform-unverified") {
     const platform = isInstall(plan) ? plan.launch?.platform : plan.platform;
     if (platform === undefined) return null;

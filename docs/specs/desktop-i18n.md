@@ -78,6 +78,8 @@ The same rule applies to lifecycle result warnings and Adopt/Benchmark errors.
 
 ## Known limitation (Fact)
 
+Fixed translation (v0.2.0): `TOOL_CONFIG_UNKNOWN` was shown in English as "This tool config is not on OpenHub's reviewed list." Core uses the code in one place only, the install plan, when the current state of the managed tool config for a scope that would be written could not be checked safely (location, link or permissions); the Korean Core text already said that. The English text is now per scope ("The current state of the project-scope tool config could not be checked safely, so the plan is blocked. Nothing was written."). A regression test checks the Core Korean text, the per-scope English lines, and that the English sentences of all `TOOL_CONFIG_*` codes are distinct and only `TOOL_CONFIG_REJECTED` and `TOOL_CONFIG_VERSION_UNREVIEWED` mention review.
+
 The Desktop update smoke (`OPENHUB_SMOKE_UPDATE`) used a fake spawner that exited 0 without creating an npx cache entry, so npx tools stopped at npx Prepare verification (`preparation-failed`). This was a test-environment gap, not an update failure. Resolved in the follow-up pull request (`test/npx-lifecycle-smoke`): install, update and rollback smokes now share `smokeNpmSpawner`, which meets the npx Prepare cache contract; `OPENHUB_SMOKE_ROLLBACK=1` adds rollback and Health. Covered: npx install → update (Prepare) → Health → rollback → Health in the real window, and exact-version npx install Prepare → update Prepare → Health → rollback → Health at IPC level.
 
 ## Open Questions

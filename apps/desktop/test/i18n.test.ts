@@ -8,8 +8,11 @@ import {
   LIFECYCLE_APPROVAL_REQUIREMENTS,
   REASON_CODES,
   REVIEWED_TOOL_CONFIGS,
+  analyzeProject,
+  buildInstallPlan,
   loadRegistry,
   projectKeyFromRealpath,
+  recommend,
   recordInstallInState,
   runInstallTransaction,
   toolConfigLocation,
@@ -24,6 +27,7 @@ import type { NativeDialogLike } from "../src/install";
 import { LIFECYCLE_PLAN_CHANNELS, LIFECYCLE_RUN_CHANNEL, LIFECYCLE_STATUS_CHANNEL, LifecycleSession, projectChangedMessage, registerLifecycle, type LifecyclePlanResponse, type LifecycleRunResponse, type LifecycleStatusResponse } from "../src/lifecycle";
 import { buildForYouView } from "../src/for-you-view";
 import { approveAll, createHarness, plannedOf } from "../../../packages/core/test/installer/harness";
+import { ALL_AVAILABLE } from "../../../packages/core/test/installer/helpers";
 import { fakeNpmSpawner } from "../../../packages/core/test/process/fake-npm";
 
 /**
@@ -298,6 +302,34 @@ describe("v0.2.0 PR B English 표시(실제 Plan·IPC 결과)", () => {
     expect(lines).toContain("  - .mcp.json already has a playwright entry; OpenHub does not overwrite it.");
     expect(lines).not.toContain(".cursor/mcp.json already has");
     expect(lines).toContain("Already configured for another client or scope");
+  });
+
+  it("TOOL_CONFIG_UNKNOWN은 'tool config 현재 상태를 확인하지 못함'이다(검토 목록과 무관). scope마다 한 줄이고 다른 TOOL_CONFIG_* 문장과 섞이지 않는다", async () => {
+    const analysis = await analyzeProject(path.join(ROOT, "packages/core/test/fixtures/projects/k8s-deploy"));
+    if (!analysis.ok) throw new Error("analysis");
+    const report = recommend(analysis.profile, entries, undefined, { platform: "linux" });
+    const none = { exists: false, fileDigest: null, keyAbsent: true };
+    // tool config 상태(toolConfigs)를 넘기지 않으면 Core는 쓸 scope마다 TOOL_CONFIG_UNKNOWN으로 막는다.
+    const built = buildInstallPlan({ toolId: "kubernetes-mcp-server", entries, report, probes: ALL_AVAILABLE, platform: "linux", targets: [
+      { client: "cursor", scope: "project", file: ".cursor/mcp.json", envReference: "cursor-env", precondition: none },
+      { client: "cursor", scope: "user", file: "~/.cursor/mcp.json", envReference: "cursor-env", precondition: none },
+    ] });
+    if (!built.ok) throw new Error(built.code);
+    const unknown = built.planned.plan.warnings.filter((w) => w.code === "TOOL_CONFIG_UNKNOWN");
+    expect(built.planned.plan.status).toBe("blocked");
+    // 한국어(Core 원문)는 원래 뜻 그대로다.
+    expect(unknown.map((w) => w.message)).toEqual(["project 범위 tool config 상태를 확인하지 못했습니다", "user 범위 tool config 상태를 확인하지 못했습니다"]);
+    const english = warningsEn(built.planned.plan, unknown);
+    expect(english).toEqual([
+      { code: "TOOL_CONFIG_UNKNOWN", text: "The current state of the project-scope tool config could not be checked safely, so the plan is blocked. Nothing was written." },
+      { code: "TOOL_CONFIG_UNKNOWN", text: "The current state of the user-scope tool config could not be checked safely, so the plan is blocked. Nothing was written." },
+    ]);
+    expect(installPreviewEn(built.planned).join("\n")).not.toMatch(/reviewed list/u);
+    // 다른 TOOL_CONFIG_* 코드와 문장이 겹치지 않고, "검토(reviewed)"는 검토 정책 관련 코드에서만 말한다.
+    const sentences = ["TOOL_CONFIG_UNKNOWN", "TOOL_CONFIG_UNREADABLE", "TOOL_CONFIG_MISSING", "TOOL_CONFIG_DRIFT", "TOOL_CONFIG_REJECTED", "TOOL_CONFIG_VERSION_UNREVIEWED"].map((code) => [code, warningsEn(null, [{ code, message: "x" }])[0]!.text] as const);
+    expect(new Set(sentences.map(([, t]) => t)).size).toBe(sentences.length);
+    for (const [code, t] of sentences) expect(/review/iu.test(t), code).toBe(code === "TOOL_CONFIG_REJECTED" || code === "TOOL_CONFIG_VERSION_UNREVIEWED");
+    expect(sentences.find(([c]) => c === "TOOL_CONFIG_UNKNOWN")![1]).toBe("The current state of the tool config could not be checked safely, so the plan is blocked. Nothing was written.");
   });
 
   it("Repair: 상태·Preview·승인 대화상자·성공 결과가 영어이고 승인 요구 ID는 그대로다", async () => {
