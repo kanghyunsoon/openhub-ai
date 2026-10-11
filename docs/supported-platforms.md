@@ -11,6 +11,8 @@
 
 Claude Code, Codex and Cursor, in project scope and user scope. OpenHub never writes `~/.claude.json`.
 
+Install support is not the same as run verification. The app shows, per client and OS, whether OpenHub actually ran the tool from that client's configuration. Today: Cursor is **not verified** on Windows and Linux; on macOS nothing is verified (platform-unverified); Kubernetes MCP Server is verified for Claude Code and Codex on Windows and Linux and is limited to version 0.0.67.
+
 ## Backends
 
 npx, uvx and Docker must be on PATH. `openhub doctor` shows what was found. Pinokio support targets pterm 0.0.25. Default tests use a fake pinokiod; real Pinokio integration runs only when OPENHUB_E2E=1.
