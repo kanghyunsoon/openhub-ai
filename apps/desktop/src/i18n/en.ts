@@ -308,6 +308,7 @@ export const en = {
   "outcome.failedDefault": "See the next steps in the result.",
   "install.prepared.launchOnDemand": "launch-on-demand (downloaded on the client's first start)",
   "install.prepared.cached": "cached (downloaded into the npx cache in advance)",
+  "install.prepared.cachedUv": "cached (installed into the uv cache in advance and checked offline)",
   "common.yes": "yes",
   "common.no": "no",
   "install.detected.skipped": "not checked",
