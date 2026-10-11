@@ -33,8 +33,9 @@ export function needsDesktopE2e(files) {
   return { run: needed.length > 0, needed, skipped: list.filter((f) => !needed.includes(f)) };
 }
 
-// 줄 머리의 describe/it/test.skipIf(…OPENHUB_E2E…)로 켜지는 테스트(문자열 안의 예시는 세지 않는다).
-const isE2eSource = (text) => /^\s*(describe|it|test)\.skipIf\([^\n]*process\.env\[["']OPENHUB_E2E["']\]/mu.test(text);
+// describe/it/test.skipIf(…OPENHUB_E2E…)·.runIf(…OPENHUB_E2E…)로 켜지는 테스트(v0.2.1: 줄 머리가 아니어도, 예: const suite = describe.skipIf(…)).
+// 따옴표·백틱 바로 뒤에서 시작하는 것(문자열 안의 예시)은 세지 않는다. process.env["OPENHUB_E2E"]·process.env.OPENHUB_E2E 둘 다 본다.
+const isE2eSource = (text) => /(?<![\w'"`.])(describe|it|test)(\.concurrent)?\.(skipIf|runIf)\([^\n]*process\.env(\[["']OPENHUB_E2E["']\]|\.OPENHUB_E2E\b)/mu.test(text);
 
 /** apps/desktop/test 아래에서 OPENHUB_E2E로 켜지는 테스트 파일(실제 Electron E2E). 정렬된 상대 경로. */
 export function discoverElectronE2e(root) {

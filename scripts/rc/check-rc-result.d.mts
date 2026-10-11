@@ -1,4 +1,5 @@
 export declare const REQUIRED_STEPS: number[];
+export declare const REQUIRED_CHECKS: Readonly<Record<"windows" | "linux", readonly string[]>>;
 export declare const ALLOWED_NOT_RUN: Readonly<Record<string, { step: number; os: readonly string[]; reason: string }>>;
 export interface RcVerdict {
   ok: boolean;
@@ -7,6 +8,6 @@ export interface RcVerdict {
 }
 export declare function checkRcResult(
   result: unknown,
-  options?: { os?: string; requiredSteps?: readonly number[]; allowedNotRun?: typeof ALLOWED_NOT_RUN },
+  options?: { os?: string; requiredSteps?: readonly number[]; allowedNotRun?: typeof ALLOWED_NOT_RUN; requiredChecks?: typeof REQUIRED_CHECKS },
 ): RcVerdict;
 export declare function formatVerdict(verdict: RcVerdict): string;
