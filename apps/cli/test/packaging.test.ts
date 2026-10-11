@@ -34,15 +34,15 @@ async function installedLayout() {
 }
 
 describe("REQ-065 TASK-071 CLI 배포", () => {
-  it("AC-071-01 core·cli·desktop 버전이 0.1.1이고 --version은 0.1.1이다", async () => {
-    expect(OPENHUB_CORE_VERSION).toBe("0.1.1");
+  it("AC-071-01 core·cli·desktop 버전이 0.2.0이고 --version은 0.2.0이다", async () => {
+    expect(OPENHUB_CORE_VERSION).toBe("0.2.0");
     for (const f of ["packages/core/package.json", "apps/cli/package.json", "apps/desktop/package.json"]) {
-      expect((JSON.parse(await readFile(path.join(REPO, f), "utf8")) as { version: string }).version, f).toBe("0.1.1");
+      expect((JSON.parse(await readFile(path.join(REPO, f), "utf8")) as { version: string }).version, f).toBe("0.2.0");
     }
     const io = memoryIO(scratch);
     io.version = OPENHUB_CORE_VERSION;
     expect(await runCli(["--version"], io)).toBe(0);
-    expect(io.stdout).toEqual(["0.1.1"]);
+    expect(io.stdout).toEqual(["0.2.0"]);
   });
 
   it("AC-071-03 저장소 밖 cwd에서 패키지 리소스 Registry로 registry list·project scan·doctor가 동작한다", async () => {
