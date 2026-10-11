@@ -57,6 +57,8 @@ openhub doctor
 
 데스크톱: release에서 Windows x64 설치 파일이나 Linux x64 AppImage를 받습니다. Windows 설치 파일은 **서명되지 않아** Windows SmartScreen·Smart App Control 경고가 나올 수 있습니다. macOS release artifact는 없으며 macOS에서는 소스로 빌드할 수 있습니다([지원 플랫폼](docs/supported-platforms.md)).
 
+v0.2.0을 쓰고 있다면 먼저 [알려진 문제](docs/known-issues-v0.2.0.ko.md)를 확인하세요(프로젝트 전환, 업데이트 중단, 새 환경의 Postgres MCP Pro, Windows uvx 도구 첫 실행).
+
 소스에서:
 
 ```sh

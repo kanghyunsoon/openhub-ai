@@ -57,6 +57,8 @@ openhub doctor
 
 Desktop: download the Windows x64 installer or the Linux x64 AppImage from the release. The Windows installer is **unsigned**, so Windows SmartScreen or Smart App Control may warn before it runs. There is no macOS release artifact; macOS users can build from source (see [Supported platforms](docs/supported-platforms.md)).
 
+Using v0.2.0? Read the [known issues](docs/known-issues-v0.2.0.md) first (project switching, interrupted updates, Postgres MCP Pro on a new machine, slow first start of uvx tools on Windows).
+
 From source:
 
 ```sh
