@@ -24,7 +24,13 @@ const seed = await seedEntries();
 const scratch = await newScratch("v021-health-exception");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 
-async function installedCase(makeEnv: (base: LifecycleEnvironment) => LifecycleEnvironment) {
+interface CaseContext {
+  /** 프로젝트 Cursor 설정 파일(절대 경로)과 설치 직후 내용 */
+  cursorFile: string;
+  original: string;
+}
+
+async function installedCase(makeEnv: (base: LifecycleEnvironment, ctx: CaseContext) => LifecycleEnvironment, operation: LifecycleRequest["operation"] = "update") {
   const h = await createHarness(scratch, { entries: seed });
   const targets: InstallRequest["targets"] = [{ client: "cursor", scope: "project" }];
   const install = h.request("github-mcp-server", targets);
@@ -47,8 +53,9 @@ async function installedCase(makeEnv: (base: LifecycleEnvironment) => LifecycleE
     configFs: h.env.configFs!,
     spawner: exec.spawner,
   };
-  const env = makeEnv(base);
-  const request: LifecycleRequest = { operation: "update", toolId: "github-mcp-server", projectRoot: h.projectRoot, homeDir: h.homeDir, platform: "linux", includeUser: false, targets };
+  const cursorFile = path.join(h.projectRoot, ".cursor", "mcp.json");
+  const env = makeEnv(base, { cursorFile, original: await readFile(cursorFile, "utf8") });
+  const request: LifecycleRequest = { operation, toolId: "github-mcp-server", projectRoot: h.projectRoot, homeDir: h.homeDir, platform: "linux", includeUser: false, targets };
   const built = await planLifecycleRequest(request, env);
   if (!built.ok) throw new Error(built.code + " " + built.message);
   const outcome = await requestLifecycleApproval(built.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
@@ -86,5 +93,94 @@ describe("v0.2.1 P0-5 Health 예외 보상(Update)", () => {
     expect(after[0], JSON.stringify(result).slice(0, 400)).toBe(before[0]);
     expect(after[1]).toBe(before[1]);
     expect(result).toMatchObject({ status: "health-failed", compensated: true, stateCommitted: false });
+  });
+});
+
+const healthy: NonNullable<LifecycleEnvironment["runHealth"]> = async () => ({ ok: true, result: { status: "healthy", reason: null, toolCount: 3, environmentUnverified: false, terminated: true, excerpt: null } });
+const changed = async (ctx: CaseContext) => (await readFile(ctx.cursorFile, "utf8")) !== ctx.original;
+
+describe("v0.2.1 P0-5 A. Manifest를 읽지 못하면 Health를 실행하지 않는다", () => {
+  const cases: [string, (b: LifecycleEnvironment, ctx: CaseContext) => LifecycleEnvironment][] = [
+    // 설정이 바뀐 뒤(= Health 직전)에만 실패한다. 계획·실행 직전 재생성은 정상이다.
+    ["loadEntries 예외", (b, ctx) => ({ ...b, loadEntries: async () => { if (await changed(ctx)) throw new Error("EACCES: registry"); return seed; } })],
+    ["Registry에 그 Tool이 없음", (b, ctx) => ({ ...b, loadEntries: async () => ((await changed(ctx)) ? seed.filter((e) => e.manifest.name !== "github-mcp-server") : seed) })],
+  ];
+  for (const [name, makeEnv] of cases) {
+    it("update: " + name + " → Health 실행 0회, MANIFEST_UNAVAILABLE, config 원본 복구, Version State 그대로", async () => {
+      let healthRuns = 0;
+      const c = await installedCase((b, ctx) => ({ ...makeEnv(b, ctx), runHealth: async (...a) => ((healthRuns += 1), healthy(...a)) }));
+      const before = await c.files();
+      const result = await c.run();
+      expect(healthRuns).toBe(0);
+      expect(result).toMatchObject({ status: "health-failed", code: "MANIFEST_UNAVAILABLE", compensated: true, stateCommitted: false, health: null });
+      expect(result.steps.find((s) => s.id === "health")).toMatchObject({ status: "failed", code: "MANIFEST_UNAVAILABLE" });
+      expect(result.nextActions.join(" ")).toContain("Registry Manifest");
+      expect(await c.files()).toEqual(before);
+    });
+  }
+
+  it("단독 health: Manifest 예외 → Health 실행 0회, 설정·Version State 그대로", async () => {
+    let healthRuns = 0;
+    let calls = 0;
+    let armed = false;
+    const c = await installedCase((b) => ({
+      ...b,
+      // 실행 직전 재생성(1회) 뒤 Health 단계의 Manifest 읽기만 실패시킨다.
+      loadEntries: async () => {
+        if (armed && ++calls >= 2) throw new Error("registry unreadable");
+        return seed;
+      },
+      runHealth: async (...a) => ((healthRuns += 1), healthy(...a)),
+    }), "health");
+    const before = await c.files();
+    armed = true;
+    const result = await c.run();
+    expect(healthRuns).toBe(0);
+    expect(result).toMatchObject({ status: "health-failed", code: "MANIFEST_UNAVAILABLE", stateCommitted: false, health: null });
+    expect(await c.files()).toEqual(before);
+  });
+});
+
+describe("v0.2.1 P0-5 D·E. 보상 자체가 실패하거나 외부 변경이 있으면 덮어쓰지 않는다", () => {
+  it("D. Health 예외 뒤 설정 복구 쓰기가 실패하면 rollback-failed(CONFIG_RESTORE_FAILED)이고 succeeded·health-failed로 표시하지 않으며 Version State는 그대로다", async () => {
+    let renames = 0;
+    const c = await installedCase((b, ctx) => ({
+      ...b,
+      configFs: {
+        ...b.configFs!,
+        // 첫 rename(update의 설정 교체)은 통과, 그 다음(보상 복구)부터 실패한다.
+        rename: async (from: string, to: string) => {
+          if (path.resolve(to) === path.resolve(ctx.cursorFile) && ++renames > 1) throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+          return b.configFs!.rename(from, to);
+        },
+      },
+      runHealth: async () => {
+        throw new Error("health crashed");
+      },
+    }));
+    const before = await c.files();
+    const result = await c.run();
+    const after = await c.files();
+    expect(result).toMatchObject({ status: "rollback-failed", code: "CONFIG_RESTORE_FAILED", compensated: false, stateCommitted: false });
+    expect(after[0]).not.toBe(before[0]); // 복구하지 못했다는 사실 그대로(거짓 성공 없음)
+    expect(after[1]).toBe(before[1]);
+    expect(result.nextActions.join(" ")).toContain(".cursor/mcp.json");
+  });
+
+  it("E. Health 중 다른 프로그램이 같은 설정 파일을 바꾸면 보상이 그 내용을 덮어쓰지 않는다", async () => {
+    const external = '{ "mcpServers": { "edited-by-user": { "command": "uvx", "args": ["x-mcp==1.0.0"] } } }\n';
+    const c = await installedCase((b, ctx) => ({
+      ...b,
+      runHealth: async () => {
+        await writeFile(ctx.cursorFile, external);
+        throw new Error("health crashed");
+      },
+    }));
+    const before = await c.files();
+    const result = await c.run();
+    const after = await c.files();
+    expect(after[0]).toBe(external);
+    expect(after[1]).toBe(before[1]);
+    expect(result).toMatchObject({ status: "rollback-failed", code: "CONFIG_RESTORE_FAILED", stateCommitted: false });
   });
 });
