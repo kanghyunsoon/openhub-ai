@@ -338,7 +338,10 @@ export function lifecyclePreviewEn(planned: PlannedLifecycle): string[] {
           : run.map((s) => s.executable + " " + s.args.join(" ")).join(", ") +
             (run.every((s) => s.executable === "npx")
               ? " — OpenHub downloads this version into the npx cache before changing configuration (the MCP server is not started; network, download, dependency install scripts)"
-              : " — run by OpenHub (network, download; downloaded images are not removed)")),
+              : run.every((s) => s.executable === "uvx")
+                ? " — OpenHub installs the Python packages of this exact version into the uv cache before changing configuration and checks them again offline (the MCP server is not started" +
+                  (run.some((s) => s.args[0] !== "--no-build") ? "; includes a reviewed source build)" : "; wheels only, no build)")
+                : " — run by OpenHub (network, download; downloaded images are not removed)")),
     );
     lines.push("Client command");
     lines.push("  current  " + spec(plan.current.clientSpec));

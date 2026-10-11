@@ -3,6 +3,7 @@ import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  formatLifecyclePlanPreview,
   lifecyclePlanSchema,
   planLifecycleRequest,
   recordInstallInState,
@@ -84,6 +85,9 @@ describe("uvx Prepare: update·rollback", () => {
     expect(plan.steps[0]).toMatchObject({ executable: "uvx", args: uvxPrepareArgs(V031, "wheels-only"), timeoutMs: 600_000 });
     expect(plan.warnings.map((w) => w.code)).toContain("uvx-prepare");
     expect(plan.healthPolicy.timeouts.startupMs).toBe(20_000);
+    const preview = formatLifecyclePlanPreview({ plan, planDigest: "sha256:" + "0".repeat(64) } as never).join("\n");
+    expect(preview).toContain("uv cache에 설치하고 네트워크 없이 다시 확인합니다");
+    expect(preview).not.toContain("image");
     expect(result.status).toBe("updated");
     expect(spawns).toEqual([["uvx", ...uvxPrepareArgs(V031, "wheels-only")], ["uvx", ...uvxVerifyArgs(V031, "wheels-only")]]);
     const config = JSON.parse((await c.files())[0]!);
