@@ -33,6 +33,22 @@ export function checkReleaseTag(tag: string, version: string): string[] {
   return [];
 }
 
+/** 버전을 정하는 곳(package.json 3개와 core의 OPENHUB_CORE_VERSION). 하나라도 다르면 패키징 전에 멈춘다. */
+export const VERSION_SOURCES = ["packages/core/package.json", "apps/cli/package.json", "apps/desktop/package.json", "OPENHUB_CORE_VERSION"] as const;
+
+/** 모든 버전 출처가 같은 X.Y.Z인지. 빠진 출처도 오류다. */
+export function checkVersionConsistency(versions: Readonly<Record<string, string | undefined>>): string[] {
+  const errors: string[] = [];
+  for (const source of VERSION_SOURCES) {
+    const v = versions[source];
+    if (v === undefined) errors.push("버전 없음: " + source);
+    else if (!/^\d+\.\d+\.\d+$/u.test(v)) errors.push("X.Y.Z 버전이 아닙니다: " + source + " = " + v);
+  }
+  const distinct = [...new Set(VERSION_SOURCES.map((s) => versions[s]).filter((v): v is string => v !== undefined))];
+  if (distinct.length > 1) errors.push("버전 불일치: " + VERSION_SOURCES.map((s) => s + "=" + String(versions[s])).join(", "));
+  return errors;
+}
+
 /** 사용자용 Release Notes 파일 위치(저장소 루트 기준). 유지보수자 문서(docs/release-process.md)는 Release 본문으로 쓰지 않는다. */
 export function releaseNotesPath(tag: string): string {
   return "docs/release-notes/" + tag + ".md";

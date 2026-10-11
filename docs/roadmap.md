@@ -45,11 +45,12 @@ Each step is described in [Architecture](architecture.md) and [Approval model](a
 Spec: [docs/specs/v0.2.0.md](specs/v0.2.0.md)
 
 - **P0-1 Stack coverage**: recognize Go, Express, NestJS, Jest, Vitest, pytest, Playwright, Unity, Unreal Engine and Kubernetes from project files; connect them to Need Rules; explain empty results. Details: [stack-coverage.md](specs/stack-coverage.md).
-- **P0-2 Registry expansion**: grow the Verified Registry from 7 to 25-40 tools, only with tools that pass the verification criteria.
+- **P0-2 Registry expansion**: v0.2.0 ships with 9 verified tools (7 plus MongoDB MCP Server and Kubernetes MCP Server). The original 25-40 target is not met and is carried over to a later release (decision of 2026-10-11, recorded in the spec as the D-v2-2 amendment).
 - **P0-3 Desktop UX**: English by default with Korean selectable and persisted, user-scope install, client choice, guidance for empty results.
 
 ## v0.3.0 and later (Proposal)
 
+- Registry expansion toward the carried-over 25-40 verified tools, with the same verification criteria and in reviewable batches. Unverified tools are never added to reach the number.
 - More stacks, chosen from user reports (for example Django, Flask, Rails, .NET web, Terraform).
 - Registry growth past 40 with the same criteria, and a contributor workflow for new Manifests.
 - Windows code signing and a macOS release artifact, once signing identities are available.

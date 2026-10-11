@@ -15,6 +15,7 @@
  *   coverage    --dir <dist> --reports <dir>       job별 보고서를 합쳐 release-coverage.json 작성·검사
  *
  * GitHub Release 단계(release job·release-verify.yml). GitHub API 호출은 workflow의 gh가 하고, 이 명령은 그 JSON만 읽는다.
+ *   check-versions                                                   core·cli·desktop package.json과 OPENHUB_CORE_VERSION이 같은지(metadata job 첫 검사)
  *   check-tag      --tag <vX.Y.Z>                                    SemVer tag이고 package 버전과 같은지
  *   check-notes    --tag <vX.Y.Z>                                    사용자용 Release Notes(docs/release-notes/<tag>.md) 계약 확인
  *   release-assets --dir <dist> [--list <file>]                       필수 asset 8개·버전·SHA256SUMS 확인, 올릴 경로 목록 작성
@@ -29,7 +30,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { checkBundledSnapshot, validateRegistry } from "../packages/core/src/index";
+import { OPENHUB_CORE_VERSION, checkBundledSnapshot, validateRegistry } from "../packages/core/src/index";
 import { bundledPackages, sbomComponentNames } from "./bundle-inventory-lib.mjs";
 import {
   DESKTOP_PRODUCT_NAME,
@@ -63,6 +64,8 @@ import {
   checkLocalAssets,
   checkReleaseNotes,
   checkReleaseTag,
+  checkVersionConsistency,
+  VERSION_SOURCES,
   draftNotesUpdate,
   flattenReleases,
   planDraftRelease,
@@ -415,9 +418,19 @@ const printIssues = (warnings: readonly string[]) => {
   for (const w of warnings) console.log("  경고: " + w);
 };
 function checkTag() {
+  checkVersions();
   const errors = checkReleaseTag(need(values.tag, "--tag"), version);
   if (errors.length > 0) fail(errors.join("; "));
   console.log("✓ tag " + values.tag + " = package v" + version);
+}
+function checkVersions() {
+  const versions: Record<string, string> = { OPENHUB_CORE_VERSION };
+  for (const source of VERSION_SOURCES) {
+    if (source.endsWith("package.json")) versions[source] = (JSON.parse(readFileSync(path.join(ROOT, source), "utf8")) as { version: string }).version;
+  }
+  const errors = checkVersionConsistency(versions);
+  if (errors.length > 0) fail(errors.join("; "));
+  console.log("✓ version " + version + " = " + VERSION_SOURCES.join(" = "));
 }
 function checkNotes() {
   const tag = need(values.tag, "--tag");
@@ -486,6 +499,7 @@ const commands: Record<string, () => unknown> = {
   "verify-sums": verifySums,
   coverage,
   "check-tag": checkTag,
+  "check-versions": checkVersions,
   "check-notes": checkNotes,
   "release-assets": releaseAssets,
   "github-plan": githubPlan,

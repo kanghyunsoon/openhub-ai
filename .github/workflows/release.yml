@@ -45,6 +45,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: 버전 출처 일치(core·cli·desktop package.json, OPENHUB_CORE_VERSION). 다르면 패키징하지 않는다
+        run: pnpm release check-versions
       - name: 포함 metadata snapshot 수집(공개 GitHub 메타데이터, job 기본 token)
         run: pnpm openhub collect --out release-out/metadata.json
         env:
