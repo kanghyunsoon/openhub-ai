@@ -40,6 +40,9 @@ describe("v0.2.1 P0-6 Adopt: 검토되지 않은 실행 옵션", () => {
     ["postgres access-mode=unrestricted", "postgres-mcp", "postgres", { command: "uvx", args: ["postgres-mcp", "--access-mode=unrestricted"] }],
     ["postgres access-mode 없음", "postgres-mcp", "postgres", { command: "uvx", args: ["postgres-mcp"] }],
     ["postgres uvx --index-url", "postgres-mcp", "postgres", { command: "uvx", args: ["--index-url", "https://pypi.example.test/simple", "postgres-mcp", "--access-mode=restricted"] }],
+    // v0.2.1 #39: 검토된 postgres 실행 인자는 mcp SDK를 1.x로 고정한다. v0.2.0 형식(고정 없음)과 SDK 버전을 바꾼 항목은 검토된 인자가 아니다.
+    ["postgres v0.2.0 형식(mcp 고정 없음)", "postgres-mcp", "postgres", { command: "uvx", args: ["postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }],
+    ["postgres mcp SDK 2.x로 바꿈", "postgres-mcp", "postgres", { command: "uvx", args: ["--from", "postgres-mcp", "--with", "mcp==2.3.0", "postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }],
     ["kubernetes --read-only 없음", "kubernetes-mcp-server", "kubernetes", { command: "npx", args: ["-y", "kubernetes-mcp-server@0.0.67", "--toolsets", "core"] }],
   ];
   for (const [name, toolId, server, entry] of unreviewed) {
@@ -57,10 +60,10 @@ describe("v0.2.1 P0-6 Adopt: 검토되지 않은 실행 옵션", () => {
     ["memory 정확한 버전 고정(Manifest가 버전을 고정하지 않음)", "memory-mcp", "memory", { command: "npx", args: ["-y", MEMORY + "@2026.8.31"] }],
     ["memory Windows cmd wrapper", "memory-mcp", "memory", { command: "cmd", args: ["/d", "/c", "npx", "-y", MEMORY + "@2026.8.31"] }, "windows"],
     ["memory Windows에서 wrapper 없는 npx", "memory-mcp", "memory", { command: "npx", args: ["-y", MEMORY + "@1.2.3"] }, "windows"],
-    ["postgres Windows", "postgres-mcp", "postgres", { command: "uvx", args: ["postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }, "windows"],
+    ["postgres Windows", "postgres-mcp", "postgres", { command: "uvx", args: ["--from", "postgres-mcp", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }, "windows"],
     ["mongodb Manifest 그대로", "mongodb-mcp-server", "mongodb", { command: "npx", args: ["-y", "mongodb-mcp-server@3.0.5", ...MONGO], env: { MDB_MCP_CONNECTION_STRING: "${MDB_MCP_CONNECTION_STRING}" } }],
-    ["postgres Manifest 그대로", "postgres-mcp", "postgres", { command: "uvx", args: ["postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }],
-    ["postgres 정확한 버전 고정", "postgres-mcp", "postgres", { command: "uvx", args: ["postgres-mcp==0.3.0", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }],
+    ["postgres Manifest 그대로", "postgres-mcp", "postgres", { command: "uvx", args: ["--from", "postgres-mcp", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }],
+    ["postgres 정확한 버전 고정", "postgres-mcp", "postgres", { command: "uvx", args: ["--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }],
   ];
   for (const [name, toolId, server, entry, platform] of reviewed) {
     it(name + " → 지금처럼 ready", async () => {
