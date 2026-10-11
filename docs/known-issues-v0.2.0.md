@@ -4,6 +4,22 @@ These issues affect the published v0.2.0 release. The release and its assets are
 
 Also see the existing limits in the [v0.2.0 release notes](release-notes/v0.2.0.md): Cursor launches are not verified, macOS is not verified, Kubernetes is limited to `kubernetes-mcp-server@0.0.67`, and the Windows installer is unsigned.
 
+## Summary
+
+Every issue below exists in the published v0.2.0. Status as of main `5be23af` (2026-10-11); no release contains these fixes yet.
+
+| Issue | Status | Workaround in v0.2.0 |
+| --- | --- | --- |
+| Installing while switching projects | Fixed on main (#34) | Yes |
+| Home folder used as the project | Fixed on main (#34) | Yes |
+| Adopted entries with unreviewed options | Fixed on main (#37) | Yes (manual check) |
+| Health errors during an update leave the new configuration | Fixed on main (#36) | Partly (check the file) |
+| Damaged `lifecycle.json` still lets installs write | Fixed on main (#36) | Yes (restore from `.bak`) |
+| Interrupted update has no in-app recovery | Fix in review (#40); Desktop recovery UI not yet available | Yes (manual edit) |
+| Concurrent installs or updates can lose a record | Fix in review (#38) | Yes (one at a time, Adopt) |
+| Postgres MCP Pro does not start on a new machine | Fix in review (#39) | Yes (manual arguments) |
+| Slow first start of uvx tools on Windows | Not fixed; uvx Prepare design approved (#41), implementation pending | Yes (run Health again) |
+
 ## Installing while switching projects (Desktop)
 
 - **Symptom:** you pick project B while project A's recommendations are shown, then install from the list before B's analysis finishes. The tool can be written into B's configuration.
@@ -21,6 +37,7 @@ Also see the existing limits in the [v0.2.0 release notes](release-notes/v0.2.0.
 - **Symptom:** after an update, rollback or repair was interrupted, the tool shows `config-drift`. Update and Health are blocked, Rollback has no previous version (for a first update), and Repair only applies to tools with an OpenHub tool config.
 - **Workaround:** open the configuration file named in `openhub lifecycle status` and change that server entry back to the command in the tool's Registry Manifest (`registry/<category>/<tool>.yaml` in this repository, `install.options.command`), or remove the entry and install again. OpenHub does not change the file for you.
 - **Status:** fix in review (#40): an operation journal and `openhub lifecycle recover <tool>`, which shows the interrupted operation and restores the previous entry only after you approve it and only if the file still matches what OpenHub was writing.
+- **Desktop:** the Desktop app has no recovery screen yet. After #40 ships, Desktop users recover from a terminal: run `openhub lifecycle status` (the tool shows `interrupted-update`), then `openhub lifecycle recover <tool>`, read the plan, and approve it. Until then, use the manual workaround above.
 
 ## Running installs or updates at the same time
 
@@ -38,7 +55,7 @@ Also see the existing limits in the [v0.2.0 release notes](release-notes/v0.2.0.
 
 - **Symptom:** on Windows, the first Health right after installing serena or postgres-mcp can stop with `startup-timeout`, because uv downloads and installs the Python packages within the 20 s limit. Later starts are faster (measured: serena about 6 s, postgres-mcp about 10 s).
 - **Workaround:** run Health again (`openhub lifecycle health <tool>` or the Desktop button), or start the client once and wait for the server.
-- **Status:** design proposal in review (#41, uvx Prepare). Linux was within the limit in our measurements.
+- **Status:** not fixed. The uvx Prepare design is approved (#41); implementation is pending. Linux was within the limit in our measurements.
 
 ## Adopted entries with extra options
 
@@ -48,6 +65,6 @@ Also see the existing limits in the [v0.2.0 release notes](release-notes/v0.2.0.
 
 ## Other issues found in v0.2.0
 
-- **Health errors during an update** (for example, the temporary folder cannot be created) can leave the new configuration in place without the usual restore. Check the file if an update ends with an error instead of a result. Fix in review (#36).
-- **Damaged `~/.openhub/state/lifecycle.json`**: installs still write the client configuration but cannot record it, so the tool shows as untracked. Restore the file from `lifecycle.json.bak` if it is valid. Fix in review (#36): installs are refused until the file can be read.
+- **Health errors during an update** (for example, the temporary folder cannot be created) can leave the new configuration in place without the usual restore. Check the file if an update ends with an error instead of a result. Fixed on main (#36): the configuration is restored, and Health does not run at all when the Registry Manifest cannot be read.
+- **Damaged `~/.openhub/state/lifecycle.json`**: installs still write the client configuration but cannot record it, so the tool shows as untracked. Restore the file from `lifecycle.json.bak` if it is valid. Fixed on main (#36): installs are refused until the file can be read.
 
