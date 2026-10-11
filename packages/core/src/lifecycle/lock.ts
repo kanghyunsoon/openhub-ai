@@ -1,14 +1,19 @@
 import { randomBytes } from "node:crypto";
-import { lstat, open, readFile, unlink } from "node:fs/promises";
+import { link, lstat, readFile, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 
 /**
- * (v0.2.1 B) 소유권 기반 파일 잠금. ~/.openhub/state 아래 잠금 파일을 배타 생성(open "wx")한 쪽만 소유자다.
+ * (v0.2.1 B) 소유권 기반 파일 잠금. ~/.openhub/state 아래 잠금 파일을 배타적으로 게시한 쪽만 소유자다.
  * - 잠금 파일: { token, pid, host, purpose, startedAt }. token은 생성할 때마다 새로 만든 무작위 값이다.
+ * - 게시: 내용을 모두 쓴 임시 파일("<잠금>.<pid>.<token>.tmp")을 hard link로 잠금 경로에 건다. link는 대상이 있으면 EEXIST로 실패하고
+ *   대상 symlink를 따라가지 않으므로 "있으면 실패"가 원자적이다. 그래서 잠금 경로에는 내용이 완전한 파일만 나타나고, 생성과 쓰기 사이에
+ *   멈춘 살아 있는 소유자의 빈 잠금이 회수되는 경우가 없다(open "wx" 뒤 writeFile 방식의 빈 파일 구간을 없앴다).
+ *   hard link를 지원하지 않는 파일 시스템이면 잠금을 만들지 못한 것으로 보고 실행하지 않는다(fail closed).
  * - 해제: 파일의 token이 내 token일 때만 지운다(남의 잠금을 지우지 않는다).
+ *   살아 있는 소유자의 잠금은 다른 누구도 지우거나 바꾸지 않으므로(회수는 소유자가 죽었을 때만) 읽은 뒤 지우는 사이에 바뀌지 않는다.
  * - 회수: 같은 host에서 pid가 살아 있지 않을 때만 버려진 잠금이다. 시간이 오래 지났다는 이유만으로는 회수하지 않는다
  *   (일시 정지·느린 Health 중인 살아 있는 소유자를 보호한다). 다른 host의 잠금은 확인할 수 없으므로 회수하지 않는다.
- *   내용을 쓰기 전(빈 파일)인 잠금은 LOCK_INCOMPLETE_MS가 지나야 버려진 것으로 본다.
+ *   내용이 잠금 형식이 아닌 파일(이 방식으로는 생기지 않는다: 손상·이전 빌드가 남긴 빈 파일)은 LOCK_INCOMPLETE_MS가 지나야 버려진 것으로 본다.
  * - 회수자끼리는 "<잠금>.reclaim" 보조 잠금으로 직렬화하고, 보조 잠금 안에서 다시 읽은 token이 처음 관찰한 버려진 잠금과
  *   같을 때만 지운다. 그 사이 다른 소유자가 만든 새 잠금은 token이 달라 지우지 않는다.
  * - 잠금 경로가 일반 파일이 아니면(symlink·junction·디렉터리) LockPathError다. open "wx"는 기존 symlink를 따라가지 않는다.
@@ -25,6 +30,8 @@ export interface LockRecord {
 export interface LockHooks {
   /** pid 생존 확인(테스트 주입용). 기본은 process.kill(pid, 0). */
   isAlive?: (pid: number) => boolean;
+  /** 임시 파일을 쓴 뒤 잠금 경로에 게시하기 직전(테스트에서 "생성과 게시 사이 정지"를 만든다). */
+  beforePublish?: () => Promise<void>;
 }
 
 export const LOCK_INCOMPLETE_MS = 30_000;
@@ -50,6 +57,8 @@ export function processAlive(pid: number): boolean {
 interface Observed {
   record: LockRecord | null;
   mtimeMs: number;
+  /** 파일은 있는데 읽지 못했다(Windows 삭제 대기 EPERM·백신 EBUSY 등). 내용을 모르므로 버려진 잠금으로 보지 않는다. */
+  unreadable?: boolean;
 }
 
 const isRecord = (v: unknown): v is LockRecord => {
@@ -58,7 +67,10 @@ const isRecord = (v: unknown): v is LockRecord => {
   return typeof r["token"] === "string" && /^[0-9a-f]{32}$/u.test(r["token"]) && Number.isInteger(r["pid"]) && typeof r["host"] === "string" && typeof r["purpose"] === "string" && typeof r["startedAt"] === "string";
 };
 
-/** 잠금 파일을 읽는다. 없으면 null. 일반 파일이 아니면 LockPathError. 내용이 잠금 형식이 아니면 record null. */
+/**
+ * 잠금 파일을 읽는다. 없으면(읽는 사이 지워진 경우 포함) null. 일반 파일이 아니면 LockPathError.
+ * 읽기 자체가 실패하면 unreadable(회수 대상 아님), 읽었지만 잠금 형식이 아니면 record null.
+ */
 export async function readLock(file: string): Promise<Observed | null> {
   let info;
   try {
@@ -68,9 +80,16 @@ export async function readLock(file: string): Promise<Observed | null> {
     throw e;
   }
   if (!info.isFile()) throw new LockPathError("잠금 경로가 일반 파일이 아닙니다(symlink·junction·디렉터리)");
+  let text: string;
+  try {
+    text = await readFile(file, "utf8");
+  } catch (e) {
+    if (errorCode(e) === "ENOENT") return null;
+    return { record: null, mtimeMs: info.mtimeMs, unreadable: true };
+  }
   let record: LockRecord | null = null;
   try {
-    const doc: unknown = JSON.parse(await readFile(file, "utf8"));
+    const doc: unknown = JSON.parse(text);
     if (isRecord(doc)) record = doc;
   } catch {
     record = null;
@@ -78,25 +97,23 @@ export async function readLock(file: string): Promise<Observed | null> {
   return { record, mtimeMs: info.mtimeMs };
 }
 
-/** 배타 생성. 이미 있으면 null. */
-async function create(file: string, purpose: string): Promise<string | null> {
+/** 배타 게시. 내용을 모두 쓴 임시 파일을 hard link로 건다. 이미 있으면 null. */
+async function create(file: string, purpose: string, hooks: LockHooks = {}): Promise<string | null> {
   const token = randomBytes(16).toString("hex");
   const record: LockRecord = { token, pid: process.pid, host: os.hostname(), purpose, startedAt: new Date().toISOString() };
-  let handle;
+  const temp = file + "." + String(process.pid) + "." + token + ".tmp";
+  await writeFile(temp, JSON.stringify(record) + "\n", { flag: "wx", mode: 0o600 });
   try {
-    handle = await open(file, "wx", 0o600);
-  } catch (e) {
-    if (errorCode(e) === "EEXIST") return null;
-    throw e;
+    if (hooks.beforePublish !== undefined) await hooks.beforePublish();
+    try {
+      await link(temp, file);
+    } catch (e) {
+      if (errorCode(e) === "EEXIST") return null;
+      throw e;
+    }
+  } finally {
+    await unlink(temp).catch(() => undefined);
   }
-  try {
-    await handle.writeFile(JSON.stringify(record) + "\n");
-  } catch (e) {
-    await handle.close().catch(() => undefined);
-    await unlink(file).catch(() => undefined);
-    throw e;
-  }
-  await handle.close();
   return token;
 }
 
@@ -106,15 +123,17 @@ async function release(file: string, token: string): Promise<void> {
   if (now?.record?.token === token) await unlink(file).catch(() => undefined);
 }
 
-/** 버려진 잠금인가: 같은 host에서 pid가 죽었거나, 내용을 쓰지 못한 채 LOCK_INCOMPLETE_MS가 지났다. */
+/** 버려진 잠금인가: 같은 host에서 pid가 죽었거나, 잠금 형식이 아닌 내용으로 LOCK_INCOMPLETE_MS가 지났다. 읽지 못한 잠금은 아니다. */
 export function isAbandoned(observed: Observed, hooks: LockHooks = {}, now = Date.now()): boolean {
+  if (observed.unreadable === true) return false;
   if (observed.record === null) return now - observed.mtimeMs > LOCK_INCOMPLETE_MS;
   if (observed.record.host !== os.hostname()) return false;
   if (observed.record.pid === process.pid) return false;
   return !(hooks.isAlive ?? processAlive)(observed.record.pid);
 }
 
-const sameLock = (a: Observed, b: Observed) => (a.record !== null && b.record !== null ? a.record.token === b.record.token : a.record === null && b.record === null && a.mtimeMs === b.mtimeMs);
+const sameLock = (a: Observed, b: Observed) =>
+  a.unreadable !== true && b.unreadable !== true && (a.record !== null && b.record !== null ? a.record.token === b.record.token : a.record === null && b.record === null && a.mtimeMs === b.mtimeMs);
 
 /**
  * 관찰한 버려진 잠금을 회수한다. 보조 잠금(.reclaim)을 얻은 회수자만, 다시 읽은 잠금이 관찰한 것과 같을 때만 지운다.
@@ -152,7 +171,7 @@ export async function acquireLock(file: string, purpose: string, options: { wait
   const deadline = Date.now() + options.waitMs;
   let reclaims = 0;
   for (;;) {
-    const token = await create(file, purpose);
+    const token = await create(file, purpose, options);
     if (token !== null) return { ok: true, release: () => release(file, token) };
     const holder = await readLock(file);
     if (holder === null) continue; // 그 사이 해제됐다

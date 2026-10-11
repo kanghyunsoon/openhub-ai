@@ -19,6 +19,7 @@ export * from "./installer/backends";
 export * from "./installer/config-writer";
 export * from "./installer/result";
 export * from "./installer/transaction";
+export * from "./installer/install-and-record";
 export * from "./installer/verify";
 export * from "./installer/preview";
 export * from "./lifecycle/state";

@@ -183,7 +183,11 @@ export async function withOperationLock<T>(options: StateStoreOptions & { purpos
         if (!(typeof e === "object" && e !== null && (e as { code?: unknown }).code === "EEXIST")) throw e;
       }
     }
-    lock = await acquireLock(path.join(p.dir, OPERATION_LOCK_FILE), options.purpose, { waitMs: 0, ...(options.isAlive === undefined ? {} : { isAlive: options.isAlive }) });
+    lock = await acquireLock(path.join(p.dir, OPERATION_LOCK_FILE), options.purpose, {
+      waitMs: 0,
+      ...(options.isAlive === undefined ? {} : { isAlive: options.isAlive }),
+      ...(options.beforePublish === undefined ? {} : { beforePublish: options.beforePublish }),
+    });
   } catch (e) {
     for (const d of created.reverse()) await rmdir(d).catch(() => undefined);
     return { ok: false, code: "OPERATION_LOCK_FAILED", message: e instanceof LockPathError ? "작업 잠금 경로가 일반 파일이 아니어서 실행하지 않았습니다" : "작업 잠금을 만들지 못해 실행하지 않았습니다" };

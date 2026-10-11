@@ -16,8 +16,8 @@ import {
   npmChildEnv,
   planInstall,
   probeBackends,
-  recordInstallInState,
   requestApproval,
+  runInstallAndRecord,
   runInstallTransaction,
   serializeInstallPlan,
   toRecommendPlatform,
@@ -141,17 +141,15 @@ const EXIT_BY_STATUS: Readonly<Record<InstallResultV1["status"], number>> = {
   "approval-required": 3,
 };
 
-/** 설치가 succeeded이면 Version State(~/.openhub/state/lifecycle.json)에 기록한다(TASK-038). 실패해도 설치 결과는 바꾸지 않는다. */
-async function recordInState(planned: PlannedInstall, result: InstallResultV1, request: InstallRequest, io: InstallCommandIO): Promise<void> {
-  if (result.status !== "succeeded") return;
-  const recorded = await recordInstallInState(planned, result, {
-    projectRoot: request.projectRoot,
-    homeDir: request.homeDir,
-    ...(io.configFs === undefined ? {} : { fs: io.configFs }),
-    now: io.now ?? (() => new Date()),
-  });
-  if (recorded.ok && recorded.recorded > 0) io.out("Version State  " + LIFECYCLE_STATE_LOGICAL_PATH + "에 " + recorded.recorded + "개 기록");
-  else if (!recorded.ok) io.err("경고: Version State를 기록하지 못했습니다 (" + recorded.code + "). 설치 결과는 그대로입니다.");
+/**
+ * (v0.2.1 B) 설치와 Version State(~/.openhub/state/lifecycle.json) 기록을 하나의 작업 잠금 안에서 한다(TASK-038).
+ * 기록이 실패하면 Core가 설정을 되돌리고 STATE_RECORD_FAILED를 돌려준다(성공 + 경고로 끝내지 않는다).
+ */
+async function installAndRecord(planned: PlannedInstall, approval: Parameters<typeof runInstallAndRecord>[1], request: InstallRequest, env: Parameters<typeof runInstallAndRecord>[3], io: InstallCommandIO): Promise<InstallResultV1> {
+  const { result, recorded } = await runInstallAndRecord(planned, approval, request, env, { now: io.now ?? (() => new Date()) });
+  for (const line of formatInstallResult(result)) io.out(line);
+  if (recorded > 0) io.out("Version State  " + LIFECYCLE_STATE_LOGICAL_PATH + "에 " + recorded + "개 기록");
+  return result;
 }
 
 export async function runInstall(argv: readonly string[], io: InstallCommandIO, usage: string): Promise<number> {
@@ -292,8 +290,6 @@ export async function runInstall(argv: readonly string[], io: InstallCommandIO, 
     io.err(outcome.status === "rejected" ? "승인하지 않아 설치를 중단했습니다. 아무것도 바꾸지 않았습니다." : "승인할 수 없는 계획입니다.");
     return 1;
   }
-  const result = await runInstallTransaction(planned, outcome.approval, request, env);
-  for (const line of formatInstallResult(result)) io.out(line);
-  await recordInState(planned, result, request, io);
+  const result = await installAndRecord(planned, outcome.approval, request, env, io);
   return EXIT_BY_STATUS[result.status];
 }

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -100,5 +100,87 @@ describe("v0.2.1 B 소유권 잠금", () => {
     expect(r).toMatchObject({ ok: false, code: "OPERATION_LOCK_FAILED" });
     expect(ran).toBe(false);
     expect(await readFile(target, "utf8")).toBe("x");
+  });
+
+  it("[B] 내용을 쓴 뒤 게시하기 전에 멈춘 소유자가 있어도 잠금 경로에는 빈 파일이 없고, 그 사이 잡은 소유자의 잠금을 지우지 않는다", async () => {
+    const { file } = await lockIn();
+    let paused!: () => void;
+    let resume!: () => void;
+    const atPublish = new Promise<void>((r) => (paused = r));
+    const gate = new Promise<void>((r) => (resume = r));
+    const slow = acquireLock(file, "slow", { waitMs: 0, beforePublish: async () => {
+      paused();
+      await gate;
+    } });
+    await atPublish;
+    // 멈춘 동안 잠금 경로에는 아무것도 없다(빈·불완전 잠금 파일이 보이지 않는다). 시간이 아무리 지나도 회수할 대상이 없다.
+    expect(await readLock(file)).toBeNull();
+    const fast = await acquireLock(file, "fast", { waitMs: 0 });
+    if (!fast.ok) throw new Error("busy");
+    const fastBytes = await readFile(file, "utf8");
+    expect(JSON.parse(fastBytes)).toMatchObject({ purpose: "fast", pid: process.pid });
+    resume();
+    const late = await slow;
+    expect(late).toMatchObject({ ok: false, holder: { purpose: "fast" } });
+    expect(await readFile(file, "utf8")).toBe(fastBytes);
+    await fast.release();
+    expect(await readLock(file)).toBeNull();
+    // 게시용 임시 파일은 남지 않는다.
+    expect((await readdir(path.dirname(file))).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("[B] 잠금 파일은 언제 읽어도 내용이 완전하다(획득·해제를 반복하는 동안 빈·불완전 파일 관찰 0)", async () => {
+    const { file } = await lockIn();
+    let incomplete = 0;
+    let observed = 0;
+    let stop = false;
+    const reader = (async () => {
+      while (!stop) {
+        const o = await readLock(file).catch(() => null);
+        if (o !== null) {
+          observed += 1;
+          // 읽는 사이 해제되면 null(ENOENT), Windows 삭제 대기는 unreadable이다. 둘 다 "빈·불완전 내용"이 아니다.
+          if (o.record === null && o.unreadable !== true) incomplete += 1;
+        }
+      }
+    })();
+    for (let i = 0; i < 150; i += 1) {
+      const l = await acquireLock(file, "loop", { waitMs: 1_000 });
+      if (!l.ok) throw new Error("busy");
+      await new Promise((r) => setImmediate(r));
+      await l.release();
+    }
+    stop = true;
+    await reader;
+    expect(observed).toBeGreaterThan(0);
+    expect(incomplete).toBe(0);
+  });
+
+  it("[B] 있는데 읽지 못한 잠금(삭제 대기·다른 프로그램 점유)은 아무리 오래돼도 버려진 것으로 보지 않고 회수하지 않는다", async () => {
+    expect(isAbandoned({ record: null, mtimeMs: 0, unreadable: true })).toBe(false);
+    const { file } = await lockIn();
+    await writeFile(file, JSON.stringify(record(process.pid)) + "\n");
+    expect(await reclaimLock(file, { record: null, mtimeMs: 0, unreadable: true })).toBe(false);
+    expect((await readLock(file))?.record?.pid).toBe(process.pid);
+  });
+
+  it("[B] withOperationLock도 게시 전 정지 중에는 다른 작업이 먼저 진행하고, 멈췄던 작업은 OPERATION_IN_PROGRESS로 아무것도 하지 않는다", async () => {
+    const { home } = await lockIn();
+    let paused!: () => void;
+    let resume!: () => void;
+    const atPublish = new Promise<void>((r) => (paused = r));
+    const gate = new Promise<void>((r) => (resume = r));
+    let slowRan = false;
+    const slow = withOperationLock({ homeDir: home, purpose: "slow", beforePublish: async () => {
+      paused();
+      await gate;
+    } }, async () => (slowRan = true));
+    await atPublish;
+    const fast = await withOperationLock({ homeDir: home, purpose: "fast" }, async () => {
+      resume();
+      return (await slow) as unknown;
+    });
+    expect(fast).toMatchObject({ ok: true, value: { ok: false, code: "OPERATION_IN_PROGRESS" } });
+    expect(slowRan).toBe(false);
   });
 });

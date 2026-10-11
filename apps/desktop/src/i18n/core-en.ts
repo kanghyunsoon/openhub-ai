@@ -132,6 +132,7 @@ export const EN_WARNING_CODES: readonly string[] = Object.freeze([
   "docker-daemon-unchecked",
   "manual-setup-required",
   "configured-not-detected",
+  "state-record-failed",
 ]);
 
 type AnyPlan = InstallPlanV1 | LifecyclePlanV1;
@@ -468,6 +469,7 @@ const INSTALL_CODE_EN: Readonly<Record<string, string>> = {
   MANUAL_SETUP_REQUIRED: "The Node.js launch path for the client configuration could not be verified, so nothing was changed.",
   TOOL_CONFIG_STALE: "The tool config changed after approval. Review the new plan and approve again.",
   COMPENSATION_INCOMPLETE: "Some files could not be restored (changed elsewhere after this run, or not writable). They were not overwritten; check them with lifecycle status.",
+  STATE_RECORD_FAILED: "Version State could not be recorded, so the configuration written by this install was restored to its original content. Check the cause and install again.",
 };
 
 /** InstallResult의 다음에 할 일(영어). Core 원문 대신 code·상태·Plan 구조로 만든다. */
@@ -481,6 +483,7 @@ export function installResultNextEn(result: InstallResultV1, plan: InstallPlanV1
 
 export function installWarningEn(plan: InstallPlanV1, w: { code: string; message: string }): string {
   if (w.code === "configured-not-detected") return "[configured-not-detected] The configuration was written, but the " + (plan.targets[0]?.serverName ?? plan.toolId) + " server was not found when analyzing again. The configuration files were not restored.";
+  if (w.code === "state-record-failed") return "[state-record-failed] Version State could not be recorded" + (/\(([A-Z_]+)\)/u.exec(w.message)?.[1] === undefined ? "" : " (" + /\(([A-Z_]+)\)/u.exec(w.message)![1] + ")") + ".";
   const line = warningsEn(plan, [w])[0] ?? untranslatedWarningEn(w);
   return "[" + line.code + "] " + line.text;
 }
