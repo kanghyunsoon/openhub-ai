@@ -177,6 +177,12 @@ function finalize(d: Draft): LifecycleResultV1 {
   });
 }
 
+/** (v0.2.1 P0-5) Health 실행 예외의 안내(경로 없이 오류 코드만). */
+function healthExceptionMessage(error: unknown): string {
+  const raw = typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined;
+  const code = typeof raw === "string" && /^[A-Z0-9_]{2,32}$/u.test(raw) ? raw : "exception";
+  return "Health를 실행하지 못했습니다(" + code + "). 임시 폴더 권한·디스크 공간·보안 프로그램 차단을 확인하세요";
+}
 const healthOf = (r: HealthCheckResult, at: Date | null): NonNullable<LifecycleResultV1["health"]> => ({
   status: r.status,
   reason: r.reason,
@@ -396,7 +402,24 @@ async function runLocked(planned: PlannedLifecycle, approval: LifecycleApproval 
   const healthStep = plan.steps.find((s) => s.kind === "health");
   if (healthStep !== undefined) {
     trace("health");
-    const manifest = (await env.loadEntries()).find((e) => e.manifest.name === plan.toolId)?.manifest;
+    // (v0.2.1 P0-5) Manifest를 읽지 못하면(예외·Registry에 없음) Health 검사 종류를 알 수 없으므로 Health를 실행하지 않는다.
+    // 명시적 실패(MANIFEST_UNAVAILABLE)이고, update·rollback·repair는 바꾼 설정을 보상한다(외부 변경은 덮어쓰지 않는다). Version State는 그대로다.
+    let manifest: RegistryEntry["manifest"] | undefined;
+    try {
+      manifest = (await env.loadEntries()).find((e) => e.manifest.name === plan.toolId)?.manifest;
+    } catch {
+      manifest = undefined;
+    }
+    if (manifest === undefined) {
+      outcome(healthStep.id, { status: "failed", code: "MANIFEST_UNAVAILABLE", excerpt: "Registry Manifest를 읽지 못해 Health를 실행하지 않았습니다" });
+      skipRest(0);
+      const next = "Registry Manifest를 읽지 못했습니다. OpenHub 설치(Registry 파일)를 확인한 뒤 새 계획을 승인하세요";
+      if (plan.operation === "health") return finalize({ planned: verified, status: "health-failed", code: "MANIFEST_UNAVAILABLE", steps, retryable: true, nextActions: [next, "설정과 Version State는 바꾸지 않았습니다"] });
+      if (!(await compensate())) return failedRestore();
+      return finalize({ planned: verified, status: "health-failed", code: "MANIFEST_UNAVAILABLE", steps, applied, restored, compensated: true, retryable: true, nextActions: [next, "Health를 실행하지 않고 설정 파일을 원래 내용으로 되돌렸습니다. Version State는 바꾸지 않았습니다"] });
+    }
+    // Health 실행기가 값을 돌려주지 않고 예외를 던져도(TEMP 접근·임시 폴더 생성 실패, 실행기 예외 등) 정상 Health 실패와 같은 경로(보상·Version State 그대로)로 간다.
+    // 결과에는 경로 없이 오류 코드만 남긴다.
     const run = env.runHealth ?? runHealthCheck;
     // tool config Tool: Client와 같은 파일로 실행한다. 실행 직전 파일이 승인·기록된 내용과 같은지 다시 확인한다.
     let toolConfigFile: string | undefined;
@@ -414,15 +437,20 @@ async function runLocked(planned: PlannedLifecycle, approval: LifecycleApproval 
       }
       toolConfigFile = loc.file;
     }
-    const report = await run(verified, {
-      healthCheckType: manifest?.healthCheck?.type,
-      windowsNpx,
-      tempBase: env.tempBase,
-      ...(toolConfigFile === undefined ? {} : { toolConfigFile }),
-      ...(env.healthSpawner === undefined ? {} : { spawner: env.healthSpawner }),
-      ...(env.killTree === undefined ? {} : { killTree: env.killTree }),
-    });
-    const result: HealthCheckResult = report.ok ? report.result : { status: "launch-failed", reason: "spawn-failed", toolCount: null, environmentUnverified: false, terminated: true, excerpt: report.message };
+    let result: HealthCheckResult;
+    try {
+      const report = await run(verified, {
+        healthCheckType: manifest.healthCheck?.type,
+        windowsNpx,
+        tempBase: env.tempBase,
+        ...(toolConfigFile === undefined ? {} : { toolConfigFile }),
+        ...(env.healthSpawner === undefined ? {} : { spawner: env.healthSpawner }),
+        ...(env.killTree === undefined ? {} : { killTree: env.killTree }),
+      });
+      result = report.ok ? report.result : { status: "launch-failed", reason: "spawn-failed", toolCount: null, environmentUnverified: false, terminated: true, excerpt: report.message };
+    } catch (error) {
+      result = { status: "launch-failed", reason: "spawn-failed", toolCount: null, environmentUnverified: false, terminated: true, excerpt: healthExceptionMessage(error) };
+    }
     health = healthOf(result, env.now());
     if (result.status !== "healthy") {
       outcome(healthStep.id, { status: "failed", code: result.reason ?? result.status, ...(result.excerpt === null ? {} : { excerpt: result.excerpt }) });

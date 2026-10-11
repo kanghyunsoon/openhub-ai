@@ -16,10 +16,12 @@ import {
   npmChildEnv,
   planInstall,
   probeBackends,
+  readLifecycleState,
   requestApproval,
   runInstallAndRecord,
   runInstallTransaction,
   serializeInstallPlan,
+  stateUnreadableMessage,
   toRecommendPlatform,
   verifyInstallation,
   type ApprovalPrompter,
@@ -152,6 +154,14 @@ async function installAndRecord(planned: PlannedInstall, approval: Parameters<ty
   return result;
 }
 
+/** Version State를 읽을 수 없으면(손상·미지원 버전·경로 이탈) 고정 문구를 stderr에 쓰고 true. 쓰기 0(v0.2.1). */
+async function stateUnreadable(request: InstallRequest, io: InstallCommandIO): Promise<boolean> {
+  const read = await readLifecycleState({ homeDir: request.homeDir, ...(io.configFs === undefined ? {} : { fs: io.configFs }) });
+  if (read.ok) return false;
+  io.err(stateUnreadableMessage(read.code));
+  return true;
+}
+
 export async function runInstall(argv: readonly string[], io: InstallCommandIO, usage: string): Promise<number> {
   const forbidden = argv.find((a) => FORBIDDEN_FLAGS.test(a));
   if (forbidden !== undefined) {
@@ -275,6 +285,8 @@ export async function runInstall(argv: readonly string[], io: InstallCommandIO, 
     io.out(JSON.stringify({ planDigest: planned.planDigest, plan: JSON.parse(serializeInstallPlan(installPlanSchema.parse(planned.plan))) }, null, 2));
     return 0;
   }
+  // v0.2.1: Version State를 읽을 수 없으면 설치 뒤 기록할 수 없다. 승인을 묻지 않고 멈춘다(파일은 고치거나 덮어쓰지 않는다).
+  if (await stateUnreadable(request, io)) return 1;
   for (const line of formatInstallPlanPreview(planned)) io.out(line);
   if (planned.plan.status === "already-installed") {
     const result = await runInstallTransaction(planned, undefined, request, env);
@@ -290,6 +302,8 @@ export async function runInstall(argv: readonly string[], io: InstallCommandIO, 
     io.err(outcome.status === "rejected" ? "승인하지 않아 설치를 중단했습니다. 아무것도 바꾸지 않았습니다." : "승인할 수 없는 계획입니다.");
     return 1;
   }
+  // 승인을 묻는 동안 손상됐어도 Client 설정을 쓰지 않는다.
+  if (await stateUnreadable(request, io)) return 1;
   const result = await installAndRecord(planned, outcome.approval, request, env, io);
   return EXIT_BY_STATUS[result.status];
 }
