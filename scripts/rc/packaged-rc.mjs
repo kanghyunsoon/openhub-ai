@@ -9,10 +9,13 @@
 //   node scripts/rc/packaged-rc.mjs run --exe <app> --work <dir> --out <json> [--os windows|linux] [--arg <extra electron arg>]...
 //   node scripts/rc/packaged-rc.mjs snapshot --work <dir> --out <json>   (설정·Version State byte digest, 제거 전후 비교용)
 //   node scripts/rc/packaged-rc.mjs compare <before.json> <after.json>
+// run은 결과 JSON을 먼저 쓰고 check-rc-result.mjs 판정으로 종료 코드를 정한다(FAIL·오류·빠진 단계·허용 안 된 NOT-RUN이면 1).
+// OPENHUB_RC_INJECT_FAILURE=step-fail|check-fail|error|missing-step|not-run: CI에서 실패 전파를 확인하는 주입. 주입한 결과는 항상 FAIL이다.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { checkRcResult, formatVerdict } from "./check-rc-result.mjs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -408,7 +411,8 @@ async function run() {
     const upd = await ev(app, "window.__openhubLifecycle('memory-mcp')", 1200000);
     const memAfter = JSON.parse((await read(p(".mcp.json"))) ?? "{}").mcpServers?.memory;
     const pinned = (memAfter?.args ?? []).find((a) => /^@modelcontextprotocol\/server-memory@\d+\.\d+\.\d+$/u.test(a)) ?? null;
-    step(9, upd.status === "updated" && pinned !== null && JSON.stringify(JSON.parse((await read(p(".mcp.json"))) ?? "{}").mcpServers?.notes) === JSON.stringify(NOTES) ? "PASS" : "FAIL", { status: upd.status, health: upd.health, before: memBefore?.args, after: memAfter?.args, exactVersion: pinned, note: "packaged app: unpinned → npm latest exact; exact V1→V2→V1 is NOT-RUN (no version choice in the app)" });
+    step(9, upd.status === "updated" && pinned !== null && JSON.stringify(JSON.parse((await read(p(".mcp.json"))) ?? "{}").mcpServers?.notes) === JSON.stringify(NOTES) ? "PASS" : "FAIL", { status: upd.status, health: upd.health, before: memBefore?.args, after: memAfter?.args, exactVersion: pinned, note: "packaged app: unpinned → npm latest exact" });
+    results.notRun.push({ id: "exact-version-v1-v2-v1", step: 9, detail: "exact V1→V2→V1 needs a version choice in the app (not in this build)" });
     const rb = await ev(app, "window.__openhubLifecycleRun('memory-mcp', 'rollback')", 1200000);
     const memRolled = JSON.parse((await read(p(".mcp.json"))) ?? "{}").mcpServers?.memory;
     const rbHealth = await ev(app, "window.__openhubLifecycleRun('memory-mcp', 'health')", 600000);
@@ -429,7 +433,7 @@ async function run() {
     }
     // 사용자 범위를 숨긴 동안 사용자 항목은 not-inspected(읽지 않음)가 정상이다.
     step(11, repair !== null && repair.status === "repaired" && repair.outcome === "succeeded" && repair.restored && repair.after.includes("state-consistent") && repair.after.every((s) => s === "state-consistent" || s === "not-inspected") ? "PASS" : "FAIL", repair);
-    results.notRun.push("11: Health failure compensation in the packaged app (needs a failing real MCP server; covered only by automated tests)");
+    results.notRun.push({ id: "health-failure-compensation", step: 11, detail: "needs a failing real MCP server in the packaged app; covered only by automated tests" });
 
     // ---- 12 English / Korean, 승인 대화상자 언어
     progress("step 11 " + results.steps[11].status);
@@ -481,7 +485,7 @@ async function run() {
       const k = await appKo.page.evaluate("window.__openhubI18n()");
       await appKo.quit();
       check("first-start-follows-os-korean", k.locale === "ko", { locale: k.locale });
-    } else results.notRun.push("3: first start with a Korean OS language on Windows (the runner's OS language cannot be switched)");
+    } else results.notRun.push({ id: "korean-os-first-start", step: 3, detail: "the Windows runner's OS language cannot be switched" });
   } catch (error) {
     results.errors.push(String(error instanceof Error ? error.stack ?? error.message : error));
   } finally {
@@ -491,16 +495,36 @@ async function run() {
     results.finishedAt = new Date().toISOString();
     results.appLogTail = ctx.logs.map((l) => l.replace(new RegExp(TOKEN, "gu"), "<token>"));
     for (const n of [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]) if (results.steps[n] === undefined) results.steps[n] = { status: "NOT-RUN", evidence: "not reached" };
+    injectFailure(results, process.env["OPENHUB_RC_INJECT_FAILURE"]);
+    const verdict = checkRcResult(results, { os: osName });
+    results.verdict = { ok: verdict.ok, failures: verdict.failures, notRunAllowed: verdict.notRunRecorded.map((n) => n.id) };
     await mkdir(path.dirname(out), { recursive: true });
     const text = JSON.stringify(results, null, 2);
-    if (text.includes(TOKEN) || text.includes(SECRET_PLAIN)) throw new Error("fake credential leaked into results");
+    if (text.includes(TOKEN) || text.includes(SECRET_PLAIN)) {
+      // 결과를 쓰지 않고 실패한다(가짜 값이라도 산출물에 남기지 않는다).
+      console.error("fake credential leaked into results; result file not written");
+      process.exit(1);
+    }
     await writeFile(out, text + "\n");
     console.log(Object.entries(results.steps).map(([n, s]) => n + ":" + s.status).join(" "));
     for (const [n, c] of Object.entries(results.checks)) console.log("check " + n + ": " + c.status);
     for (const e of results.errors) console.error(e);
-    // 남은 핸들(WebSocket·자식 프로세스)이 있어도 끝낸다.
-    process.exit(0);
+    console.log(formatVerdict(verdict));
+    // 남은 핸들(WebSocket·자식 프로세스)이 있어도 끝낸다. 종료 코드는 판정 결과다.
+    process.exit(verdict.ok ? 0 : 1);
   }
+}
+
+/** CI에서 실패 전파를 확인하기 위한 주입. 값이 없거나 none이면 아무것도 바꾸지 않는다. */
+function injectFailure(results, kind) {
+  if (kind === undefined || kind === "" || kind === "none") return;
+  results.injected = kind;
+  if (kind === "step-fail") results.steps[14] = { status: "FAIL", evidence: "injected" };
+  else if (kind === "check-fail") results.checks["injected"] = { status: "FAIL", evidence: "injected" };
+  else if (kind === "error") results.errors.push("injected error");
+  else if (kind === "missing-step") delete results.steps[12];
+  else if (kind === "not-run") results.notRun.push({ id: "injected-not-run", step: 4, detail: "injected" });
+  else results.errors.push("unknown OPENHUB_RC_INJECT_FAILURE: " + kind);
 }
 
 // ---------------------------------------------------------------- 제거 전후 비교

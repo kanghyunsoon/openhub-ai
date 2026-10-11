@@ -3,6 +3,8 @@ name: RC packaged app (v0.2.0)
 # v0.2.0 RC: release.yml dry run이 만든 공식 산출물(Windows NSIS, Linux AppImage)을 일회용 runner에서 실제 백엔드로 실행한다.
 # 실제 사용자 프로필·자격증명·클러스터·DB 없음: runner 안의 임시 home, 합성 프로젝트, 127.0.0.1 합성 Kubernetes API, 가짜 token.
 # required check가 아니다(수동 실행과 이 하네스를 바꾸는 PR에서만). 결과 JSON은 artifact로 남긴다.
+# 판정은 fail-closed: 단계 3~14 중 FAIL·오류·빠진 단계·허용 목록 밖 NOT-RUN이 하나라도 있으면 job이 실패한다
+# (packaged-rc.mjs 종료 코드 + check-rc-result.mjs 독립 재판정). inject_failure는 이 실패 전파를 실제 runner에서 확인하는 용도다.
 on:
   pull_request:
     paths:
@@ -13,6 +15,11 @@ on:
       release_run_id:
         description: "release.yml dry-run run ID whose artifacts are verified"
         required: true
+      inject_failure:
+        description: "Force an RC failure to prove the job fails (none keeps the real result)"
+        type: choice
+        default: none
+        options: [none, step-fail, check-fail, error, missing-step, not-run]
 
 permissions:
   contents: read
@@ -21,6 +28,7 @@ permissions:
 env:
   # PR에서 실행할 때 쓰는 dry run(main a951ad6, run 38108687721).
   RELEASE_RUN_ID: ${{ inputs.release_run_id || '38108687721' }}
+  OPENHUB_RC_INJECT_FAILURE: ${{ inputs.inject_failure || 'none' }}
 
 jobs:
   windows:
@@ -77,6 +85,9 @@ jobs:
           if (Test-Path $env:APP_EXE) { throw "program files remain after uninstall" }
           node scripts/rc/packaged-rc.mjs snapshot --work "$env:RUNNER_TEMP/rc-work" --out rc-out/windows-after-uninstall.json
           node scripts/rc/packaged-rc.mjs compare rc-out/windows-before-uninstall.json rc-out/windows-after-uninstall.json
+      - name: "Verdict (steps 3-14 result file, fail-closed)"
+        if: ${{ !cancelled() }}
+        run: node scripts/rc/check-rc-result.mjs rc-out/windows.json --os windows
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -130,6 +141,9 @@ jobs:
           test ! -e "$APPIMAGE"
           node scripts/rc/packaged-rc.mjs snapshot --work "$RUNNER_TEMP/rc-work" --out rc-out/linux-after-remove.json
           node scripts/rc/packaged-rc.mjs compare rc-out/linux-before-remove.json rc-out/linux-after-remove.json
+      - name: "Verdict (steps 3-14 result file, fail-closed)"
+        if: ${{ !cancelled() }}
+        run: node scripts/rc/check-rc-result.mjs rc-out/linux.json --os linux
       - uses: actions/upload-artifact@v4
         if: always()
         with:
