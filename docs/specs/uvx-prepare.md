@@ -1,6 +1,6 @@
 # uvx Prepare (v0.2.1 design)
 
-Status: **design approved** (2026-10-11). The implementation is a separate Draft PR. Companion to [npx Prepare](npx-prepare.md).
+Status: **design approved** (2026-10-11). Implementation: #45 (Draft). Companion to [npx Prepare](npx-prepare.md).
 
 Labels: **Fact** (measured), **Decision** (approved), **Open** (known limit, not blocking).
 
