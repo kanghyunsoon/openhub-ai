@@ -87,6 +87,11 @@ function docker(args: string[]): { status: number | null; stdout: string } {
  * 기본 테스트·PR CI에서는 skip이다.
  */
 describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("REQ-051 Registry sandbox install", () => {
+  // v0.2.1: registry-remote.yml inject_failure=true일 때만 실행되는 의도한 실패. sandbox job·workflow가 실패하고 보고서가 남는지 확인한다.
+  it.runIf(process.env["OPENHUB_E2E_INJECT_FAILURE"] === "1")("workflow 검증 전용: 의도한 실패(inject_failure)", () => {
+    expect("injected failure").toBe("no failure");
+  });
+
   it("AC-054-08 sandbox: memory-mcp를 설치 계획대로 적고 실제 npx로 Health handshake를 통과한다", async () => {
     const seed = await seedEntries();
     const scratch = await mkdtemp(path.join(os.tmpdir(), "openhub-sandbox-"));
