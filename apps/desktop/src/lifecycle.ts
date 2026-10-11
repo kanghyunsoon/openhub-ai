@@ -55,12 +55,37 @@ import { tr, type MessageKey } from "./i18n/index";
  *   (~/.cursor/mcp.json·~/.codex/config.toml)을 읽는다. "user:" 항목의 계획·실행은 사용자 범위 보기가 켜진 세션에서만 받는다.
  *   프로젝트 분석은 사용자 설정을 읽지 않는다.
  * - Preview·결과·상태 문장은 CLI와 같은 Core 문장이다. skip된 Health는 Not verified로만 표시한다.
+ * - 정확한 버전으로 Update(v0.2.0 RC, 선택 A): lifecycle:plan-update의 두 번째 인자 { version }만 받는다. 정확한 SemVer(X.Y.Z와
+ *   prerelease 없음)만 허용하고 범위·dist-tag·URL·경로·셸 문법은 계획 전에 거부한다(network 0). Version State의 backend가 npx인
+ *   항목에서만 받는다. 값은 Core LifecycleRequest.to로만 넘긴다(tool config 도구는 Core가 검토된 버전만 허용한다).
+ *   버전 입력을 바꾸면 renderer가 lifecycle:discard를 부르고, 그 전에 만든 계획·진행 중인 계획·열린 승인 대화상자의 승인은 쓰지 않는다.
+ *   lifecycle:run은 화면의 버전을 다시 받아 Plan의 목표 버전과 다르면 대화상자를 열지 않는다.
  */
 
 export const LIFECYCLE_STATUS_CHANNEL = "lifecycle:status";
 export const LIFECYCLE_CHECK_CHANNEL = "lifecycle:check";
 export const LIFECYCLE_PLAN_CHANNELS = { update: "lifecycle:plan-update", rollback: "lifecycle:plan-rollback", health: "lifecycle:plan-health", repair: "lifecycle:plan-repair" } as const;
 export const LIFECYCLE_RUN_CHANNEL = "lifecycle:run";
+export const LIFECYCLE_DISCARD_CHANNEL = "lifecycle:discard";
+
+/**
+ * 정확한 버전: X.Y.Z(각 자리 앞 0 없음). prerelease·build metadata·범위·dist-tag·v 접두어는 받지 않는다.
+ * Core installer가 고정(pinned) artifact로 보는 형식(X.Y.Z)과 같아서 npx Prepare가 반드시 계획에 들어간다.
+ */
+export const EXACT_VERSION = /^(?:0|[1-9]\d{0,8})\.(?:0|[1-9]\d{0,8})\.(?:0|[1-9]\d{0,8})$/u;
+
+/**
+ * renderer가 보낸 { version }을 읽는다. undefined: 버전 지정 없음(Manifest 기본), null: 형식 오류(계획하지 않는다).
+ * 객체가 아니거나 version이 없거나 빈 문자열이면 지정 없음이다. 문자열이 아니면 형식 오류다.
+ */
+export function requestedVersion(options: unknown): string | undefined | null {
+  if (options === undefined || options === null) return undefined;
+  if (typeof options !== "object" || Array.isArray(options)) return null;
+  const v = (options as { version?: unknown }).version;
+  if (v === undefined || v === "") return undefined;
+  if (typeof v !== "string" || v.length > 64 || !EXACT_VERSION.test(v)) return null;
+  return v;
+}
 
 type Listener = (...args: unknown[]) => unknown;
 interface IpcMainLike {
@@ -101,6 +126,8 @@ export interface LifecycleEntryView {
   canHealth: boolean;
   /** Core가 이 항목의 ready Repair Plan을 만들 수 있을 때만 true(오류 상태만 보고 켜지 않는다). */
   canRepair: boolean;
+  /** 정확한 버전으로 Update를 고를 수 있는가(Update 가능 + Version State backend가 npx). */
+  canChooseVersion: boolean;
   warning: string | null;
 }
 export type LifecycleStatusResponse =
@@ -127,9 +154,15 @@ export interface LifecyclePlanView {
   requirements: { id: string; message: string }[];
   executable: boolean;
   upToDate: boolean;
+  /** update·rollback의 현재 → 목표 버전(spec). health·repair는 null. */
+  version: { from: string; to: string } | null;
 }
 /** superseded: 계획하는 동안 더 새 계획 요청·사용자 범위 보기 변경·프로젝트 변경이 있어 이 계획은 기억하지 않았다(실행 불가). */
-export type LifecyclePlanResponse = { status: "ok"; view: LifecyclePlanView } | { status: "no-project" | "not-managed" | "superseded" } | { status: "error"; code: string; message: string };
+export type LifecyclePlanResponse =
+  | { status: "ok"; view: LifecyclePlanView }
+  | { status: "no-project" | "not-managed" | "superseded" }
+  | { status: "invalid-version" | "version-not-supported"; message: string }
+  | { status: "error"; code: string; message: string };
 
 export interface LifecycleResultView {
   status: LifecycleResultV1["status"];
@@ -191,6 +224,8 @@ export function lifecycleDialogDetail(planned: PlannedLifecycle, requirements: r
     }
   }
   const run = plan.steps.filter((s) => s.kind === "run");
+  const version = versionOf(plan);
+  if (version !== null) lines.push(tr("dialog.version", version));
   lines.push(tr("dialog.prepare", { commands: run.length === 0 ? tr("common.none") : run.map((s) => s.executable + " " + s.args.join(" ")).join(" / ") }));
   for (const s of plan.steps) if (s.kind === "tool-config") lines.push(tr("dialog.toolConfig", { scope: scopeName(s.scope), action: tr(TOOL_CONFIG_ACTION[s.action]) }));
   const health = plan.steps.some((s) => s.kind === "health");
@@ -198,6 +233,12 @@ export function lifecycleDialogDetail(planned: PlannedLifecycle, requirements: r
   for (const w of planWarningTexts(plan, plan.warnings)) lines.push(tr("dialog.warning", { code: w.code, message: w.text }));
   lines.push("", tr("dialog.requirements"), ...requirements.map((r) => tr("dialog.requirement", { id: r.id, message: lifecycleApprovalText(r.id) })), "", tr("dialog.digest", { digest: planDigest }));
   return lines.join("\n");
+}
+
+/** update·rollback의 현재 → 목표 버전(spec). 고정되지 않은 현재 항목은 요청 spec 그대로다. */
+function versionOf(plan: PlannedLifecycle["plan"]): { from: string; to: string } | null {
+  if (plan.operation !== "update" && plan.operation !== "rollback") return null;
+  return { from: plan.current.identity?.spec ?? plan.current.requested, to: plan.target.identity?.spec ?? plan.target.requested };
 }
 
 /** entry id는 "scope:client:serverName"이다(현재 프로젝트 기준, 경로 없음). */
@@ -233,6 +274,8 @@ export interface LifecycleTicket {
   readonly userGeneration: number;
   readonly user: boolean;
   readonly projectDir: string | undefined;
+  /** 계획 폐기 세대(버전 입력 변경 등 lifecycle:discard마다 증가). 다르면 계획·승인 모두 쓰지 않는다. */
+  readonly discardGeneration: number;
 }
 
 /**
@@ -248,6 +291,7 @@ export class LifecycleSession {
   #includeUser = false;
   #generation = 0;
   #userGeneration = 0;
+  #discardGeneration = 0;
   constructor(readonly projectDir: () => string | undefined) {}
   /** 사용자가 [사용자 범위 보기]를 켰는가(lifecycle:status { includeUser }로만 바뀐다). */
   get includeUser(): boolean {
@@ -262,11 +306,17 @@ export class LifecycleSession {
   /** 새 계획 요청의 표. */
   begin(id: string): LifecycleTicket {
     this.#generation += 1;
-    return { generation: this.#generation, userGeneration: this.#userGeneration, user: id.startsWith("user:"), projectDir: this.projectDir() };
+    return { generation: this.#generation, userGeneration: this.#userGeneration, user: id.startsWith("user:"), projectDir: this.projectDir(), discardGeneration: this.#discardGeneration };
+  }
+  /** 사용자가 계획의 입력(목표 버전)을 바꿨다: 기억한 계획을 버리고, 진행 중인 계획 요청과 열린 승인 대화상자의 결과도 쓰지 않게 한다. */
+  discard(): void {
+    this.#discardGeneration += 1;
+    this.#pending.clear();
   }
   /** 이 표가 아직 유효한가(더 새 계획 요청 없음·같은 프로젝트·사용자 항목이면 보기 켜짐 + 같은 사용자 세대). */
   isCurrent(ticket: LifecycleTicket, checkGeneration = true): boolean {
     if (checkGeneration && ticket.generation !== this.#generation) return false;
+    if (ticket.discardGeneration !== this.#discardGeneration) return false;
     if (ticket.projectDir !== this.projectDir()) return false;
     if (ticket.user && (!this.#includeUser || ticket.userGeneration !== this.#userGeneration)) return false;
     return true;
@@ -338,6 +388,7 @@ async function snapshot(session: LifecycleSession, deps: LifecycleDeps): Promise
     const consistent = managed && item.state === "state-consistent";
     const key = entryKeyOf({ client: item.client as InstallClient, scope: item.scope, file: item.file, serverName: item.serverName, projectName: null, projectKey: item.scope === "project" ? projectKey : null });
     const hasPrevious = state.ok && (state.state.entries[key]?.previous ?? null) !== null;
+    const npx = state.ok && state.state.entries[key]?.backend === "npx";
     const [title, ...lines] = statusItemLines(item);
     // Repair 버튼: 오류 상태만 보고 켜지 않는다. Core가 지금 ready Repair Plan을 만들 수 있을 때만(파일 읽기·PATH 탐색만, 실행·쓰기·network 0).
     let canRepair = false;
@@ -353,7 +404,7 @@ async function snapshot(session: LifecycleSession, deps: LifecycleDeps): Promise
     }
     // 사용자 범위 보기가 꺼져 있으면 사용자 항목은 Version State 기록만 보이고(not-inspected) 실행 버튼이 없다.
     if (item.scope === "user" && !includeUser) warning = tr("life.warn.userNotInspected");
-    items.push({ id, scope: item.scope, toolId: item.toolId, title: title!, lines, state: item.state, managed, canUpdate: consistent, canRollback: consistent && hasPrevious, canHealth: consistent, canRepair, warning });
+    items.push({ id, scope: item.scope, toolId: item.toolId, title: title!, lines, state: item.state, managed, canUpdate: consistent, canRollback: consistent && hasPrevious, canHealth: consistent, canRepair, canChooseVersion: consistent && npx, warning });
   }
   return { dir, entries, items, raw };
 }
@@ -377,7 +428,7 @@ export async function statusForRenderer(session: LifecycleSession, deps: Lifecyc
   }
 }
 
-async function requestFor(operation: LifecycleOperation, session: LifecycleSession, deps: LifecycleDeps, id: unknown) {
+async function requestFor(operation: LifecycleOperation, session: LifecycleSession, deps: LifecycleDeps, id: unknown, to?: string) {
   const snap = await snapshot(session, deps);
   if (!("raw" in snap)) return { error: snap.status === "no-project" ? ({ status: "no-project" } as const) : ({ status: "not-managed" } as const) };
   if (typeof id !== "string") return { error: { status: "not-managed" } as const };
@@ -387,6 +438,8 @@ async function requestFor(operation: LifecycleOperation, session: LifecycleSessi
   const item = snap.raw.get(id);
   const allowed = operation === "rollback" ? view?.canRollback : operation === "health" ? view?.canHealth : operation === "repair" ? view?.canRepair : view?.canUpdate;
   if (view === undefined || item === undefined || item.toolId === null || allowed !== true) return { error: { status: "not-managed" } as const };
+  // 정확한 버전은 npx 항목의 update에서만(다른 backend·작업은 계획하지 않는다).
+  if (to !== undefined && (operation !== "update" || !view.canChooseVersion)) return { error: { status: "version-not-supported", message: tr("life.version.notSupported") } as const };
   const request: LifecycleRequest = {
     operation,
     toolId: item.toolId,
@@ -395,6 +448,7 @@ async function requestFor(operation: LifecycleOperation, session: LifecycleSessi
     platform: toRecommendPlatform(deps.platform)!,
     includeUser: session.includeUser,
     targets: [{ client: item.client as InstallClient, scope: item.scope }],
+    ...(to === undefined ? {} : { to }),
   };
   return { request, env: environment(deps, snap.entries) };
 }
@@ -403,7 +457,7 @@ async function requestFor(operation: LifecycleOperation, session: LifecycleSessi
 export async function checkForRenderer(session: LifecycleSession, deps: LifecycleDeps, id: unknown): Promise<LifecycleCheckResponse> {
   try {
     const r = await requestFor("update", session, deps, id);
-    if ("error" in r) return r.error;
+    if ("error" in r) return r.error.status === "version-not-supported" ? { status: "not-managed" } : r.error;
     const built = await planLifecycleRequest(r.request, r.env);
     if (!built.ok) return { status: "ok", view: { id: id as string, result: "check-failed", from: null, to: null, message: tr("life.check.failedCode", { code: built.code }) } };
     const p = built.planned.plan;
@@ -417,11 +471,16 @@ export async function checkForRenderer(session: LifecycleSession, deps: Lifecycl
   }
 }
 
-/** lifecycle:plan-* — entry id 하나. Plan을 만들어 기억하고 Core Preview 문장을 돌려준다. */
-export async function planForRenderer(operation: LifecycleOperation, session: LifecycleSession, deps: LifecycleDeps, id: unknown): Promise<LifecyclePlanResponse> {
+/**
+ * lifecycle:plan-* — entry id 하나(update만 두 번째 인자 { version }). Plan을 만들어 기억하고 Core Preview 문장을 돌려준다.
+ * 버전 형식이 틀리면 계획하지 않는다(resolver·network 0).
+ */
+export async function planForRenderer(operation: LifecycleOperation, session: LifecycleSession, deps: LifecycleDeps, id: unknown, options?: unknown): Promise<LifecyclePlanResponse> {
   try {
     const ticket = session.begin(typeof id === "string" ? id : "");
-    const r = await requestFor(operation, session, deps, id);
+    const to = operation === "update" ? requestedVersion(options) : undefined;
+    if (to === null) return { status: "invalid-version", message: tr("life.version.invalid") };
+    const r = await requestFor(operation, session, deps, id, to);
     if ("error" in r) return r.error;
     const built = await planLifecycleRequest(r.request, r.env);
     // 계획하는 동안 더 새 요청·사용자 범위 보기 변경·프로젝트 변경이 있었으면 이 계획은 기억하지 않는다.
@@ -440,6 +499,7 @@ export async function planForRenderer(operation: LifecycleOperation, session: Li
         requirements: plan.approvalRequirements.map((rid) => ({ id: rid, message: lifecycleApprovalText(rid) })),
         executable: plan.status === "ready",
         upToDate: plan.status === "up-to-date",
+        version: versionOf(plan),
       },
     };
   } catch {
@@ -479,8 +539,11 @@ export function buildLifecycleResultView(result: LifecycleResultV1): LifecycleRe
   };
 }
 
-/** lifecycle:run — entry id 하나. 화면에 보여 준 Plan을 네이티브 대화상자로 승인받아 실행한다. */
-export async function runForRenderer(session: LifecycleSession, deps: LifecycleDeps, id: unknown): Promise<LifecycleRunResponse> {
+/**
+ * lifecycle:run — entry id 하나와(update) 화면에 보이는 { version }. 화면에 보여 준 Plan을 네이티브 대화상자로 승인받아 실행한다.
+ * update Plan의 목표 버전과 화면의 버전이 다르면 대화상자를 열지 않는다(plan-changed).
+ */
+export async function runForRenderer(session: LifecycleSession, deps: LifecycleDeps, id: unknown, options?: unknown): Promise<LifecycleRunResponse> {
   if (typeof id !== "string") return { status: "no-plan" };
   const pending = session.take(id);
   if (pending === undefined) return { status: "no-plan" };
@@ -490,6 +553,7 @@ export async function runForRenderer(session: LifecycleSession, deps: LifecycleD
   // 계획을 만든 뒤 바뀐 것(사용자 범위 보기·프로젝트)이 있으면 대화상자를 열지 않는다.
   const planChanged = { status: "plan-changed" as const, message: tr("life.planChanged") };
   if (!session.isCurrent(pending.ticket, false)) return planChanged;
+  if (pending.request.operation === "update" && requestedVersion(options) !== pending.request.to) return { status: "plan-changed", message: tr("life.version.changed") };
   try {
     const { entries } = await loadRegistry(deps.registryDir);
     const env = environment(deps, entries);
@@ -506,14 +570,19 @@ export async function runForRenderer(session: LifecycleSession, deps: LifecycleD
   }
 }
 
-/** IPC 핸들러 등록. 첫 번째 인자(entry id)만 쓰고 나머지는 무시한다. */
+/** IPC 핸들러 등록. 첫 번째 인자(entry id)와 update 계획·실행의 { version }만 쓰고 나머지는 무시한다. */
 export function registerLifecycle(ipc: IpcMainLike, session: LifecycleSession, deps: LifecycleDeps): void {
   ipc.handle(LIFECYCLE_STATUS_CHANNEL, (_event: unknown, options: unknown) => statusForRenderer(session, deps, options));
   ipc.handle(LIFECYCLE_CHECK_CHANNEL, (_event: unknown, id: unknown) => checkForRenderer(session, deps, id));
-  for (const operation of ["update", "rollback", "health", "repair"] as const) {
+  ipc.handle(LIFECYCLE_PLAN_CHANNELS.update, (_event: unknown, id: unknown, options: unknown) => planForRenderer("update", session, deps, id, options));
+  for (const operation of ["rollback", "health", "repair"] as const) {
     ipc.handle(LIFECYCLE_PLAN_CHANNELS[operation], (_event: unknown, id: unknown) => planForRenderer(operation, session, deps, id));
   }
-  ipc.handle(LIFECYCLE_RUN_CHANNEL, (_event: unknown, id: unknown) => runForRenderer(session, deps, id));
+  ipc.handle(LIFECYCLE_RUN_CHANNEL, (_event: unknown, id: unknown, options: unknown) => runForRenderer(session, deps, id, options));
+  ipc.handle(LIFECYCLE_DISCARD_CHANNEL, () => {
+    session.discard();
+    return { status: "discarded" as const };
+  });
 }
 
 /**

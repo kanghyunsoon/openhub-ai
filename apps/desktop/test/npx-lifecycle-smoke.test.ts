@@ -142,5 +142,27 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || electronBin === null)("v0.
     expect(mongo.smoke.install.stages[0]).toMatch(/^Prepared:cached/u);
     console.log("npx smoke: " + JSON.stringify({ update: chain.smoke.update.status, rollback: chain.smoke.rollbackChain.rollback.status, health: chain.smoke.rollbackChain.health.status, mongoPrepared: mongo.smoke.install.stages[0] }));
   }, 300_000);
+
+  it("정확한 버전 Update(선택 A): 목표 버전 입력 → 계획 → 승인 → V1 → V2 → Rollback V1 → Health(클릭), 형식이 틀린 값은 거부", async () => {
+    await promisify(execFile)(process.execPath, ["build.mjs"], { cwd: DESKTOP });
+    const run = await smoke({ OPENHUB_SMOKE_PROJECT: path.join(ROOT, "examples", "demo-project"), OPENHUB_SMOKE_INSTALL: "playwright-mcp", OPENHUB_SMOKE_UPDATE: "playwright-mcp", OPENHUB_SMOKE_UPDATE_VERSIONS: "9.9.7,9.9.8", OPENHUB_SMOKE_ROLLBACK: "1" });
+    const exact = run.smoke.exact;
+    expect(run.code, JSON.stringify(exact)).toBe(0);
+    expect(exact.invalid.status).toBe("not-executable");
+    expect(exact.invalid.message).toContain("1.2.3");
+    expect(exact.steps.map((s: { version: string; result: { status: string; plan: { to: string } } }) => [s.version, s.result.status, s.result.plan.to])).toEqual([
+      ["9.9.7", "updated", "@playwright/mcp@9.9.7"],
+      ["9.9.8", "updated", "@playwright/mcp@9.9.8"],
+    ]);
+    expect(exact.steps[1].result.plan.from).toBe("@playwright/mcp@9.9.7");
+    // 정확한 버전은 resolver가 조회하지 않는다.
+    expect(exact.fetched).toBe(0);
+    expect(run.smoke.rollbackChain.rollback).toMatchObject({ status: "rolled-back", outcome: "succeeded" });
+    expect(run.smoke.rollbackChain.health).toMatchObject({ status: "health-checked", outcome: "succeeded", after: ["state-consistent"] });
+    const npm = run.smoke.rollbackChain.npmCalls as string[];
+    expect(npm.some((c) => c.includes("--package=@playwright/mcp@9.9.7"))).toBe(true);
+    expect(npm.some((c) => c.includes("--package=@playwright/mcp@9.9.8"))).toBe(true);
+    console.log("exact-version smoke: " + JSON.stringify({ steps: exact.steps.map((s: { version: string; result: { status: string } }) => s.version + "=" + s.result.status), rollback: run.smoke.rollbackChain.rollback.status, health: run.smoke.rollbackChain.health.status }));
+  }, 300_000);
 });
 

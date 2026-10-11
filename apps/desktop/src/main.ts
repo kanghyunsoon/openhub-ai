@@ -137,6 +137,11 @@ const smokeLifecycle = smokeUpdate === undefined || smokeNpmCache === undefined 
 /** 스모크 rollback(v0.2.0): --smoke + 스모크 update + OPENHUB_SMOKE_ROLLBACK=1이면 update 뒤 [롤백] → [Health Check]까지 클릭으로 지난다. */
 const smokeRollback = smokeUpdate !== undefined && process.env["OPENHUB_SMOKE_ROLLBACK"] === "1";
 /**
+ * 스모크 정확한 버전 Update(v0.2.0 RC 선택 A): --smoke + 스모크 update + OPENHUB_SMOKE_UPDATE_VERSIONS="V1,V2"이면 버전 없는 update 대신
+ * INSTALLED의 목표 버전 입력 → [업데이트 계획] → 승인 → 실행을 버전마다 클릭으로 지난다(먼저 형식이 틀린 값이 거부되는지 본다).
+ */
+const smokeUpdateVersions = smokeUpdate === undefined || !process.env["OPENHUB_SMOKE_UPDATE_VERSIONS"] ? undefined : process.env["OPENHUB_SMOKE_UPDATE_VERSIONS"].split(",").map((s) => s.trim()).filter((s) => s !== "");
+/**
  * 스모크 Repair(v0.2.0 P0-3): --smoke + OPENHUB_SMOKE_REPAIR(toolId) + OPENHUB_SMOKE_HOME(테스트가 미리 설치·손상시킨 home)일 때만.
  * 설치 스모크와 함께 쓰지 않는다. 가짜 npm(cache 항목만)·가짜 Health·자동 확인 대화상자를 쓴다.
  */
@@ -286,14 +291,26 @@ async function createWindow(): Promise<void> {
                 ].map(async ([name, file]) => [name, await readFile(file!, "utf8").catch(() => null)] as const),
               ),
             );
+      type ExactStep = { status: string; outcome?: string; message?: string; plan?: { from: string | null; to: string | null }; requirements?: string[]; after?: string[] };
+      const exact =
+        smokeUpdateVersions === undefined || smokeUpdate === undefined || install === undefined
+          ? undefined
+          : {
+              invalid: (await win.webContents.executeJavaScript("window.__openhubLifecycleUpdateTo(" + JSON.stringify(smokeUpdate) + ', "latest", false)')) as ExactStep,
+              steps: [] as { version: string; result: ExactStep }[],
+            };
+      for (const version of exact === undefined ? [] : smokeUpdateVersions!) {
+        exact!.steps.push({ version, result: (await win.webContents.executeJavaScript("window.__openhubLifecycleUpdateTo(" + JSON.stringify(smokeUpdate) + ", " + JSON.stringify(version) + ")")) as ExactStep });
+      }
       const update =
-        smokeUpdate === undefined || install === undefined
+        smokeUpdate === undefined || install === undefined || exact !== undefined
           ? undefined
           : ((await win.webContents.executeJavaScript("window.__openhubLifecycle(" + JSON.stringify(smokeUpdate) + ")")) as { status: string; health: string[]; rollbackButton: boolean });
+      const updated = update?.status === "updated" || (exact !== undefined && exact.steps.length > 0 && exact.steps.every((s) => s.result.status === "updated"));
       // 스모크 rollback(v0.2.0): update 뒤 [이전 버전으로 롤백] → 승인 → 결과, 이어서 [Health Check] → 승인 → 결과(클릭으로).
       type RunOp = { status: string; outcome?: string; requirements?: string[]; lines?: string[]; after?: string[] };
       const rollbackChain =
-        !smokeRollback || update === undefined || update.status !== "updated"
+        !smokeRollback || !updated
           ? undefined
           : {
               rollback: (await win.webContents.executeJavaScript("window.__openhubLifecycleRun(" + JSON.stringify(smokeUpdate) + ', "rollback")')) as RunOp,
@@ -359,6 +376,11 @@ async function createWindow(): Promise<void> {
       }
       const installOk = install === undefined || install.status === "succeeded";
       const updateOk = update === undefined || update.status === "updated";
+      const exactOk =
+        exact === undefined ||
+        (exact.invalid.status === "not-executable" &&
+          exact.steps.length === smokeUpdateVersions!.length &&
+          exact.steps.every((s) => s.result.status === "updated" && s.result.outcome === "succeeded" && (s.result.plan?.to ?? "").endsWith("@" + s.version)));
       const rollbackOk = !smokeRollback || (rollbackChain !== undefined && rollbackChain.rollback.status === "rolled-back" && rollbackChain.health.status === "health-checked");
       const repairOk = repair === undefined || (repair.status === "repaired" && repair.outcome === "succeeded" && (repair.after ?? []).length > 0 && (repair.after ?? []).every((s) => s === "state-consistent"));
       const adoptOk = adopt === undefined || (adopt.status === "ok" && (smokeAdopt?.dialogs.length ?? 0) === 2 && (smokeAdopt?.spawns ?? 0) === 6);
@@ -388,6 +410,7 @@ async function createWindow(): Promise<void> {
           ...(project === undefined ? {} : { project, recommendations, forYou }),
           ...(install === undefined ? {} : { install: { ...install, spawned: smokeDeps?.spawned.length ?? 0, dialogs: smokeDeps?.dialogs ?? 0, configFiles } }),
           ...(update === undefined ? {} : { update: { ...update, fetched: smokeLifecycle?.fetched.length ?? 0, healthRuns: smokeLifecycle?.healthRuns ?? 0, spawned: smokeLifecycle?.spawned.length ?? 0, dialogs: smokeLifecycle?.dialogs ?? 0 } }),
+          ...(exact === undefined ? {} : { exact: { ...exact, fetched: smokeLifecycle?.fetched.length ?? 0, healthRuns: smokeLifecycle?.healthRuns ?? 0, dialogs: smokeLifecycle?.dialogs ?? 0 } }),
           ...(rollbackChain === undefined ? {} : { rollbackChain: { ...rollbackChain, healthRuns: smokeLifecycle?.healthRuns ?? 0, npmCalls: (smokeLifecycle?.spawned ?? []).map((c) => c.slice(1).join(" ")), installNpmCalls: (smokeDeps?.spawned ?? []).map((c) => c.slice(1).join(" ")) } }),
           ...(repair === undefined ? {} : { repair: { ...repair, npmCalls: smokeRepair?.npmCalls.length ?? 0, healthRuns: smokeRepair?.healthRuns ?? 0, dialogs: smokeRepair?.dialogs ?? [] } }),
           ...(adopt === undefined ? {} : { adopt: { ...adopt, spawns: smokeAdopt?.spawns ?? 0, dialogs: smokeAdopt?.dialogs ?? [] } }),
@@ -398,7 +421,7 @@ async function createWindow(): Promise<void> {
           i18n,
         })}\n`,
         // pipe로 받는 쪽(release dry-run)이 결과 줄을 놓치지 않도록 stdout에 다 쓴 뒤에 종료한다(TASK-072, Linux AppImage에서 확인).
-        () => app.exit(count > 0 && (project === undefined || project > 0) && repairOk && adoptOk && userScopeOk && rollbackOk && i18nOk && installOk && updateOk && releaseOk && onboardingOk && discoverOk ? 0 : 1),
+        () => app.exit(count > 0 && (project === undefined || project > 0) && repairOk && adoptOk && userScopeOk && rollbackOk && exactOk && i18nOk && installOk && updateOk && releaseOk && onboardingOk && discoverOk ? 0 : 1),
       );
     } catch (error) {
       process.stderr.write(`OPENHUB_SMOKE_FAILED ${String(error)}\n`);

@@ -59,11 +59,13 @@ const lifecycleBridge = {
   lifecycleStatus: (options?: unknown) =>
     ipcRenderer.invoke("lifecycle:status", options !== null && typeof options === "object" && typeof (options as { includeUser?: unknown }).includeUser === "boolean" ? { includeUser: (options as { includeUser: boolean }).includeUser } : undefined),
   checkLifecycle: (id: unknown) => ipcRenderer.invoke("lifecycle:check", String(id)),
-  planLifecycleUpdate: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-update", String(id)),
+  // 정확한 버전(선택)은 문자열일 때만 { version }으로 보낸다. 검증은 main이 한다.
+  planLifecycleUpdate: (id: unknown, version?: unknown) => ipcRenderer.invoke("lifecycle:plan-update", String(id), typeof version === "string" ? { version } : undefined),
   planLifecycleRollback: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-rollback", String(id)),
   planLifecycleHealth: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-health", String(id)),
   planLifecycleRepair: (id: unknown) => ipcRenderer.invoke("lifecycle:plan-repair", String(id)),
-  runLifecycle: (id: unknown) => ipcRenderer.invoke("lifecycle:run", String(id)),
+  runLifecycle: (id: unknown, version?: unknown) => ipcRenderer.invoke("lifecycle:run", String(id), typeof version === "string" ? { version } : undefined),
+  discardLifecyclePlan: () => ipcRenderer.invoke("lifecycle:discard"),
 };
 
 /**
