@@ -21,11 +21,20 @@ describe("v0.2.0 Release Notes Client 검증 표", () => {
     }
   });
 
-  it("Registry 9개, 25-40 미포함, 검증은 Kubernetes MCP Server에만 있다는 범위를 유지한다", () => {
+  it("Registry 9개, 25-40 목표 미달성·이월, 검증은 Kubernetes MCP Server에만 있다는 범위를 유지한다", () => {
     expect(notes).toContain("The Verified Registry has **9 tools**.");
     expect(notes).toContain("Per-client start verification exists for **Kubernetes MCP Server only**");
     expect(notes).toContain("only version 0.0.67 is allowed");
-    expect(notes).not.toMatch(/\b(?:25|40) (?:verified )?tools\b/u);
+    // 25-40은 목표로만 언급하고 달성했다고 쓰지 않는다.
+    expect(notes).toContain("The earlier target of 25–40 verified tools is **not met** in this release and is carried over to a later version");
+    expect(notes).not.toMatch(/\b(?:ships|includes|has) (?:\*\*)?(?:2[5-9]|3\d|40)(?:\*\*)? (?:verified )?tools\b/u);
+  });
+
+  it("미서명 NSIS와 SmartScreen 미관찰, AppImage 추출 실행 검증 범위를 적는다", () => {
+    expect(notes).toContain("the NSIS installer has no code signature. How Windows SmartScreen or Smart App Control reacts to it was **not observed** in release testing");
+    expect(notes).toContain("by extracting it (`--appimage-extract`) and starting the extracted app. Starting the AppImage file directly through FUSE was not part of release testing.");
+    expect(notes).toContain("nothing is verified on macOS (platform-unverified)");
+    expect(notes).toContain("starting tools from Cursor is **not verified** on any platform");
   });
 
   it("정확한 버전 Update: npx만, X.Y.Z, 빈 값은 기존 동작, 승인 필요, 실패 시 복구, Kubernetes 0.0.67 제한을 적는다", () => {
