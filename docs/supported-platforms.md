@@ -9,7 +9,13 @@
 
 ## Clients
 
-Claude Code, Codex and Cursor, in project scope and user scope. OpenHub never writes `~/.claude.json`.
+| Client | Install support (files OpenHub writes) |
+| --- | --- |
+| Claude Code | Project scope (`.mcp.json`). OpenHub never writes the Claude Code user configuration (`~/.claude.json`); user scope is not offered for Claude Code. |
+| Codex | Project scope (`.codex/config.toml`) and user scope (`~/.codex/config.toml`). |
+| Cursor | Project scope (`.cursor/mcp.json`) and user scope (`~/.cursor/mcp.json`). |
+
+Install support is not the same as run verification. The app shows, per client and OS, whether OpenHub actually started the tool from that client's configuration. Today: Cursor is **not verified** on Windows and Linux; on macOS nothing is verified (platform-unverified); Kubernetes MCP Server is verified for Claude Code and Codex on Windows and Linux and is limited to version 0.0.67. Other tools have no per-client run record.
 
 ## Backends
 
