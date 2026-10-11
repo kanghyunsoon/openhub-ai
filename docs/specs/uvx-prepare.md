@@ -1,8 +1,8 @@
-# uvx Prepare (v0.2.1 design, not implemented)
+# uvx Prepare (v0.2.1 design)
 
-Status: **design for approval**. No code in this change. Companion to [npx Prepare](npx-prepare.md).
+Status: **design approved** (2026-10-11). The implementation is a separate Draft PR. Companion to [npx Prepare](npx-prepare.md).
 
-Labels: **Fact** (measured), **Proposal**, **Open Question**.
+Labels: **Fact** (measured), **Decision** (approved), **Open** (known limit, not blocking).
 
 ## Problem (Fact)
 
@@ -33,39 +33,64 @@ uvx [--no-build] --compile-bytecode --from <pkg>==<X.Y.Z> [--with <dep>==<A.B.C>
 - `--no-build` refuses to build source distributions, so no third-party build code runs. postgres-mcp prepares with `--no-build` (all wheels). **serena does not**: its dependency `proxy-tools` has no wheel (`Wheels are required for proxy-tools because building from source is disabled`), on both OSes. With building allowed, uv builds `proxy-tools==0.1.0` from source, which runs that package's build backend.
 - A floating spec (`--from postgres-mcp`) also prepares, but a later online start may resolve a newer release, so Prepare can only promise the environment for an exact version.
 
-## Proposal
+## Decisions
+
+| # | Decision |
+| --- | --- |
+| D1 | Prepare only exact versions: `--from <pkg>==X.Y.Z` and every `--with` also `==X.Y.Z`. Floating specs stay launch-on-demand. |
+| D2 | Registry Manifests for uvx tools are pinned to reviewed versions (postgres-mcp `0.3.0` with `mcp==1.30.0`; serena-agent `1.7.0` after verification), which turns on Prepare and the exact update flow. The pins are made in the Registry PR (#39), not in the engine PR. |
+| D3 | Wheels only by default (`--no-build`). A source build is allowed only for a Manifest with a reviewed flag that lists each source-built package (name, exact version, source), plus a separate `source-build` approval and a third-party-code notice. Rejecting that approval means zero builds. There is no automatic fallback from wheels-only to a source build. |
+| D4 | Order: plan → approval → **Prepare** → offline verify → client config write → Health. A Prepare or verify failure means zero config changes and Version State unchanged. |
+| D5 | Health startup limit stays 20 s. Prepare has its own limit of at most 10 min (600 000 ms, same as npx Prepare). |
+| D6 | On timeout, failure or cancel, the uv process tree is killed and its exit confirmed (same mechanism as npx Prepare). If the exit cannot be confirmed, the result says so. |
+| D7 | No version change after approval: the plan digest covers the Prepare argv, and the runner re-checks that the spec and `--with` pins equal the launch target. A Manifest change → `PLAN_STALE`. |
+| D8 | Child environment is an allowlist (below). AI/API keys, tokens, cloud credentials and database URLs are never passed. Package-index settings are fingerprinted into the plan (without credentials), so an index change between approval and run → `PLAN_STALE`. No credentials in logs, results or the plan. |
+| D9 | OpenHub never deletes uv cache entries. |
+
+## Design
 
 ### When it applies (same rule as npx Prepare)
 
 | Case | Prepare |
 | --- | --- |
-| Install, uvx Manifest pinned to `pkg==X.Y.Z` | yes |
-| Install, floating uvx Manifest (postgres-mcp, serena today) | no (see Open Questions) |
+| Install, uvx Manifest pinned to `pkg==X.Y.Z` (and all `--with` pinned) | yes |
+| Install, floating uvx Manifest, or extra uv flags before the command | no (launch-on-demand, as today) |
 | Update / rollback to an exact version | yes |
 | Rollback to an unlocked version, Health only, npx, Docker | no change |
 
 ### Plan step
 
-`{ id: "uvx-prepare", kind: "run", executable: "uvx", args: [<build flag>, "--compile-bytecode", "--from", "<pkg>==<X.Y.Z>", ...withPins, "python", "-c", "pass"], cwd: "isolated", network: true, timeoutMs: 600000 }`
+`{ id: "uvx-prepare", kind: "run", executable: "uvx", args: [<"--no-build" unless source build>, "--compile-bytecode", "--from", "<pkg>==<X.Y.Z>", ...("--with", "<dep>==<A.B.C>"), "python", "-c", "pass"], cwd: "isolated", network: true, timeoutMs: 600000 }`, with `artifact.preparation: "uv-cache"`.
 
-- The spec and `--with` pins must equal the plan's launch target. They are checked by the plan schema and again right before running. A different version, extra index flags or extra arguments → `PLAN_STALE` / plan rejected.
-- The build flag comes from a reviewed Manifest field, not from the user:
-  - `install.options.prepare.build: "wheels-only"` (default) → `--no-build`;
-  - `"source-build-reviewed"` → no flag, plus an extra approval item (below). serena would need this.
-- Order: plan → approval → **Prepare** → verify (`uvx --offline … python -c pass` succeeds) → client config write → Health (unchanged 20 s). If Prepare or the verify fails, nothing is written (`preparation-failed`) and Version State is unchanged.
+- The spec and `--with` pins must equal the plan's launch target. The plan schema checks this, and the runner checks it again right before running. A different version, index flags or extra arguments → plan rejected.
+- The build flag comes from a reviewed Manifest field, never from the user:
+
+  ```yaml
+  install:
+    options:
+      command: "uvx --from serena-agent==1.7.0 serena start-mcp-server"
+      prepare:
+        build: source-build-reviewed      # default: wheels-only
+        sourceBuild:
+          - { package: proxy-tools, version: 0.1.0, source: pypi-sdist }
+  ```
+
+  `wheels-only` (default) → `--no-build`. `source-build-reviewed` → no build flag, plus the `source-build` approval and notice. Registry validation rejects `source-build-reviewed` without a `sourceBuild` list, a list on a wheels-only Manifest, unknown keys, and non-exact versions.
+- Verify: `uvx --offline [--no-build] --from … --with … python -c pass` must succeed (network forbidden), so the client's later start finds the same environment.
 
 ### Cache
 
 - Prepare must fill the **same** uv cache the client will use, so it cannot run in an isolated cache. OpenHub does not set `UV_CACHE_DIR`; uv picks the user's default, as the client will.
-- OpenHub never deletes uv cache entries. A broken entry is retried with `--refresh-package <pkg>` as a separate approved retry.
-- Open Question: a client started with a different `UV_CACHE_DIR` (set in its own environment) would not see the prepared environment. Health would still run, so the risk is a slow first client start, not a wrong one.
+- OpenHub never deletes uv cache entries. A failed Prepare is retried with a new plan and approval; uv itself replaces incomplete entries.
+- Open: a client started with a different `UV_CACHE_DIR` (set in its own environment) would not see the prepared environment. Health still runs, so the risk is a slow first client start, not a wrong one.
 
 ### Child environment (allowlist, like `npmChildEnv`)
 
-- Passed: `PATH` and OS/system directories, temp and home directories, locale, XDG directories, proxy variables, `SSL_CERT_FILE` / `SSL_CERT_DIR` / `REQUESTS_CA_BUNDLE`, `UV_*` settings that select the cache, Python and index (`UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, `UV_INDEX_URL`, `UV_EXTRA_INDEX_URL`, `UV_DEFAULT_INDEX`, `UV_NATIVE_TLS`, `UV_OFFLINE`), and `PIP_*` index settings.
+- Passed: `PATH` and OS/system directories, temp and home directories, locale, XDG directories, proxy variables, `SSL_CERT_FILE` / `SSL_CERT_DIR` / `REQUESTS_CA_BUNDLE`, the `UV_*` settings that select the cache, Python and index (`UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, `UV_PYTHON`, `UV_INDEX`, `UV_INDEX_URL`, `UV_EXTRA_INDEX_URL`, `UV_DEFAULT_INDEX`, `UV_INDEX_STRATEGY`, `UV_NATIVE_TLS`, `UV_INSECURE_HOST`), `UV_INDEX_<NAME>_USERNAME` / `_PASSWORD`, and `PIP_INDEX_URL` / `PIP_EXTRA_INDEX_URL`.
 - Not passed: AI provider keys, `GITHUB_TOKEN` / `GH_TOKEN`, cloud credentials, database URLs such as `DATABASE_URI`, MCP connection strings, `PYTHONPATH`, `PYTHONSTARTUP`, and every other user variable.
-- Index credentials (`UV_INDEX_<NAME>_USERNAME` / `_PASSWORD`, credentials in an index URL) are passed only if the user already configured them for uv. They are never logged or put in the plan.
-- Open Question: a private index configured only in `uv.toml` is read by both Prepare and the client, so there is no mismatch. An index set only in the client's own environment is not visible to OpenHub.
+- Index credentials (`UV_INDEX_<NAME>_USERNAME` / `_PASSWORD`, credentials in an index URL) are passed only if the user already configured them for uv. They are never logged, never in results, never in the plan.
+- Index fingerprint (D8): the plan records whether a custom index is set and a sha256 over the index variable names and their URLs with user/password removed. Password variables contribute only their names. A change between approval and run gives a different plan digest → `PLAN_STALE`. A custom index adds the `uvx-custom-index` notice.
+- Open: an index configured only in `uv.toml` is read by both Prepare and the client, so there is no mismatch, but it is not part of the fingerprint. An index set only in the client's own environment is not visible to OpenHub.
 
 ### Approval text (draft)
 
@@ -77,20 +102,16 @@ uvx [--no-build] --compile-bytecode --from <pkg>==<X.Y.Z> [--with <dep>==<A.B.C>
 ### TOCTOU and version changes
 
 - Only exact versions are prepared. The verify step runs offline, so it cannot pull a different version.
-- A re-uploaded or yanked release is not detected by uv without hash checking. Open Question: whether to require `--require-hashes` style locking for uvx tools (would need a lock file per tool).
+- Open: a re-uploaded or yanked release is not detected by uv without hash checking. Hash locking per tool is not part of v0.2.1.
 - The plan digest covers the Prepare argv. A Manifest change between approval and run → `PLAN_STALE`.
 
-## Open Questions (need a decision)
+## Resolved questions
 
-1. Floating uvx Manifests (postgres-mcp, serena) get no Prepare under this rule, so the Windows first Health still times out after **install**. Options:
-   - (a) pin both Manifests to reviewed exact versions (postgres-mcp `0.3.0` with `mcp==1.30.0`, serena-agent `1.7.0`), which turns on Prepare and the npx-style exact update flow;
-   - (b) resolve the latest version at plan time and prepare that, while the client keeps the floating spec (the first client start could still re-resolve);
-   - (c) keep launch-on-demand and document "run Health again on Windows".
-   - Recommendation: (a), reviewed per version like Kubernetes `0.0.67`.
-2. Whether serena's source build (`proxy-tools`) is acceptable with the extra approval item, or serena should stay without Prepare.
-3. Prepare time limit: 10 min like npx Prepare, or shorter for uvx.
+1. Floating uvx Manifests → (a) pin to reviewed exact versions (D2).
+2. serena's `proxy-tools` source build → allowed only under D3.
+3. Prepare limit → at most 10 min (D5).
 
 ## Not covered
 
-macOS. Private indexes. Tools that need system libraries to build.
+macOS. Hash locking. Tools that need system libraries to build.
 
