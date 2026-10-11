@@ -2,8 +2,10 @@ name: Desktop E2E (Linux)
 
 # 실제 Electron E2E를 Linux runner(xvfb)에서 실행한다. v0.2.0 merge gate: required check 이름은 "desktop-e2e"(맨 아래 job)다.
 # - 모든 PR과 main push에서 결론을 낸다(paths 필터 없음). 그래서 Desktop과 무관한 PR에서도 required check가 비지 않는다.
-# - Desktop·Core·Registry·의존성·이 워크플로가 바뀌면 Electron E2E 파일을 하나씩 순서대로 실행한다. 바뀌지 않았으면 실행하지 않았다는 결론(성공)을 낸다.
-#   변경을 판단하지 못하면(diff 실패) 실행한다.
+# - 변경 판단은 scripts/desktop-e2e.mjs(changes)가 한다. 영향이 없다고 확인된 경로(문서, 다른 워크플로, 패키지 테스트 파일, CLI,
+#   저장소 테스트)만 있으면 "E2E 불필요"(성공)이고, 그 밖의 변경·모르는 변경·diff 실패는 모두 Electron E2E를 실행한다.
+# - 실행 대상은 파일마다 한 단계(순서대로)다. 마지막 검사(check)가 apps/desktop/test에서 OPENHUB_E2E로 켜지는 파일을 모두 찾아,
+#   워크플로에 등록되지 않아 실행되지 않은 파일·결과 누락·건너뜀·todo·0개 실행이 있으면 실패한다.
 # - 단위 테스트는 CI(check)가 맡는다. 이 워크플로는 실제 Electron 창 테스트만 돌린다(continue-on-error 없음).
 # - 테스트는 임시 project·home, 가짜 npm·Health만 쓴다(실제 MCP 실행·secret 없음). 실제 MCP 검증은 registry-remote.yml(sandbox)에 따로 있다.
 on:
@@ -29,6 +31,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - id: detect
         env:
           EVENT: ${{ github.event_name }}
@@ -43,17 +48,18 @@ jobs:
             exit 0
           fi
           if [ "$EVENT" = "pull_request" ]; then range="$BASE...$HEAD"; else range="$BEFORE..$HEAD"; fi
-          if ! files=$(git diff --name-only "$range"); then
+          if ! git diff --name-only "$range" > "$RUNNER_TEMP/changed.txt"; then
             echo "could not compute changed files for $range: Electron E2E runs"
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          printf '%s\n' "$files"
-          if printf '%s\n' "$files" | grep -Eq '^(apps/desktop/|packages/core/(src/|package\.json$)|registry/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|scripts/check-e2e-results\.mjs$|\.github/workflows/desktop-e2e\.yml$)'; then
+          if ! decision=$(node scripts/desktop-e2e.mjs changes "$RUNNER_TEMP/changed.txt"); then
+            echo "change classification failed: Electron E2E runs"
             echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "$decision"
+          echo "$decision" >> "$GITHUB_OUTPUT"
 
   electron:
     name: desktop-e2e / electron
@@ -94,10 +100,13 @@ jobs:
       - name: E2E for you (diagnostics, add to another client or scope)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: xvfb-run -a pnpm exec vitest run apps/desktop/test/for-you-electron.e2e.test.ts --reporter=verbose --reporter=json --outputFile.json=e2e-results/for-you.json
-      # 건너뛴 테스트를 통과로 보지 않는다: 파일마다 결과가 있고, 실행된 테스트가 1개 이상이며, 실패·건너뜀·todo가 0이어야 한다.
-      - name: Every Electron E2E ran (no skipped tests)
+      - name: E2E npx lifecycle smoke (install, update, rollback, Health in the window)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: node scripts/check-e2e-results.mjs e2e-results i18n repair install-clients user-scope for-you
+        run: xvfb-run -a pnpm exec vitest run apps/desktop/test/npx-lifecycle-smoke.test.ts --reporter=verbose --reporter=json --outputFile.json=e2e-results/npx-lifecycle-smoke.json
+      # 건너뛴 테스트를 통과로 보지 않고, 등록되지 않은 Electron E2E 파일이 있으면 실패한다.
+      - name: Every Electron E2E file ran (none missing, none skipped)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: node scripts/desktop-e2e.mjs check e2e-results
 
   desktop-e2e:
     name: desktop-e2e
