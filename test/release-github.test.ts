@@ -75,7 +75,8 @@ describe("Release asset 계약", () => {
     for (const bad of ["0.1.1", "v0.1", "v0.1.1-rc.1", "v0.1.1 ", "refs/tags/v0.1.1"]) expect(checkReleaseTag(bad, "0.1.1"), bad).toHaveLength(1);
   });
 
-  it("버전 출처 4곳(core·cli·desktop package.json, OPENHUB_CORE_VERSION)이 모두 같아야 하고, 다르면 패키징 전에 멈춘다", () => {
+  // tsx로 release 스크립트를 새 프로세스로 실행한다(콜드 스타트). 같은 파일의 다른 프로세스 실행 테스트처럼 제한 시간을 둔다.
+  it("버전 출처 4곳(core·cli·desktop package.json, OPENHUB_CORE_VERSION)이 모두 같아야 하고, 다르면 패키징 전에 멈춘다", { timeout: 60_000 }, () => {
     const same = Object.fromEntries(VERSION_SOURCES.map((s) => [s, "0.2.0"]));
     expect(checkVersionConsistency(same)).toEqual([]);
     expect(checkVersionConsistency({ ...same, "apps/desktop/package.json": "0.1.1" })).toEqual([

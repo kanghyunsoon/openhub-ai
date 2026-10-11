@@ -49,15 +49,36 @@
     return count;
   }
 
+  // (v0.2.1 P0-1) 선택·분석 중에는 이전 프로젝트의 추천·설치·INSTALLED 패널을 "이전 프로젝트" 상태로 흐리게 하고 누를 수 없게 한다.
+  // main도 분석이 끝나기 전에는 설치·계획을 받지 않는다. 취소하면 그대로 되돌리고, 실패하면 프로젝트 영역을 비운다.
+  const STALE_IDS = ["for-you", "lifecycle"];
+  function markStale(on) {
+    for (const id of STALE_IDS) {
+      const node = document.getElementById(id);
+      if (!node) continue;
+      node.classList.toggle("project-stale", on);
+      if (on) node.setAttribute("aria-busy", "true");
+      else node.removeAttribute("aria-busy");
+    }
+  }
+  let scanSeq = 0;
+
   async function scan() {
+    const my = ++scanSeq;
     const status = document.getElementById("project-status");
     status.textContent = t("project.analyzing");
+    markStale(true);
     const result = await window.openhub.scanProject();
+    // 더 새 선택이 화면을 맡고 있으면 이 응답은 버린다(main도 superseded로 알린다).
+    if (result.status === "superseded" || my !== scanSeq) return 0;
+    markStale(false);
     if (result.status === "canceled") {
       status.textContent = t("project.canceled");
       return 0;
     }
     if (result.status === "error") {
+      // main은 현재 프로젝트를 비웠다. 이전 프로젝트의 분석 결과를 남기지 않는다(추천·INSTALLED도 다시 읽혀 비워진다).
+      document.getElementById("project-body").replaceChildren();
       status.textContent = t("project.error", { message: result.message });
       return 0;
     }

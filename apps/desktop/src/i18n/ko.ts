@@ -319,6 +319,7 @@ export const ko: Readonly<Record<keyof typeof en, string>> = {
   "install.configChange.none": "쓰지 않음",
   "install.dialog.title": "OpenHub 설치 승인",
   "install.dialog.message": "{name} 설치 계획을 승인합니까?",
+  "install.dialog.project": "프로젝트: {name}(프로젝트 범위 파일은 이 폴더에 씁니다)",
   "install.dialog.approve": "설치 승인",
   "install.platformUnsupported": "이 운영체제에서는 설치를 지원하지 않습니다",
   "install.manifestRejected": "Manifest가 설치 정책을 통과하지 못했습니다",

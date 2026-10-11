@@ -95,6 +95,7 @@ button:hover { filter: brightness(1.1); }
 .lifecycle .entry-health { margin: 2px 0 0; }
 .lifecycle .entry-warning { color: var(--warn); margin: 4px 0 0; }
 .lifecycle .entry-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.project-stale { opacity: 0.45; pointer-events: none; }
 .lifecycle .lifecycle-version-label { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
 .lifecycle .lifecycle-version { width: 11em; font: inherit; font-family: ui-monospace, monospace; }
 .lifecycle .entry-check { margin: 4px 0 0; }

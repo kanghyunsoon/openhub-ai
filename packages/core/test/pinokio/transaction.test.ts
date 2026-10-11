@@ -269,7 +269,6 @@ describe("REQ-032 Pinokio 실행·Health·Lifecycle", () => {
     const e2e = readFileSync(path.join(import.meta.dirname, "e2e.test.ts"), "utf8");
     expect(e2e).toContain('describe.skipIf(process.env["OPENHUB_E2E"] !== "1")');
     expect(readFileSync(path.join(REPO_ROOT, ".github/workflows/ci.yml"), "utf8")).not.toContain("OPENHUB_E2E");
-    expect(process.env["OPENHUB_E2E"] === "1" || true).toBe(true);
   });
 });
 
