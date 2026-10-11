@@ -8,6 +8,8 @@ import {
   checkLocalAssets,
   checkReleaseNotes,
   checkReleaseTag,
+  checkVersionConsistency,
+  VERSION_SOURCES,
   checksummedAssetNames,
   draftNotesUpdate,
   flattenReleases,
@@ -71,6 +73,23 @@ describe("Release asset 계약", () => {
     expect(checkReleaseTag("v0.1.1", "0.1.1")).toEqual([]);
     expect(checkReleaseTag("v0.1.0", "0.1.1")).toEqual(["tag v0.1.0 ≠ package v0.1.1"]);
     for (const bad of ["0.1.1", "v0.1", "v0.1.1-rc.1", "v0.1.1 ", "refs/tags/v0.1.1"]) expect(checkReleaseTag(bad, "0.1.1"), bad).toHaveLength(1);
+  });
+
+  it("버전 출처 4곳(core·cli·desktop package.json, OPENHUB_CORE_VERSION)이 모두 같아야 하고, 다르면 패키징 전에 멈춘다", () => {
+    const same = Object.fromEntries(VERSION_SOURCES.map((s) => [s, "0.2.0"]));
+    expect(checkVersionConsistency(same)).toEqual([]);
+    expect(checkVersionConsistency({ ...same, "apps/desktop/package.json": "0.1.1" })).toEqual([
+      "버전 불일치: packages/core/package.json=0.2.0, apps/cli/package.json=0.2.0, apps/desktop/package.json=0.1.1, OPENHUB_CORE_VERSION=0.2.0",
+    ]);
+    expect(checkVersionConsistency({ ...same, OPENHUB_CORE_VERSION: undefined })).toEqual(["버전 없음: OPENHUB_CORE_VERSION"]);
+    expect(checkVersionConsistency(Object.fromEntries(VERSION_SOURCES.map((s) => [s, "0.2.0-rc.1"])))).toHaveLength(4);
+    // 실제 저장소: 4곳이 같고 release 명령도 통과한다.
+    const out = execFileSync(process.execPath, [tsxCli, "scripts/release.ts", "check-versions"], { cwd: ROOT, encoding: "utf8" });
+    expect(out).toContain("✓ version " + PACKAGE_VERSION);
+    const yml = read(".github/workflows/release.yml");
+    const metadata = yml.slice(yml.indexOf("\n  metadata:\n"), yml.indexOf("\n  cli:\n"));
+    expect(metadata).toContain("run: pnpm release check-versions");
+    expect(metadata.indexOf("pnpm release check-versions")).toBeLessThan(metadata.indexOf("pnpm openhub collect"));
   });
 
   it("로컬 dist: 8개가 모두 있고 SHA256SUMS와 같아야 하며, 하나 빠지거나 크기 0·다른 버전 파일·SHA256SUMS 불일치면 실패한다", () => {
