@@ -325,7 +325,6 @@ export const en = {
   "install.planFailedMain": "Could not create the install plan",
   "install.projectChanged": "You chose another project after this plan was made, so this install plan and its approval were discarded. Nothing was run or changed. Review the plan again for the current project.",
   "install.runFailed": "Could not run the installation",
-  "install.stateRecordFailed": "[version-state] Could not record Version State ({code}). The install result stays as is.",
   "forYou.badge.confirmed": "Gap confirmed",
   "forYou.badge.likely": "Possible gap",
   "forYou.badge.unknown": "Undetermined",

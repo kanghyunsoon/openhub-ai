@@ -498,3 +498,49 @@ describe("v0.2.0 P0-3 C2 사용자 범위 Lifecycle(INSTALLED)", () => {
   });
 });
 
+describe("v0.2.1 설치와 읽을 수 없는 Version State", () => {
+  const UNREADABLE = [
+    ["{ not json", "STATE_CORRUPT"],
+    ['{ "schemaVersion": 2, "kind": "openhub-lifecycle-state", "entries": {} }\n', "STATE_VERSION_UNSUPPORTED"],
+  ] as const;
+  const stateFile = (home: string) => path.join(home, ".openhub", "state", "lifecycle.json");
+
+  it("계획할 때 Version State를 읽을 수 없으면 승인 가능한 Plan을 만들지 않는다(대화상자·쓰기 0건)", async () => {
+    for (const scope of ["project", "user"] as const) {
+      for (const [content, code] of UNREADABLE) {
+        const w = await wired();
+        await mkdir(path.dirname(stateFile(w.home)), { recursive: true });
+        await writeFile(stateFile(w.home), content);
+        const plan = await w.plan("postgres-mcp", { clients: ["cursor"], scope });
+        expect(plan).toMatchObject({ status: "error", code });
+        expect(plan.status === "error" && plan.message).toContain("lifecycle.json.bak");
+        expect(await w.install("postgres-mcp")).toEqual({ status: "no-plan" });
+        expect(w.dialogs).toEqual([]);
+        expect(await w.read(".cursor/mcp.json")).toBe(CURSOR_USER);
+        expect(await exists(path.join(w.projectA, ".cursor"))).toBe(false);
+        expect(await readFile(stateFile(w.home), "utf8")).toBe(content);
+      }
+    }
+  });
+
+  it("계획 뒤·승인 중에 Version State가 손상되면 실행하지 않는다(Client 설정 쓰기 0건, 손상 파일 그대로)", async () => {
+    for (const when of ["before-dialog", "during-dialog"] as const) {
+      for (const [content, code] of UNREADABLE) {
+        let home = "";
+        const w = await wired({ dialog: async () => (when === "during-dialog" ? await writeFile(stateFile(home), content) : undefined, 1) });
+        home = w.home;
+        const plan = await w.plan("postgres-mcp", { clients: ["cursor"], scope: "user" });
+        expect(plan.status).toBe("ok");
+        await mkdir(path.dirname(stateFile(w.home)), { recursive: true });
+        if (when === "before-dialog") await writeFile(stateFile(w.home), content);
+        const run = await w.install("postgres-mcp");
+        expect(run, when).toMatchObject({ status: "error", code });
+        expect(w.dialogs.length).toBe(when === "before-dialog" ? 0 : 1);
+        expect(await w.read(".cursor/mcp.json")).toBe(CURSOR_USER);
+        expect(await exists(w.userToolConfig())).toBe(false);
+        expect(await readFile(stateFile(w.home), "utf8")).toBe(content);
+      }
+    }
+  });
+});
+

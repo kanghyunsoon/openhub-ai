@@ -118,6 +118,7 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   NOTHING_TO_UNDO: "No entry was changed. Use --discard to remove only the operation record.",
   NOT_RESTORED: "Some entries still differ from their previous content, so the record cannot simply be removed.",
   RECOVERY_IN_PROGRESS: "Another recovery is processing this operation record. Check again when it finishes.",
+  MANIFEST_UNAVAILABLE: "The Registry Manifest could not be read, so Health was not run. Changed configuration was restored and Version State was not changed. Check the OpenHub installation and approve a new plan.",
   RESOLUTION_INVALID: "The exact artifact version could not be resolved.",
   STATE_INVALID: "Version State has an invalid format.",
   STATE_CORRUPT: "Version State could not be read (the file is damaged). OpenHub does not overwrite it.",
@@ -125,6 +126,8 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   STATE_PATH_ESCAPE: "The Version State path points outside the OpenHub state directory.",
   STATE_WRITE_FAILED: "Version State could not be written. The previous state was kept.",
   STATE_CONFLICT: "Version State was changed by another process, so it was not overwritten.",
+  OPERATION_IN_PROGRESS: "Another OpenHub operation is in progress (for example an update waiting for Health). Nothing was changed. Try again when it finishes.",
+  OPERATION_LOCK_FAILED: "OpenHub could not create its operation lock in the state folder, so nothing was run or changed.",
   UP_TO_DATE: "The tool is already at the target version.",
 };
 
@@ -143,6 +146,7 @@ export const EN_WARNING_CODES: readonly string[] = Object.freeze([
   "docker-daemon-unchecked",
   "manual-setup-required",
   "configured-not-detected",
+  "state-record-failed",
 ]);
 
 type AnyPlan = InstallPlanV1 | LifecyclePlanV1;
@@ -480,6 +484,7 @@ const INSTALL_CODE_EN: Readonly<Record<string, string>> = {
   MANUAL_SETUP_REQUIRED: "The Node.js launch path for the client configuration could not be verified, so nothing was changed.",
   TOOL_CONFIG_STALE: "The tool config changed after approval. Review the new plan and approve again.",
   COMPENSATION_INCOMPLETE: "Some files could not be restored (changed elsewhere after this run, or not writable). They were not overwritten; check them with lifecycle status.",
+  STATE_RECORD_FAILED: "Version State could not be recorded, so the configuration written by this install was restored to its original content. Check the cause and install again.",
 };
 
 /** InstallResult의 다음에 할 일(영어). Core 원문 대신 code·상태·Plan 구조로 만든다. */
@@ -493,6 +498,7 @@ export function installResultNextEn(result: InstallResultV1, plan: InstallPlanV1
 
 export function installWarningEn(plan: InstallPlanV1, w: { code: string; message: string }): string {
   if (w.code === "configured-not-detected") return "[configured-not-detected] The configuration was written, but the " + (plan.targets[0]?.serverName ?? plan.toolId) + " server was not found when analyzing again. The configuration files were not restored.";
+  if (w.code === "state-record-failed") return "[state-record-failed] Version State could not be recorded" + (/\(([A-Z_]+)\)/u.exec(w.message)?.[1] === undefined ? "" : " (" + /\(([A-Z_]+)\)/u.exec(w.message)![1] + ")") + ".";
   const line = warningsEn(plan, [w])[0] ?? untranslatedWarningEn(w);
   return "[" + line.code + "] " + line.text;
 }

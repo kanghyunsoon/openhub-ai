@@ -1,12 +1,18 @@
 name: Registry Remote Validation
 
 # 원격 검증과 sandbox install은 수동 실행·일정 실행에서만 돈다. PR·push trigger가 없어 required check가 될 수 없고
-# 실패해도 main merge를 막지 않는다(D-025). 사용자 PC의 OpenHub에는 timer·daemon·scheduler가 없다.
+# main merge를 막지 않는다(D-025). 사용자 PC의 OpenHub에는 timer·daemon·scheduler가 없다.
+# v0.2.1(docs/specs/registry-remote-sandbox-required.md): sandbox job은 continue-on-error를 쓰지 않는다. 실제 설치·Health가
+# 실패하면 job과 workflow가 실패한다(보고서 artifact는 남긴다). remote job(저장소 메타데이터, 비인증)은 참고성 검사로 continue-on-error를 유지한다.
 on:
   workflow_dispatch:
     inputs:
       real_clients:
         description: "Also run pinned Claude Code and Codex CLIs against the Kubernetes sandbox E2E (no login, no API key, no model call)"
+        type: boolean
+        default: false
+      inject_failure:
+        description: "Verification only: add one failing sandbox test to check that the job and workflow fail and the report is kept"
         type: boolean
         default: false
   schedule:
@@ -40,7 +46,6 @@ jobs:
 
   sandbox:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -70,6 +75,7 @@ jobs:
         run: pnpm exec vitest run packages/core/test/installer/executor.e2e.test.ts packages/core/test/registry/sandbox.e2e.test.ts packages/core/test/registry/npx-prepare.e2e.test.ts packages/core/test/registry/kubernetes-tool-config.e2e.test.ts packages/core/test/registry/npx-lifecycle-real.e2e.test.ts --reporter=default --reporter=json --outputFile.json=sandbox-vitest.json
         env:
           OPENHUB_E2E: "1"
+          OPENHUB_E2E_INJECT_FAILURE: ${{ inputs.inject_failure == true && '1' || '' }}
       - name: Sandbox report(개수·상태·소요 시간만, REQ-061)
         if: always()
         run: pnpm exec tsx scripts/sandbox-report.ts sandbox-vitest.json sandbox-report.json && pnpm metrics --sandbox sandbox-report.json --out metrics-report

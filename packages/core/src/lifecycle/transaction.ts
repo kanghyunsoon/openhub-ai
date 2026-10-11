@@ -37,7 +37,7 @@ import { lifecycleResultSchema, type LifecycleResultStatus, type LifecycleResult
 import { entryKeyOf, type LastHealth, type ToolState, type ToolStateCore } from "./state";
 import type { LifecycleStateFile } from "./state";
 import { configEntryDigest, tomlBlockDigest } from "./status";
-import { LIFECYCLE_STATE_LOGICAL_PATH, commitLifecycleState, projectKeyFor, readLifecycleState } from "./store";
+import { LIFECYCLE_STATE_LOGICAL_PATH, commitLifecycleState, projectKeyFor, readLifecycleState, withOperationLock } from "./store";
 import { JOURNAL_KIND, journalBeforeValue, newTransactionId, readJournals, removeJournal, setJournalPhase, writeJournal, type JournalTarget, type JournalV1 } from "./journal";
 
 /**
@@ -178,6 +178,12 @@ function finalize(d: Draft): LifecycleResultV1 {
   });
 }
 
+/** (v0.2.1 P0-5) Health 실행 예외의 안내(경로 없이 오류 코드만). */
+function healthExceptionMessage(error: unknown): string {
+  const raw = typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined;
+  const code = typeof raw === "string" && /^[A-Z0-9_]{2,32}$/u.test(raw) ? raw : "exception";
+  return "Health를 실행하지 못했습니다(" + code + "). 임시 폴더 권한·디스크 공간·보안 프로그램 차단을 확인하세요";
+}
 const healthOf = (r: HealthCheckResult, at: Date | null): NonNullable<LifecycleResultV1["health"]> => ({
   status: r.status,
   reason: r.reason,
@@ -192,10 +198,21 @@ interface JournalContext {
 
 /**
  * 승인된 LifecyclePlan을 실행한다. 승인이 없거나 Plan이 바뀌었으면 아무것도 실행하지 않는다.
+ * (v0.2.1 B) 승인이 있는 실행은 작업 잠금(operation.lock) 안에서 실행 직전 재검증부터 Version State commit·Journal 정리까지 한다.
+ * 다른 OpenHub 작업(다른 Tool의 install·health·recover 포함)이 진행 중이면 아무것도 바꾸지 않고 OPERATION_IN_PROGRESS다.
  * (v0.2.1 P0-3) Client 설정을 바꾸는 작업은 바꾸기 직전에 Journal을 남긴다. 결과가 나오면(정상 완료·보상 성공) Journal을 지우고,
  * 보상까지 실패하면(rollback-failed) compensation-failed로 남긴다. 프로세스가 끝나 이 함수가 돌아오지 못하면 Journal이 남는다.
  */
 export async function runLifecycleTransaction(planned: PlannedLifecycle, approval: LifecycleApproval | undefined, request: LifecycleRequest, env: LifecycleEnvironment): Promise<LifecycleResultV1> {
+  if (approval === undefined || approval.planDigest !== planned.planDigest || planned.plan.status === "up-to-date") return runJournaled(planned, approval, request, env);
+  const locked = await withOperationLock({ homeDir: request.homeDir, purpose: "lifecycle-" + planned.plan.operation, ...(env.configFs === undefined ? {} : { fs: env.configFs }) }, () =>
+    runJournaled(planned, approval, request, env),
+  );
+  if (locked.ok) return locked.value;
+  return finalize({ planned, status: "config-failed", code: locked.code, retryable: locked.code === "OPERATION_IN_PROGRESS", nextActions: [locked.message] });
+}
+
+async function runJournaled(planned: PlannedLifecycle, approval: LifecycleApproval | undefined, request: LifecycleRequest, env: LifecycleEnvironment): Promise<LifecycleResultV1> {
   const jctx: JournalContext = { journal: null };
   const result = await runTransaction(planned, approval, request, env, jctx);
   if (jctx.journal !== null) {
@@ -458,7 +475,24 @@ async function runTransaction(planned: PlannedLifecycle, approval: LifecycleAppr
   if (healthStep !== undefined) {
     trace("health");
     if (jctx.journal !== null) jctx.journal = await setJournalPhase(request.homeDir, jctx.journal, "health");
-    const manifest = (await env.loadEntries()).find((e) => e.manifest.name === plan.toolId)?.manifest;
+    // (v0.2.1 P0-5) Manifest를 읽지 못하면(예외·Registry에 없음) Health 검사 종류를 알 수 없으므로 Health를 실행하지 않는다.
+    // 명시적 실패(MANIFEST_UNAVAILABLE)이고, update·rollback·repair는 바꾼 설정을 보상한다(외부 변경은 덮어쓰지 않는다). Version State는 그대로다.
+    let manifest: RegistryEntry["manifest"] | undefined;
+    try {
+      manifest = (await env.loadEntries()).find((e) => e.manifest.name === plan.toolId)?.manifest;
+    } catch {
+      manifest = undefined;
+    }
+    if (manifest === undefined) {
+      outcome(healthStep.id, { status: "failed", code: "MANIFEST_UNAVAILABLE", excerpt: "Registry Manifest를 읽지 못해 Health를 실행하지 않았습니다" });
+      skipRest(0);
+      const next = "Registry Manifest를 읽지 못했습니다. OpenHub 설치(Registry 파일)를 확인한 뒤 새 계획을 승인하세요";
+      if (plan.operation === "health") return finalize({ planned: verified, status: "health-failed", code: "MANIFEST_UNAVAILABLE", steps, retryable: true, nextActions: [next, "설정과 Version State는 바꾸지 않았습니다"] });
+      if (!(await compensate())) return failedRestore();
+      return finalize({ planned: verified, status: "health-failed", code: "MANIFEST_UNAVAILABLE", steps, applied, restored, compensated: true, retryable: true, nextActions: [next, "Health를 실행하지 않고 설정 파일을 원래 내용으로 되돌렸습니다. Version State는 바꾸지 않았습니다"] });
+    }
+    // Health 실행기가 값을 돌려주지 않고 예외를 던져도(TEMP 접근·임시 폴더 생성 실패, 실행기 예외 등) 정상 Health 실패와 같은 경로(보상·Version State 그대로)로 간다.
+    // 결과에는 경로 없이 오류 코드만 남긴다.
     const run = env.runHealth ?? runHealthCheck;
     // tool config Tool: Client와 같은 파일로 실행한다. 실행 직전 파일이 승인·기록된 내용과 같은지 다시 확인한다.
     let toolConfigFile: string | undefined;
@@ -476,15 +510,20 @@ async function runTransaction(planned: PlannedLifecycle, approval: LifecycleAppr
       }
       toolConfigFile = loc.file;
     }
-    const report = await run(verified, {
-      healthCheckType: manifest?.healthCheck?.type,
-      windowsNpx,
-      tempBase: env.tempBase,
-      ...(toolConfigFile === undefined ? {} : { toolConfigFile }),
-      ...(env.healthSpawner === undefined ? {} : { spawner: env.healthSpawner }),
-      ...(env.killTree === undefined ? {} : { killTree: env.killTree }),
-    });
-    const result: HealthCheckResult = report.ok ? report.result : { status: "launch-failed", reason: "spawn-failed", toolCount: null, environmentUnverified: false, terminated: true, excerpt: report.message };
+    let result: HealthCheckResult;
+    try {
+      const report = await run(verified, {
+        healthCheckType: manifest.healthCheck?.type,
+        windowsNpx,
+        tempBase: env.tempBase,
+        ...(toolConfigFile === undefined ? {} : { toolConfigFile }),
+        ...(env.healthSpawner === undefined ? {} : { spawner: env.healthSpawner }),
+        ...(env.killTree === undefined ? {} : { killTree: env.killTree }),
+      });
+      result = report.ok ? report.result : { status: "launch-failed", reason: "spawn-failed", toolCount: null, environmentUnverified: false, terminated: true, excerpt: report.message };
+    } catch (error) {
+      result = { status: "launch-failed", reason: "spawn-failed", toolCount: null, environmentUnverified: false, terminated: true, excerpt: healthExceptionMessage(error) };
+    }
     health = healthOf(result, env.now());
     if (result.status !== "healthy") {
       outcome(healthStep.id, { status: "failed", code: result.reason ?? result.status, ...(result.excerpt === null ? {} : { excerpt: result.excerpt }) });

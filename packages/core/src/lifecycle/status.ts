@@ -157,12 +157,20 @@ export async function recordInstallInState(planned: PlannedInstall, result: Inst
   }
   const states = toolStatesFromInstall(planned, result, projectKey, path.basename(path.resolve(ctx.projectRoot)), ctx.now(), written);
   if (states.length === 0) return { ok: true, recorded: 0 };
-  const read = await readLifecycleState({ homeDir: ctx.homeDir, fs });
-  if (!read.ok) return read;
-  const entries = { ...read.state.entries };
-  for (const s of states) entries[entryKeyOf(s.target)] = s;
-  const committed = await commitLifecycleState({ ...read.state, entries }, read.digest, { homeDir: ctx.homeDir, fs });
-  return committed.ok ? { ok: true, recorded: states.length } : committed;
+  // (v0.2.1 P0-4) 설치 기록은 이 설치의 EntryKey만 덮어쓰는 병합이다. 그 사이 다른 OpenHub 실행이 다른 항목을 커밋했으면(STATE_CONFLICT)
+  // 다시 읽어 병합한다. 횟수를 제한하고, 그래도 안 되면 실패를 돌려준다.
+  let last: InstallRecordResult = { ok: false, code: "STATE_CONFLICT", message: "Version State를 기록하지 못했습니다" };
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const read = await readLifecycleState({ homeDir: ctx.homeDir, fs });
+    if (!read.ok) return read;
+    const entries = { ...read.state.entries };
+    for (const s of states) entries[entryKeyOf(s.target)] = s;
+    const committed = await commitLifecycleState({ ...read.state, entries }, read.digest, { homeDir: ctx.homeDir, fs });
+    if (committed.ok) return { ok: true, recorded: states.length };
+    last = committed;
+    if (committed.code !== "STATE_CONFLICT") break;
+  }
+  return last;
 }
 
 const healthLabel = (h: LastHealth | null): HealthLabel => (h === null ? "unknown" : h.status === "skipped" ? "not-verified" : h.status);

@@ -327,7 +327,6 @@ export const ko: Readonly<Record<keyof typeof en, string>> = {
   "install.planFailedMain": "설치 계획을 만들지 못했습니다",
   "install.projectChanged": "계획을 만든 뒤 다른 프로젝트를 선택해 이 설치 계획과 승인을 버렸습니다. 아무것도 실행하거나 바꾸지 않았습니다. 지금 프로젝트에서 계획을 다시 확인하세요.",
   "install.runFailed": "설치를 실행하지 못했습니다",
-  "install.stateRecordFailed": "[version-state] Version State를 기록하지 못했습니다({code}). 설치 결과는 그대로입니다.",
   "forYou.badge.confirmed": "Gap 확인",
   "forYou.badge.likely": "Gap 가능성",
   "forYou.badge.unknown": "판단 보류",
