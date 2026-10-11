@@ -27,4 +27,12 @@ describe("v0.2.0 Release Notes Client 검증 표", () => {
     expect(notes).toContain("only version 0.0.67 is allowed");
     expect(notes).not.toMatch(/\b(?:25|40) (?:verified )?tools\b/u);
   });
+
+  it("정확한 버전 Update: npx만, X.Y.Z, 빈 값은 기존 동작, 승인 필요, 실패 시 복구, Kubernetes 0.0.67 제한을 적는다", () => {
+    const line = notes.split("\n").find((l) => l.startsWith("- **Update to an exact version (npx tools only):**"));
+    expect(line).toBeDefined();
+    for (const part of ["`X.Y.Z`", "Leave it empty to keep the previous behavior", "needs your approval", "the client configuration and Version State are restored", "Kubernetes MCP Server stays limited to its reviewed version 0.0.67"]) expect(line, part).toContain(part);
+    // 기존 절은 그대로 남아 있다.
+    for (const heading of ["## Compatibility", "## Known limitations"]) expect(notes).toContain(heading);
+  });
 });
