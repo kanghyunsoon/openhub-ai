@@ -45,7 +45,8 @@ async function adopted(files: Record<string, unknown>, over: Partial<AdoptPlanOp
   expect(r.status).toBe("adopted");
   return c;
 }
-const bopts = (c: Case, over: Partial<BenchmarkPlanOptions> = {}): BenchmarkPlanOptions => ({ toolId: "memory-mcp", projectRoot: c.projectRoot, homeDir: c.homeDir, entries: seed, platform: "linux", includeUser: false, ...over });
+// 명시적인 빈 원본(#46 리뷰): 원본이 없으면 npx·uvx Benchmark 계획이 막힌다(BENCHMARK_PACKAGE_SOURCE_UNVERIFIED).
+const bopts = (c: Case, over: Partial<BenchmarkPlanOptions> = {}): BenchmarkPlanOptions => ({ toolId: "memory-mcp", projectRoot: c.projectRoot, homeDir: c.homeDir, entries: seed, platform: "linux", includeUser: false, mcpSourceEnv: () => ({}), ...over });
 const planned = (r: BenchmarkPlanResult): PlannedBenchmark => {
   if (!r.ok) throw new Error(r.code + " " + r.message);
   return r.planned;

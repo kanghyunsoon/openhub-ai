@@ -4,7 +4,7 @@ import { z } from "zod";
 import { containsAbsolutePath } from "../analyzer/index";
 import { INSTALL_BACKENDS } from "../installer/plan";
 import { createTreeKiller, healthArgv, runHandshake, type HandshakeMark, type HealthSpawner, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
-import { mcpPackageSourceMismatchOf, packageSourceMismatchMessage, type McpSourceEnv } from "../process/mcp-env";
+import { packageSourceRunBlock, type McpSourceEnv } from "../process/mcp-env";
 import { RECOMMEND_PLATFORMS, TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, redactSensitive } from "../recommendation/index";
 import { verifyApprovedBenchmarkPlan, type BenchmarkApproval, type BenchmarkGateFailure, type BenchmarkPlanResult, type VerifiedBenchmarkPlan } from "./plan";
 
@@ -133,9 +133,9 @@ async function executeVerifiedBenchmark(verified: VerifiedBenchmarkPlan, options
   const launch = plan.launch!;
   const argv = healthArgv({ id: "benchmark", kind: "health", executable: launch.executable, args: launch.args, envNames: launch.envNames, cwd: "isolated", timeouts: { startupMs: plan.timeouts.startupMs, handshakeMs: plan.timeouts.handshakeMs, totalMs: plan.timeouts.runTotalMs } }, plan.platform, options.windowsNpx ?? null);
   if (argv === null) return { ok: false, code: "BENCHMARK_LAUNCHER_NOT_FOUND", message: "Windows npx 실행 경로(node.exe·npx-cli.js)를 찾지 못했습니다" };
-  // v0.2.1(#46 리뷰): Prepare와 같은 패키지 출처를 확인할 수 없으면 한 번도 실행하지 않는다(spawn 0, fallback 없음).
-  const sourceMismatch = mcpPackageSourceMismatchOf(options.sourceEnv, launch.executable);
-  if (sourceMismatch.length > 0) return { ok: false, code: "BENCHMARK_PACKAGE_SOURCE_UNVERIFIED", message: packageSourceMismatchMessage(sourceMismatch) };
+  // v0.2.1(#46 리뷰): 원본 누락·오류, 넘길 수 없는 출처 설정, 승인한 출처 digest와 다름이면 한 번도 실행하지 않는다(spawn 0, fallback 없음).
+  const sourceBlock = packageSourceRunBlock(options.sourceEnv, launch.executable, launch.packageSource ?? null);
+  if (sourceBlock !== null) return { ok: false, code: "BENCHMARK_PACKAGE_SOURCE_UNVERIFIED", message: sourceBlock };
   const clock = options.clock ?? (() => performance.now());
   const realBase = await realpath(options.tempBase);
   const killTree = options.killTree ?? createTreeKiller({ cwd: realBase });

@@ -60,12 +60,14 @@ async function withEnv<T>(vars: Record<string, string>, fn: () => Promise<T>): P
 }
 
 /** 빈 cache에서 설치(실제 Prepare)한 뒤 Health 계획을 만들고, ready면 실제 Health를 실행한다. Health spawn의 환경을 기록한다. */
-async function installThenHealth(tool: keyof typeof TOOLS, vars: Record<string, string>) {
+async function installThenHealth(tool: keyof typeof TOOLS, vars: Record<string, string>, opts: { changeAfterApproval?: Record<string, string>; omitSource?: boolean } = {}) {
   const { toolId, command } = TOOLS[tool];
   const scratch = await mkdtemp(path.join(os.tmpdir(), "openhub-src-e2e-"));
   const cache = await mkdtemp(path.join(os.tmpdir(), "openhub-src-cache-"));
   const cacheVar = tool === "postgres" ? { UV_CACHE_DIR: cache } : { npm_config_cache: cache };
-  return withEnv({ ...cacheVar, ...(tool === "postgres" && DB !== undefined ? { DATABASE_URI: DB } : {}), ...vars }, async () => {
+  // 승인 뒤 바꿀 변수도 withEnv가 원래 값으로 되돌리도록 키를 미리 넣는다(값은 시작 값).
+  const restoreKeys = Object.fromEntries(Object.keys(opts.changeAfterApproval ?? {}).filter((k) => !(k in vars)).map((k) => [k, process.env[k] ?? ""]));
+  return withEnv({ ...restoreKeys, ...cacheVar, ...(tool === "postgres" && DB !== undefined ? { DATABASE_URI: DB } : {}), ...vars }, async () => {
     const entries: RegistryEntry[] = seed.map((e) => (e.manifest.name === toolId ? { ...e, manifest: { ...e.manifest, install: { ...e.manifest.install, options: { command } } } } : e));
     const h = await createHarness(scratch, { entries, verify: false });
     await writeFile(path.join(h.projectRoot, ".mcp.json"), JSON.stringify({ mcpServers: { notes: NOTES } }, null, 2) + "\n");
@@ -89,7 +91,7 @@ async function installThenHealth(tool: keyof typeof TOOLS, vars: Record<string, 
       killTree: createTreeKiller({ cwd: os.tmpdir() }),
       npmChildEnv: () => npmChildEnv(process.env),
       uvChildEnv: () => uvChildEnv(process.env),
-      mcpSourceEnv: () => process.env,
+      ...(opts.omitSource === true ? {} : { mcpSourceEnv: () => process.env }),
       healthSpawner: (exe: string, args: readonly string[], options: HealthSpawnOptions) => (spawned.push({ ...(options.env ?? {}) }), nodeHealthSpawner(exe, args, options)),
     };
     const req: LifecycleRequest = { operation: "health", toolId, projectRoot: h.projectRoot, homeDir: h.homeDir, platform, includeUser: false, targets: CLAUDE };
@@ -99,6 +101,7 @@ async function installThenHealth(tool: keyof typeof TOOLS, vars: Record<string, 
     if (built.planned.plan.status !== "ready") return { installed, config, health: null, plan: built.planned.plan, spawned, benchmark, cache };
     const ok = await requestLifecycleApproval(built.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
     if (ok.status !== "approved") throw new Error(ok.status);
+    if (opts.changeAfterApproval !== undefined) Object.assign(process.env, opts.changeAfterApproval);
     return { installed, config, health: await runLifecycleTransaction(built.planned, ok.approval, req, life), plan: built.planned.plan, spawned, benchmark, cache };
   });
 }
@@ -143,6 +146,23 @@ describe.skipIf(skip)("v0.2.1 패키지 출처 불변성 실제 E2E(uv·npm)", (
     const r = await installThenHealth("memory", { npm_config_registry: "http://127.0.0.1:9/", npm_config_fetch_retries: "0" });
     expect(r.installed.status).toBe("failed");
     expect(r.config).not.toContain("server-memory");
+    expect(r.spawned).toEqual([]);
+  }, 600_000);
+
+  // #46 리뷰 경계 사례 1·2(실제 npm): 승인 뒤 인증 정보 없는 registry 주소 변경, 원본 누락.
+  it("npx 사내 registry(mirror)로 승인한 뒤 다른 registry 주소로 바뀌면 PLAN_STALE이고 spawn 0이다", async () => {
+    const r = await installThenHealth("memory", { npm_config_registry: NPM_MIRROR }, { changeAfterApproval: { npm_config_registry: "https://registry.npmjs.org/" } });
+    expect(r.installed.status).toBe("succeeded");
+    expect(r.plan?.steps.find((s) => s.kind === "health")).toMatchObject({ packageSource: expect.stringMatching(/^sha256:/u) });
+    expect(r.health).toMatchObject({ status: "stale", code: "PLAN_STALE" });
+    expect(r.spawned).toEqual([]);
+  }, 600_000);
+
+  it("npx Health 환경 원본이 없으면(누락) 계획이 PACKAGE_SOURCE_UNVERIFIED로 막히고 spawn 0이다", async () => {
+    const r = await installThenHealth("memory", {}, { omitSource: true });
+    expect(r.installed.status).toBe("succeeded");
+    expect(r.plan?.status).toBe("blocked");
+    expect(r.plan?.warnings.map((w) => w.code)).toContain("PACKAGE_SOURCE_UNVERIFIED");
     expect(r.spawned).toEqual([]);
   }, 600_000);
 

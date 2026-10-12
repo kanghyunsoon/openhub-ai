@@ -102,7 +102,7 @@ async function drive<T>(p: Promise<T>): Promise<T> {
 }
 async function setup(behaviours: (i: number) => Behaviour = () => ({}), over: Partial<BenchmarkRunOptions> = {}) {
   const c = await managed();
-  const regenerate = () => planBenchmark({ toolId: "memory-mcp", projectRoot: c.projectRoot, homeDir: c.homeDir, entries: seed, platform: "linux", includeUser: false });
+  const regenerate = () => planBenchmark({ toolId: "memory-mcp", projectRoot: c.projectRoot, homeDir: c.homeDir, entries: seed, platform: "linux", includeUser: false, mcpSourceEnv: () => ({}) });
   const first = await regenerate();
   if (!first.ok) throw new Error(first.code);
   const o = await requestBenchmarkApproval(first.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
@@ -119,7 +119,8 @@ async function setup(behaviours: (i: number) => Behaviour = () => ({}), over: Pa
   const tempBase = await mkdtemp(path.join(scratch, "tmp-"));
   // 가짜 tree kill: 실제 kill처럼 마지막 서버의 close를 일으킨다.
   const killTree = async () => (servers.at(-1)?.close(), true);
-  const options: BenchmarkRunOptions = { regenerate, tempBase, spawner, killTree, clock: () => (t += 10), host: { arch: "x64", nodeVersion: "24.18.0" }, ...over };
+  // 명시적인 빈 원본(#46 리뷰): 원본이 없으면 npx·uvx Benchmark는 실행하지 않는다.
+  const options: BenchmarkRunOptions = { regenerate, tempBase, spawner, killTree, clock: () => (t += 10), host: { arch: "x64", nodeVersion: "24.18.0" }, sourceEnv: () => ({}), ...over };
   return { c, approval: o.approval, options, servers, spawns, tempBase, planDigest: first.planned.planDigest };
 }
 
@@ -250,13 +251,21 @@ describe("REQ-061 Benchmark 실행과 Report v1", () => {
     expect(JSON.stringify({ ...rb.report, planDigest: "" })).toBe(JSON.stringify({ ...ra.report, planDigest: "" }));
   });
 
-  it("v0.2.1 fail-closed: Benchmark가 띄우는 MCP 서버 환경은 항상 거른 값이다(원본 누락·빈 원본 → {}, 원본 있음 → 합성 key 0개)", async () => {
+  it("v0.2.1 fail-closed: 원본 누락·예외는 실행 0, 빈 원본 → {}, 원본 있음 → 합성 key 0개(#46 리뷰: 원본 누락은 출처 확인 불가로 실행하지 않는다)", async () => {
     const synthetic = { OPENAI_API_KEY: "sk-synthetic-bench-0001", GITHUB_TOKEN: "ghp_synthetic_bench", NODE_OPTIONS: "--require /synthetic.js", LD_PRELOAD: "/synthetic.so" };
     const saved = new Map(Object.keys(synthetic).map((k) => [k, process.env[k]] as const));
     Object.assign(process.env, synthetic);
     try {
-      for (const sourceEnv of [undefined, () => ({}), () => ({ ...synthetic, PATH: "/usr/bin", HOME: "/home/u", NPM_CONFIG_CACHE: "/c/npm" })]) {
-        const s = await setup(() => ({}), sourceEnv === undefined ? {} : { sourceEnv });
+      // 수정 전(5454c36): 원본 누락이면 빈 환경으로 6번 실행했다(부모 상속은 없었지만 출처를 확인하지 않았다).
+      for (const broken of ["missing", "throws"] as const) {
+        const s = await setup(() => ({}), broken === "throws" ? { sourceEnv: () => { throw new Error("boom"); } } : {});
+        const { sourceEnv: _drop, ...withoutSource } = s.options;
+        const r = await runBenchmark(s.approval, broken === "missing" ? withoutSource : s.options);
+        expect(r, broken).toMatchObject({ ok: false, code: "BENCHMARK_PACKAGE_SOURCE_UNVERIFIED" });
+        expect(s.spawns, broken).toEqual([]);
+      }
+      for (const sourceEnv of [() => ({}), () => ({ ...synthetic, PATH: "/usr/bin", HOME: "/home/u", NPM_CONFIG_CACHE: "/c/npm" })]) {
+        const s = await setup(() => ({}), { sourceEnv });
         const r = await runBenchmark(s.approval, s.options);
         if (!r.ok) throw new Error(r.code);
         expect(s.spawns).toHaveLength(6);
@@ -266,7 +275,7 @@ describe("REQ-061 Benchmark 실행과 Report v1", () => {
             expect(JSON.stringify(sp.env)).not.toContain(v);
           }
         }
-        expect(s.spawns[0]!.env).toEqual(sourceEnv === undefined || Object.keys(sourceEnv()).length === 0 ? {} : { PATH: "/usr/bin", HOME: "/home/u", NPM_CONFIG_CACHE: "/c/npm" });
+        expect(s.spawns[0]!.env).toEqual(Object.keys(sourceEnv()).length === 0 ? {} : { PATH: "/usr/bin", HOME: "/home/u", NPM_CONFIG_CACHE: "/c/npm" });
       }
     } finally {
       for (const [k, v] of saved) {

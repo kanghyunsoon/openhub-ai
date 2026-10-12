@@ -33,7 +33,7 @@ async function installed(): Promise<{ h: Harness; file: string }> {
   const loc = toolConfigLocation({ homeDir: h.homeDir, scope: "project", toolId: K8S, projectKey: projectKeyFromRealpath(await realpath(h.projectRoot)) })!;
   return { h, file: loc.file };
 }
-const bench = (h: Harness) => planBenchmark({ toolId: K8S, projectRoot: h.projectRoot, homeDir: h.homeDir, entries, platform: "linux", includeUser: false, client: "claude-code", scope: "project" });
+const bench = (h: Harness) => planBenchmark({ toolId: K8S, projectRoot: h.projectRoot, homeDir: h.homeDir, entries, platform: "linux", includeUser: false, client: "claude-code", scope: "project", mcpSourceEnv: () => ({}) });
 
 const statusOf = async (h: Harness) => {
   const r = await bench(h);

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { InstallBackend } from "../installer/plan";
 import { npmChildEnv } from "./npx-prepare";
 import { uvChildEnv } from "./uvx-prepare";
@@ -139,16 +140,47 @@ export function mcpPackageSourceMismatch(source: Readonly<Record<string, string 
   return [...out].sort();
 }
 
-/** 원본 함수가 없거나 예외를 던지면 빈 원본(불일치 없음; 이때 MCP 서버 환경도 비어 출처 설정이 없다). */
-export function mcpPackageSourceMismatchOf(sourceEnv: McpSourceEnv | undefined, backend: InstallBackend): string[] {
-  let source: Readonly<Record<string, string | undefined>> = {};
-  try {
-    source = sourceEnv?.() ?? {};
-  } catch {
-    source = {};
-  }
-  return mcpPackageSourceMismatch(source, backend);
+/**
+ * 승인할 패키지 출처의 digest(Health 단계·Benchmark launch에 넣는다). 출처 설정이 없으면(기본 공개 index·registry) null.
+ * 불일치가 없을 때만 부른다: 그때 출처 설정은 인증 정보가 없는 값뿐이다. 그래도 값은 sha256으로만 남긴다.
+ * uv.toml·.npmrc 내용은 넣지 않는다(uv·npm이 직접 읽는다. uvx Prepare 단계의 index fingerprint(#45)가 uv.toml을 따로 다룬다).
+ */
+export function packageSourceDigest(source: Readonly<Record<string, string | undefined>>, backend: InstallBackend): string | null {
+  if (backend !== "uvx" && backend !== "npx") return null;
+  const prepared = backend === "uvx" ? uvChildEnv(source) : npmChildEnv(source);
+  const lines = Object.entries(prepared)
+    .filter(([name]) => isSourceSetting(backend, name))
+    .map(([name, value]) => name.toUpperCase() + "=" + value)
+    .sort();
+  return lines.length === 0 ? null : "sha256:" + createHash("sha256").update(backend + "\n" + lines.join("\n")).digest("hex");
 }
+
+/**
+ * Health·Benchmark 실행 전 패키지 출처 확인(v0.2.1 #46 리뷰). npx·uvx만 본다(docker 등은 항상 ok, digest null).
+ * - 원본 함수가 없거나 예외를 던지면 확인할 수 없다(source-unavailable): 실행하지 않는다. 명시적으로 넘긴 빈 원본(() => ({}))은 출처 설정이 없는 정상 환경이다.
+ * - Prepare 쪽 출처 설정을 MCP 서버에 같은 값으로 넘길 수 없으면 not-passable(이름만).
+ * - 그 밖에는 ok와 승인할 출처 digest.
+ */
+export type PackageSourceCheck = { ok: true; digest: string | null } | { ok: false; reason: "source-unavailable" | "not-passable"; names: string[] };
+export function mcpPackageSourceCheck(sourceEnv: McpSourceEnv | undefined, backend: InstallBackend): PackageSourceCheck {
+  if (backend !== "uvx" && backend !== "npx") return { ok: true, digest: null };
+  if (sourceEnv === undefined) return { ok: false, reason: "source-unavailable", names: [] };
+  let source: Readonly<Record<string, string | undefined>>;
+  try {
+    const got = sourceEnv();
+    if (got === null || typeof got !== "object") return { ok: false, reason: "source-unavailable", names: [] };
+    source = got;
+  } catch {
+    return { ok: false, reason: "source-unavailable", names: [] };
+  }
+  const names = mcpPackageSourceMismatch(source, backend);
+  if (names.length > 0) return { ok: false, reason: "not-passable", names };
+  return { ok: true, digest: packageSourceDigest(source, backend) };
+}
+
+export const PACKAGE_SOURCE_UNAVAILABLE_MESSAGE =
+  "MCP 서버 실행 환경의 원본을 받지 못해(누락·오류) 패키지 출처가 준비(Prepare)와 같은지 확인할 수 없습니다. 실행하지 않았습니다. 다시 계획하세요";
+export const PACKAGE_SOURCE_CHANGED_MESSAGE = "승인한 뒤 패키지 출처 설정(index·registry 환경변수)이 바뀌어 실행하지 않았습니다. 새 계획을 확인하고 다시 승인하세요";
 
 /** 사용자 안내(이름만, 값 없음). */
 export function packageSourceMismatchMessage(names: readonly string[]): string {
@@ -156,6 +188,18 @@ export function packageSourceMismatchMessage(names: readonly string[]): string {
     "패키지 출처 설정(" + names.join(", ") + ")에 인증 정보가 든 URL 등 MCP 서버에 넘길 수 없는 값이 있어, Health·Benchmark가 준비(Prepare)와 같은 출처의 패키지를 쓴다고 확인할 수 없습니다. " +
     "실행하지 않았습니다. 인증 정보는 uv.toml·.npmrc로 옮기고 환경변수에서 지운 뒤 새 계획을 만드세요"
   );
+}
+
+export const packageSourceCheckMessage = (check: Extract<PackageSourceCheck, { ok: false }>) =>
+  check.reason === "source-unavailable" ? PACKAGE_SOURCE_UNAVAILABLE_MESSAGE : packageSourceMismatchMessage(check.names);
+
+/**
+ * 실행 직전 확인: 지금 원본으로 다시 확인하고, 승인한 digest(approved, 없으면 null)와 같아야 한다. 같지 않으면 실행하지 않을 이유(값 없음).
+ */
+export function packageSourceRunBlock(sourceEnv: McpSourceEnv | undefined, backend: InstallBackend, approved: string | null): string | null {
+  const check = mcpPackageSourceCheck(sourceEnv, backend);
+  if (!check.ok) return packageSourceCheckMessage(check);
+  return check.digest === approved ? null : PACKAGE_SOURCE_CHANGED_MESSAGE;
 }
 
 export type McpSourceEnv = () => Readonly<Record<string, string | undefined>>;

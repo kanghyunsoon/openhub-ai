@@ -199,25 +199,37 @@ describe("실제 자식 process가 받는 환경", () => {
 
   // 재현(이전 HEAD 3027da6): 원본 없이 띄우면 부모 process.env의 합성 key가 그대로 전달됐다(이 자리의 테스트가 누출을 단언했다).
   // 수정 뒤 같은 시나리오: 원본 누락·빈 원본·예외를 던지는 원본 모두 부모 환경을 쓰지 않는다(fail-closed).
+  // #46 리뷰(5454c36 이후): npx·uvx는 원본 누락·예외면 패키지 출처를 확인할 수 없어 아예 실행하지 않는다(spawn 0). 명시적인 빈 원본은 빈 환경으로 실행한다.
+  // docker(패키지 출처 확인 대상 아님)는 세 경우 모두 빈 환경으로 실행해 부모 환경을 상속하지 않는다.
   for (const [label, sourceEnv] of [
     ["원본 누락", undefined],
     ["빈 원본", () => ({})],
     ["예외를 던지는 원본", () => { throw new Error("boom"); }],
   ] as const) {
-    it("fail-closed(" + label + "): 부모 process.env에 합성 key가 있어도 MCP 서버는 하나도 받지 못한다", async () => {
-      const out = path.join(scratch, "closed-" + label.length + ".json");
-      const script = await envRecordingServer(out);
-      const outcome = await withParentSecrets(() =>
-        runHandshake([process.execPath, script], scratch, LIMITS, HOST, { killTree: createTreeKiller({ cwd: scratch }), ...(sourceEnv === undefined ? {} : { sourceEnv }) }, { mark: () => undefined }, { backend: "npx", declaredNames: ["OPENAI_API_KEY"] }),
-      );
-      expect(outcome.status).toBe("healthy");
-      const seen = JSON.parse(await readFile(out, "utf8")) as Record<string, string>;
-      noSynthetic(seen);
-      onlyOsDefaults(seen);
-    }, 30_000);
+    for (const backend of ["npx", "docker"] as const) {
+      it("fail-closed(" + label + ", " + backend + "): 부모 process.env에 합성 key가 있어도 MCP 서버는 하나도 받지 못한다", async () => {
+        const out = path.join(scratch, "closed-" + backend + "-" + label.length + ".json");
+        const script = await envRecordingServer(out);
+        const spawned: string[] = [];
+        const spawner = (exe: string, args: readonly string[], options: HealthSpawnOptions) => (spawned.push(exe), nodeHealthSpawner(exe, args, options));
+        const outcome = await withParentSecrets(() =>
+          runHandshake([process.execPath, script], scratch, LIMITS, HOST, { killTree: createTreeKiller({ cwd: scratch }), spawner, ...(sourceEnv === undefined ? {} : { sourceEnv }) }, { mark: () => undefined }, { backend, declaredNames: ["OPENAI_API_KEY"] }),
+        );
+        if (backend === "npx" && label !== "빈 원본") {
+          expect(outcome).toMatchObject({ status: "launch-failed", reason: "package-source-unverified" });
+          expect(spawned).toEqual([]);
+          return;
+        }
+        expect(outcome.status).toBe("healthy");
+        const seen = JSON.parse(await readFile(out, "utf8")) as Record<string, string>;
+        noSynthetic(seen);
+        onlyOsDefaults(seen);
+      }, 30_000);
+    }
   }
 
-  for (const withSource of [true, false]) it("Lifecycle Health(" + (withSource ? "CLI·Desktop 경로, mcpSourceEnv 있음" : "mcpSourceEnv 누락, fail-closed") + "): 실제 MCP 서버 process에는 합성 key 0개, 결과에도 값 0개", async () => {
+  for (const mode of ["source", "empty", "missing"] as const) it("Lifecycle Health(" + ({ source: "CLI·Desktop 경로, mcpSourceEnv 있음", empty: "명시적인 빈 원본, fail-closed", missing: "mcpSourceEnv 누락 → 실행 0" })[mode] + "): 실제 MCP 서버 process에는 합성 key 0개, 결과에도 값 0개", async () => {
+    const withSource = mode === "source";
     const seed = await seedEntries();
     const PIN = "uvx --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted";
     const entries: RegistryEntry[] = seed.map((e) => (e.manifest.name === "postgres-mcp" ? { ...e, manifest: { ...e.manifest, install: { ...e.manifest.install, options: { command: PIN } } } } : e));
@@ -234,10 +246,17 @@ describe("실제 자식 process가 받는 환경", () => {
     const spawned: (Record<string, string> | undefined)[] = [];
     const healthSpawner = (_exe: string, _args: readonly string[], options: HealthSpawnOptions) => (spawned.push(options.env), nodeHealthSpawner(process.execPath, [script], options));
     // uvx(postgres): uv index 인증 쌍이 있으면 Health가 실행되지 않으므로(아래 별도 테스트) 나머지 합성 key 20종으로 실제 실행을 본다.
-    const env: LifecycleEnvironment = { loadEntries: async () => entries, probe: () => h.env.probe(), tempBase: h.base, now: () => new Date("2026-10-12T00:00:00.000Z"), configFs: h.env.configFs!, healthSpawner, ...(withSource ? { mcpSourceEnv: parentEnvWithoutUvIndexAuth } : {}) };
+    const env: LifecycleEnvironment = { loadEntries: async () => entries, probe: () => h.env.probe(), tempBase: h.base, now: () => new Date("2026-10-12T00:00:00.000Z"), configFs: h.env.configFs!, healthSpawner, ...(mode === "source" ? { mcpSourceEnv: parentEnvWithoutUvIndexAuth } : mode === "empty" ? { mcpSourceEnv: () => ({}) } : {}) };
     const request: LifecycleRequest = { operation: "health", toolId: "postgres-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, platform: HOST, includeUser: false, targets: CURSOR };
     const built = await planLifecycleRequest(request, env);
     if (!built.ok) throw new Error(built.code);
+    if (mode === "missing") {
+      // 수정 전(5454c36): 원본이 없어도 ready였고 빈 환경으로 실행했다. 지금은 출처를 확인할 수 없어 계획이 막힌다.
+      expect(built.planned.plan.status).toBe("blocked");
+      expect(built.planned.plan.warnings.map((w) => w.code)).toContain("PACKAGE_SOURCE_UNVERIFIED");
+      expect(spawned).toEqual([]);
+      return;
+    }
     const outcome = await requestLifecycleApproval(built.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
     if (outcome.status !== "approved") throw new Error(outcome.status);
     const result = await withParentSecrets(() => runLifecycleTransaction(built.planned, outcome.approval, request, env));

@@ -49,6 +49,7 @@ function lifecycleEnv(h: Harness): LifecycleEnvironment {
     now,
     fetch: async () => new Response("missing", { status: 404 }),
     configFs: nodeConfigFs,
+    mcpSourceEnv: () => ({}),
     spawner: fakeNpmSpawner({ cacheRoot: path.join(h.base, "npm-cache") }).spawner,
     runHealth: async (verified) => ({ ok: true, result: { status: "healthy", reason: null, toolCount: 3, environmentUnverified: verified.plan.requiredEnv.some((e) => e.required), terminated: true, excerpt: null } }),
   };

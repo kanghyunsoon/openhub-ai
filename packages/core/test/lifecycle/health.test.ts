@@ -143,7 +143,7 @@ function fake(script: Script = {}, killResult = true) {
     if (killResult) children.at(-1)?.close(null);
     return killResult;
   };
-  const run = (verified: VerifiedLifecyclePlan, over: Partial<HealthRunOptions> = {}) => runHealthCheck(verified, { healthCheckType: "mcp-handshake", spawner, killTree, tempBase, ...over });
+  const run = (verified: VerifiedLifecyclePlan, over: Partial<HealthRunOptions> = {}) => runHealthCheck(verified, { healthCheckType: "mcp-handshake", spawner, killTree, tempBase, sourceEnv: () => ({}), ...over });
   return { spawns, options, children, kills, run };
 }
 const healthOf = async (r: Awaited<ReturnType<typeof runHealthCheck>>) => {
@@ -303,7 +303,7 @@ describe("REQ-044 MCP Health Check", () => {
     );
     const realSpawner = (_exe: string, _args: readonly string[], opts: HealthSpawnOptions) => nodeHealthSpawner(process.execPath, [script], opts);
     const verified = await verifiedFor("postgres-mcp", "health", HOST);
-    const real = await healthOf(await runHealthCheck(verified, { healthCheckType: "mcp-handshake", spawner: realSpawner, tempBase: os.tmpdir() }));
+    const real = await healthOf(await runHealthCheck(verified, { healthCheckType: "mcp-handshake", spawner: realSpawner, tempBase: os.tmpdir(), sourceEnv: () => ({}) }));
     expect(real).toMatchObject({ status: "healthy", toolCount: 1, terminated: true, environmentUnverified: true });
     const grandPid = Number(await readFile(pidFile, "utf8"));
     const alive = () => {

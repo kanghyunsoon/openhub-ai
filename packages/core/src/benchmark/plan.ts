@@ -21,7 +21,7 @@ import { PROJECT_KEY_PATTERN, artifactIdentitySchema, entryKeyOf, type ToolState
 import { TOOL_CONFIG_PLACEHOLDER } from "../tool-config/index";
 import { configEntryDigest } from "../lifecycle/status";
 import { healthEnvNotice } from "../lifecycle/preview";
-import { mcpPackageSourceMismatchOf, packageSourceMismatchMessage, type McpSourceEnv } from "../process/mcp-env";
+import { mcpPackageSourceCheck, packageSourceCheckMessage, type McpSourceEnv } from "../process/mcp-env";
 import { wheelsOnlyUvxLaunchArgs } from "../installer/backends";
 import { projectKeyFor, readLifecycleState, type StateErrorCode } from "../lifecycle/store";
 
@@ -73,7 +73,16 @@ export const benchmarkPlanSchema = z
       .nullable(),
     state: z.strictObject({ revision: z.number().int().min(1), entryDigest: sha256, appliedPlanDigest: sha256 }).nullable(),
     artifact: z.strictObject({ resolved: artifactIdentitySchema.nullable() }),
-    launch: z.strictObject({ executable: z.enum(INSTALL_BACKENDS), args: z.array(text).min(1), envNames: z.array(z.string().regex(/^[A-Z][A-Z0-9_]*$/u)), cwd: z.literal("isolated") }).nullable(),
+    launch: z
+      .strictObject({
+        executable: z.enum(INSTALL_BACKENDS),
+        args: z.array(text).min(1),
+        envNames: z.array(z.string().regex(/^[A-Z][A-Z0-9_]*$/u)),
+        cwd: z.literal("isolated"),
+        /** v0.2.1(#46 리뷰): 승인한 패키지 출처 digest(npx·uvx에서 출처 설정이 있을 때만). 바뀌면 launch 변경(PLAN_STALE), 실행 직전 다시 확인. */
+        packageSource: sha256.optional(),
+      })
+      .nullable(),
     runs: z.strictObject({ warmup: z.literal(BENCHMARK_RUNS.warmup), measured: z.literal(BENCHMARK_RUNS.measured) }),
     timeouts: z.strictObject({
       startupMs: z.literal(BENCHMARK_TIMEOUTS.startupMs),
@@ -175,10 +184,18 @@ export async function planBenchmark(options: BenchmarkPlanOptions): Promise<Benc
       blockers.push({ code: "BENCHMARK_ARTIFACT_MISMATCH", message: "실행 인자에 Version State의 고정 artifact가 없습니다" });
     }
     // v0.2.1(#45 리뷰): 고정 버전 wheel-only uvx는 Benchmark도 --no-build로 실행한다(기록이 이전 형식이어도 소스 빌드 없음).
-    if (args.length > 0) launch = { executable: state.backend, args: wheelsOnlyUvxLaunchArgs(manifest, state.backend, args), envNames: manifest.env.filter((e) => e.required).map((e) => e.name).sort(), cwd: "isolated" };
-    // v0.2.1(#46 리뷰): Prepare와 같은 패키지 출처를 MCP 서버 환경에 유지할 수 없으면 실행하지 않는다(이름만 안내, 값 없음).
-    const sourceMismatch = mcpPackageSourceMismatchOf(options.mcpSourceEnv, state.backend);
-    if (sourceMismatch.length > 0) blockers.push({ code: "BENCHMARK_PACKAGE_SOURCE_UNVERIFIED", message: packageSourceMismatchMessage(sourceMismatch).slice(0, 400) });
+    // v0.2.1(#46 리뷰): 원본이 없거나 Prepare와 같은 패키지 출처를 MCP 서버 환경에 유지할 수 없으면 실행하지 않는다(이름만 안내, 값 없음).
+    const sourceCheck = mcpPackageSourceCheck(options.mcpSourceEnv, state.backend);
+    if (!sourceCheck.ok) blockers.push({ code: "BENCHMARK_PACKAGE_SOURCE_UNVERIFIED", message: packageSourceCheckMessage(sourceCheck).slice(0, 400) });
+    if (args.length > 0) {
+      launch = {
+        executable: state.backend,
+        args: wheelsOnlyUvxLaunchArgs(manifest, state.backend, args),
+        envNames: manifest.env.filter((e) => e.required).map((e) => e.name).sort(),
+        cwd: "isolated",
+        ...(sourceCheck.ok && sourceCheck.digest !== null ? { packageSource: sourceCheck.digest } : {}),
+      };
+    }
   }
   const requirements: BenchmarkApprovalRequirement[] = ["base"];
   if (manifest.env.some((e) => e.required)) requirements.push("environment-unverified");

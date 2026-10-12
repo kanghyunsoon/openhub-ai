@@ -55,6 +55,7 @@ async function installed() {
   const files = async () => [await readFile(path.join(h.projectRoot, ".cursor", "mcp.json"), "utf8"), await readFile(path.join(h.homeDir, ".openhub", "state", "lifecycle.json"), "utf8")];
   const env = (spawns: string[][], codes: number[] = []): LifecycleEnvironment => ({
     loadEntries: async () => entries,
+    mcpSourceEnv: () => ({}),
     probe: () => h.env.probe(),
     tempBase: h.base,
     now: () => new Date("2026-10-12T00:00:00.000Z"),
@@ -141,7 +142,7 @@ describe("uvx Prepare: update·rollback", () => {
     expect(health.plan.steps.find((s) => s.kind === "health")).toMatchObject({ args: ["--no-build", ...old] });
     expect(JSON.parse(await readFile(cfgFile, "utf8")).mcpServers.postgres.args).toEqual(old);
     // Benchmark(설정을 쓰지 않음)도 기록된 인자 앞에 --no-build를 붙여 실행한다.
-    const bench = await planBenchmark({ toolId: "postgres-mcp", projectRoot: c.h.projectRoot, homeDir: c.h.homeDir, entries, platform: "linux", includeUser: false });
+    const bench = await planBenchmark({ toolId: "postgres-mcp", projectRoot: c.h.projectRoot, homeDir: c.h.homeDir, entries, platform: "linux", includeUser: false, mcpSourceEnv: () => ({}) });
     if (!bench.ok) throw new Error(bench.code);
     expect(bench.planned.plan.launch?.args).toEqual(["--no-build", ...old]);
     // update: 새 인자는 --no-build로 시작하고 준비는 wheel만이다.

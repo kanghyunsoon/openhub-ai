@@ -121,6 +121,8 @@ function lifecycleEnv(h: Harness): LifecycleEnvironment {
     probe: h.env.probe,
     tempBase: os.tmpdir(),
     now: () => new Date("2026-10-10T00:00:00.000Z"),
+    // 명시적인 빈 원본(#46 리뷰): 원본이 없으면 npx·uvx Health·Benchmark가 막힌다.
+    mcpSourceEnv: () => ({}),
     spawner: fakeNpmSpawner({ cacheRoot: path.join(h.base, "npm-cache") }).spawner,
     runHealth: async (_verified, options) => {
       healthCalls.push({ toolConfigFile: options.toolConfigFile, content: options.toolConfigFile === undefined ? null : await readFile(options.toolConfigFile, "utf8") });

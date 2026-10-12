@@ -18,7 +18,7 @@ import {
 } from "../tool-config/index";
 import { executeLifecyclePreparation, type ExecSpawner, type IsolatedDir } from "../process/executor";
 import { createTreeKiller, runHealthCheck, type HealthCheckResult, type HealthRunOptions, type HealthRunReport, type HealthSpawner, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
-import { mcpPackageSourceMismatchOf, type McpSourceEnv } from "../process/mcp-env";
+import { mcpPackageSourceCheck, type McpSourceEnv } from "../process/mcp-env";
 import type { BackendProbeReport } from "../process/probe";
 import { uvSourceSettings, type UvConfigReader } from "../process/uvx-prepare";
 import type { RecommendPlatform } from "../recommendation/index";
@@ -124,8 +124,9 @@ export async function planLifecycleRequest(request: LifecycleRequest, env: Lifec
     ...(env.fetch === undefined ? {} : { fetch: env.fetch }),
     ...(env.timeoutMs === undefined ? {} : { timeoutMs: env.timeoutMs }),
     ...(env.uvChildEnv === undefined ? {} : { uvSource: await uvSourceSettings(env.uvChildEnv(), request.platform, env.readUvConfig) }),
-    // v0.2.1(#46 리뷰): Health가 Prepare와 같은 패키지 출처를 쓸 수 있는지(변수 이름만). backend는 Version State로 정해지므로 둘 다 넘기고 plan이 고른다.
-    packageSourceMismatch: { npx: mcpPackageSourceMismatchOf(env.mcpSourceEnv, "npx"), uvx: mcpPackageSourceMismatchOf(env.mcpSourceEnv, "uvx") },
+    // v0.2.1(#46 리뷰): Health가 Prepare와 같은 패키지 출처를 쓸 수 있는지와 승인할 출처 digest(값 없음). 원본이 없으면 확인 불가로 막는다.
+    // backend는 Version State로 정해지므로 둘 다 넘기고 plan이 고른다.
+    packageSource: { npx: mcpPackageSourceCheck(env.mcpSourceEnv, "npx"), uvx: mcpPackageSourceCheck(env.mcpSourceEnv, "uvx") },
     ...(env.configFs === undefined ? {} : { fs: env.configFs }),
     ...(env.toolConfigFs === undefined ? {} : { toolConfigFs: env.toolConfigFs }),
     ...(env.windowsNpx === undefined ? {} : { clientLauncher: env.windowsNpx }),

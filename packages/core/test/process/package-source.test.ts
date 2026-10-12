@@ -1,10 +1,12 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { EventEmitter } from "node:events";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  PACKAGE_SOURCE_UNAVAILABLE_MESSAGE,
+  mcpPackageSourceCheck,
   mcpPackageSourceMismatch,
-  mcpPackageSourceMismatchOf,
   mcpServerChildEnv,
   planBenchmark,
   planLifecycleRequest,
@@ -12,6 +14,8 @@ import {
   requestLifecycleApproval,
   runInstallTransaction,
   runLifecycleTransaction,
+  type ExecChild,
+  type ExecSpawner,
   type HealthSpawnOptions,
   type LifecycleEnvironment,
   type LifecycleRequest,
@@ -77,44 +81,169 @@ describe("mcpPackageSourceMismatch(이름만, 값 없음)", () => {
     expect(mcpPackageSourceMismatch(source, "docker")).toEqual([]);
   });
 
-  it("원본이 없거나 예외를 던지면 빈 원본이다(이때 MCP 서버 환경도 비어 출처 설정이 없다)", () => {
-    expect(mcpPackageSourceMismatchOf(undefined, "uvx")).toEqual([]);
-    expect(mcpPackageSourceMismatchOf(() => { throw new Error("boom"); }, "npx")).toEqual([]);
+  // 수정 전(5454c36): 원본 누락·예외를 빈 원본으로 보고 불일치 없음([])을 돌려줘 npx·uvx Health가 출처 확인 없이 실행될 수 있었다.
+  it("원본 누락·예외·객체가 아닌 값은 출처를 확인할 수 없다(source-unavailable). 명시적인 빈 원본은 출처 설정이 없는 정상 환경이다", () => {
+    for (const backend of ["uvx", "npx"] as const) {
+      expect(mcpPackageSourceCheck(undefined, backend)).toEqual({ ok: false, reason: "source-unavailable", names: [] });
+      expect(mcpPackageSourceCheck(() => { throw new Error("boom"); }, backend)).toEqual({ ok: false, reason: "source-unavailable", names: [] });
+      expect(mcpPackageSourceCheck((() => null) as never, backend)).toEqual({ ok: false, reason: "source-unavailable", names: [] });
+      expect(mcpPackageSourceCheck(() => ({}), backend)).toEqual({ ok: true, digest: null });
+    }
+    // docker는 패키지 출처 확인 대상이 아니다.
+    expect(mcpPackageSourceCheck(undefined, "docker")).toEqual({ ok: true, digest: null });
+  });
+
+  it("승인할 출처 digest: 주소·설정 추가·제거마다 다르고, 공개 기본값(설정 없음)은 null이며, 값은 digest에만 들어간다", () => {
+    const digest = (vars: Record<string, string>, backend: "uvx" | "npx") => {
+      const c = mcpPackageSourceCheck(() => ({ ...BASE, ...vars }), backend);
+      if (!c.ok) throw new Error(c.reason);
+      return c.digest;
+    };
+    const a = digest({ NPM_CONFIG_REGISTRY: "https://mirror-a.example/" }, "npx");
+    const b = digest({ NPM_CONFIG_REGISTRY: "https://mirror-b.example/" }, "npx");
+    expect(a).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(a).not.toBe(b);
+    expect(digest({}, "npx")).toBeNull();
+    expect(digest({ npm_config_registry: "https://mirror-a.example/" }, "npx")).toBe(a);
+    const ua = digest({ UV_INDEX_URL: "https://mirror-a.example/simple" }, "uvx");
+    expect(ua).not.toBe(digest({ UV_INDEX_URL: "https://mirror-b.example/simple" }, "uvx"));
+    expect(ua).not.toBe(digest({ UV_INDEX_URL: "https://mirror-a.example/simple", UV_EXTRA_INDEX_URL: "https://extra.example/simple" }, "uvx"));
+    expect(digest({}, "uvx")).toBeNull();
+    expect(String(a) + String(ua)).not.toContain("mirror-a");
   });
 });
 
 describe("Lifecycle Health·Benchmark: 출처를 확인할 수 없으면 실행하지 않는다", () => {
   const PIN = "uvx --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted";
+  const NPX_PIN = "npx -y @modelcontextprotocol/server-memory@2026.8.31";
   const CURSOR = [{ client: "cursor" as const, scope: "project" as const }];
   const CLEAN = () => ({ ...BASE, DATABASE_URI: "postgresql://probe:synthetic-declared@db/app" });
   const CREDENTIALED = () => ({ ...CLEAN(), UV_INDEX_URL: "https://u:" + SECRET + "@pypi.corp.example/simple" });
 
-  async function installed() {
+  /** uvx 준비 단계 가짜(성공). onSpawn은 spawn마다 불린다(Prepare 도중 환경 변경 재현용). */
+  const fakeUvx = (onSpawn: () => void): ExecSpawner => () => {
+    onSpawn();
+    const events = new EventEmitter();
+    queueMicrotask(() => events.emit("close", 0, null));
+    return { pid: 9100, stdout: null, stderr: new EventEmitter(), on: (e: string, l: (...a: unknown[]) => void) => events.on(e, l), kill: () => true } as unknown as ExecChild;
+  };
+
+  async function installed(tool: "postgres" | "memory" = "postgres") {
     const seed = await seedEntries();
-    const entries: RegistryEntry[] = seed.map((e) => (e.manifest.name === "postgres-mcp" ? { ...e, manifest: { ...e.manifest, install: { ...e.manifest.install, options: { command: PIN } } } } : e));
+    const toolId = tool === "postgres" ? "postgres-mcp" : "memory-mcp";
+    const entries: RegistryEntry[] = seed.map((e) => (e.manifest.name === toolId ? { ...e, manifest: { ...e.manifest, install: { ...e.manifest.install, options: { command: tool === "postgres" ? PIN : NPX_PIN } } } } : e));
     const h = await createHarness(scratch, { entries });
-    const install = h.request("postgres-mcp", CURSOR);
+    const install = h.request(toolId, CURSOR);
     const planned = await plannedOf(h, install);
     const done = await runInstallTransaction(planned, await approveAll(planned), install, h.env);
     expect(done.status).toBe("succeeded");
     expect(await recordInstallInState(planned, done, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date("2026-10-12T00:00:00.000Z") })).toMatchObject({ ok: true });
     const spawned: string[] = [];
-    let source: () => Record<string, string> = CLEAN;
+    let source: (() => Record<string, string>) | undefined = CLEAN;
+    let onPrepare = () => undefined as void;
     const env: LifecycleEnvironment = {
       loadEntries: async () => entries,
       probe: () => h.env.probe(),
       tempBase: h.base,
       now: () => new Date("2026-10-12T00:00:00.000Z"),
       configFs: h.env.configFs!,
+      spawner: fakeUvx(() => onPrepare()),
+      fetch: async (url: string) =>
+        url.startsWith("https://pypi.org/pypi/postgres-mcp/") ? new Response(JSON.stringify({ info: { name: "postgres-mcp", version: url.includes("/0.3.0/") ? "0.3.0" : "0.3.1" } }), { status: 200 }) : new Response("missing", { status: 404 }),
       healthSpawner: (exe: string, _args: readonly string[], _options: HealthSpawnOptions) => {
         spawned.push(exe);
         throw new Error("spawn은 일어나면 안 된다");
       },
-      mcpSourceEnv: () => source(),
+      ...(source === undefined ? {} : { mcpSourceEnv: () => (source === undefined ? (undefined as never) : source()) }),
     };
-    const request = (operation: LifecycleRequest["operation"]): LifecycleRequest => ({ operation, toolId: "postgres-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, platform: "linux", includeUser: false, targets: CURSOR });
-    return { h, entries, env, spawned, request, setSource: (s: () => Record<string, string>) => void (source = s) };
+    const request = (operation: LifecycleRequest["operation"]): LifecycleRequest => ({ operation, toolId, projectRoot: h.projectRoot, homeDir: h.homeDir, platform: "linux", includeUser: false, targets: CURSOR, ...(operation === "update" && tool === "postgres" ? { to: "0.3.1" } : {}) });
+    const approveRun = async (operation: LifecycleRequest["operation"]) => {
+      const built = await planLifecycleRequest(request(operation), env);
+      if (!built.ok) throw new Error(built.code);
+      if (built.planned.plan.status !== "ready") throw new Error("PLANSTATUS " + built.planned.plan.status + " " + JSON.stringify(built.planned.plan.warnings));
+      const approved = await requestLifecycleApproval(built.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
+      if (approved.status !== "approved") throw new Error(approved.status);
+      return { built, run: () => runLifecycleTransaction(built.planned, approved.approval, request(operation), env) };
+    };
+    return {
+      h,
+      entries,
+      env,
+      spawned,
+      request,
+      approveRun,
+      setSource: (s: (() => Record<string, string>) | undefined) => void (source = s),
+      onPrepare: (f: () => void) => void (onPrepare = f),
+      withoutSource: (): LifecycleEnvironment => {
+        const { mcpSourceEnv: _omit, ...rest } = env;
+        return rest;
+      },
+    };
   }
+
+  // 수정 전(5454c36): 원본이 없으면 불일치 없음으로 보아 Health 계획이 ready였고, 실행은 빈 환경으로 MCP 서버를 띄웠다.
+  it("원본 누락: health 계획은 PACKAGE_SOURCE_UNVERIFIED로 막히고(원본 확인 불가 안내) spawn 0", async () => {
+    const c = await installed();
+    const built = await planLifecycleRequest(c.request("health"), c.withoutSource());
+    if (!built.ok) throw new Error(built.code);
+    expect(built.planned.plan.status).toBe("blocked");
+    expect(built.planned.plan.warnings.find((w) => w.code === "PACKAGE_SOURCE_UNVERIFIED")?.message).toBe(PACKAGE_SOURCE_UNAVAILABLE_MESSAGE);
+    // 원본 함수가 예외를 던져도 같다.
+    const throwing = await planLifecycleRequest(c.request("health"), { ...c.withoutSource(), mcpSourceEnv: () => { throw new Error("boom"); } });
+    if (!throwing.ok) throw new Error(throwing.code);
+    expect(throwing.planned.plan.warnings.map((w) => w.code)).toContain("PACKAGE_SOURCE_UNVERIFIED");
+    expect(c.spawned).toEqual([]);
+  });
+
+  // 수정 전(5454c36): 승인한 출처가 Plan에 없어 인증 정보 없는 주소 변경(mirror-a → mirror-b)을 잡지 못하고 실행했다.
+  for (const [label, tool, name, a, b] of [
+    ["npm NPM_CONFIG_REGISTRY", "memory", "NPM_CONFIG_REGISTRY", "https://mirror-a.example/", "https://mirror-b.example/"],
+    ["uv UV_INDEX_URL", "postgres", "UV_INDEX_URL", "https://mirror-a.example/simple", "https://mirror-b.example/simple"],
+  ] as const) {
+    it("승인 뒤 " + label + " 주소 변경(인증 정보 없음) → PLAN_STALE, spawn 0. 같은 주소면 Health 단계에 같은 출처 digest", async () => {
+      const c = await installed(tool);
+      c.setSource(() => ({ ...CLEAN(), [name]: a }));
+      const { built, run } = await c.approveRun("health");
+      const step = built.planned.plan.steps.find((s) => s.kind === "health");
+      expect(step).toMatchObject({ packageSource: expect.stringMatching(/^sha256:/u) });
+      expect(JSON.stringify(built.planned.plan)).not.toContain("mirror-a");
+      c.setSource(() => ({ ...CLEAN(), [name]: b }));
+      expect(await run()).toMatchObject({ status: "stale", code: "PLAN_STALE" });
+      expect(c.spawned).toEqual([]);
+    });
+  }
+
+  it("승인 뒤 출처 설정 추가·제거·인증 정보가 든 주소로 변경·원본 누락 → 모두 실행하지 않는다(spawn 0)", async () => {
+    const cases: [string, (() => Record<string, string>) | undefined, (() => Record<string, string>) | undefined, string][] = [
+      ["추가", CLEAN, () => ({ ...CLEAN(), UV_INDEX_URL: "https://mirror-a.example/simple" }), "stale"],
+      ["제거", () => ({ ...CLEAN(), UV_INDEX_URL: "https://mirror-a.example/simple" }), CLEAN, "stale"],
+      ["인증 정보가 든 주소로", () => ({ ...CLEAN(), UV_INDEX_URL: "https://mirror-a.example/simple" }), () => ({ ...CLEAN(), UV_INDEX_URL: "https://u:" + SECRET + "@mirror-a.example/simple" }), "stale"],
+    ];
+    for (const [label, before, after, status] of cases) {
+      const c = await installed();
+      c.setSource(before);
+      const { run } = await c.approveRun("health");
+      c.setSource(after);
+      const result = await run();
+      expect(result.status, label).toBe(status);
+      expect(c.spawned, label).toEqual([]);
+      expect(JSON.stringify(result), label).not.toContain(SECRET);
+    }
+  });
+
+  it("같은 update 실행 안에서 Prepare 뒤 Health 전에 출처가 바뀌면 Health는 실행하지 않고(spawn 0) 설정을 되돌린다", async () => {
+    const c = await installed();
+    c.setSource(() => ({ ...CLEAN(), UV_INDEX_URL: "https://mirror-a.example/simple" }));
+    const before = await readFile(path.join(c.h.projectRoot, ".cursor", "mcp.json"), "utf8");
+    const { run } = await c.approveRun("update");
+    // 승인 뒤 재생성 확인을 통과한 다음, Prepare(uvx) 단계가 실행되는 순간 출처가 바뀐다.
+    c.onPrepare(() => c.setSource(() => ({ ...CLEAN(), UV_INDEX_URL: "https://mirror-b.example/simple" })));
+    const result = await run();
+    expect(result.status).not.toBe("updated");
+    expect(result.steps.find((s) => s.id === "health")).toMatchObject({ status: "failed", code: "package-source-unverified" });
+    expect(c.spawned).toEqual([]);
+    expect(await readFile(path.join(c.h.projectRoot, ".cursor", "mcp.json"), "utf8")).toBe(before);
+  });
 
   it("health 계획: 인증 정보가 든 UV_INDEX_URL이면 PACKAGE_SOURCE_UNVERIFIED로 막히고(승인 불가) 계획에 값이 없다", async () => {
     const c = await installed();
@@ -156,15 +285,23 @@ describe("Lifecycle Health·Benchmark: 출처를 확인할 수 없으면 실행�
     expect(JSON.stringify(result)).not.toContain(SECRET);
   });
 
-  it("Benchmark 계획도 같은 이유로 막힌다(BENCHMARK_PACKAGE_SOURCE_UNVERIFIED, 값 없음)", async () => {
+  it("Benchmark 계획도 같은 이유로 막히고(원본 누락 포함), 승인할 출처 digest가 launch에 들어간다(주소가 바뀌면 launch가 달라짐)", async () => {
     const c = await installed();
     const base = { toolId: "postgres-mcp", projectRoot: c.h.projectRoot, homeDir: c.h.homeDir, entries: c.entries, platform: "linux" as const, includeUser: false, fs: c.h.env.configFs! };
     const blocked = await planBenchmark({ ...base, mcpSourceEnv: CREDENTIALED });
     if (!blocked.ok) throw new Error(blocked.code);
     expect(blocked.planned.plan.blockers.map((b) => b.code)).toContain("BENCHMARK_PACKAGE_SOURCE_UNVERIFIED");
     expect(JSON.stringify(blocked.planned.plan)).not.toContain(SECRET);
+    const missing = await planBenchmark(base);
+    if (!missing.ok) throw new Error(missing.code);
+    expect(missing.planned.plan.blockers.map((b) => b.code)).toContain("BENCHMARK_PACKAGE_SOURCE_UNVERIFIED");
     const clean = await planBenchmark({ ...base, mcpSourceEnv: CLEAN });
     if (!clean.ok) throw new Error(clean.code);
     expect(clean.planned.plan.blockers.map((b) => b.code)).not.toContain("BENCHMARK_PACKAGE_SOURCE_UNVERIFIED");
+    const mirrorA = await planBenchmark({ ...base, mcpSourceEnv: () => ({ ...CLEAN(), UV_INDEX_URL: "https://mirror-a.example/simple" }) });
+    const mirrorB = await planBenchmark({ ...base, mcpSourceEnv: () => ({ ...CLEAN(), UV_INDEX_URL: "https://mirror-b.example/simple" }) });
+    if (!mirrorA.ok || !mirrorB.ok) throw new Error("plan");
+    expect(mirrorA.planned.plan.launch?.packageSource).toMatch(/^sha256:/u);
+    expect(mirrorA.planned.plan.launch?.packageSource).not.toBe(mirrorB.planned.plan.launch?.packageSource);
   });
 });

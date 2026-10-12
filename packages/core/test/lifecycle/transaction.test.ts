@@ -111,6 +111,8 @@ async function setup(
   const health = fakeHealth(log, ...(opts.health ?? ["healthy", null]));
   const fs = opts.fs === undefined ? h.env.configFs! : opts.fs(h.env.configFs!);
   const env: LifecycleEnvironment = {
+    // 명시적인 빈 원본(#46 리뷰): 원본이 없으면 npx·uvx Health·Benchmark가 막힌다.
+    mcpSourceEnv: () => ({}),
     loadEntries: async () => seed,
     probe: () => h.env.probe(),
     tempBase: scratch,
