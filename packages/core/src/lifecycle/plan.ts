@@ -71,6 +71,7 @@ import { CLIENT_COMMANDS, artifactIdentitySchema, entryKeyOf, type ArtifactIdent
 import { configEntryDigest, standardEntries } from "./status";
 import { projectKeyFor, readLifecycleState, type StateErrorCode } from "./store";
 import { damagedJournalMessage, pendingFor, readJournals } from "./journal";
+import { packageSourceMismatchMessage } from "../process/mcp-env";
 
 /**
  * LifecyclePlan v1·Approval·PLAN_STALE 확장(TASK-040, D-020).
@@ -452,6 +453,11 @@ export interface LifecyclePlanOptions {
   uvIndex?: string | null;
   /** v0.2.1 uvx Prepare: 환경변수와 uv.toml의 패키지 출처 설정(uvSourceSettings). 있으면 uvIndex 대신 fingerprint를 쓴다. */
   uvSource?: UvSourceSettings;
+  /**
+   * v0.2.1(#46 리뷰): Prepare가 쓰는 패키지 출처 설정 중 MCP 서버 환경에 같은 값으로 넘길 수 없는 변수 이름(mcpPackageSourceMismatch, 값 없음).
+   * Health를 실행하는 계획이면 blocker다(spawn 0). 실행 직전 재생성에서 달라지면 Plan digest가 바뀌어 PLAN_STALE이다.
+   */
+  packageSourceMismatch?: { readonly npx: readonly string[]; readonly uvx: readonly string[] };
 }
 
 export type LifecyclePlanErrorCode =
@@ -740,6 +746,10 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
   // update는 Manifest에서 다시 만든 인자에 이미 있다. rollback·health는 Version State 기록을 쓰므로, --no-build 이전 형식의 기록이면 여기서 붙인다
   // (버전·패키지는 그대로이고 소스 빌드만 막는다). 고정되지 않은(launch-on-demand) 명령은 바꾸지 않는다.
   target = { ...target, launchArgs: wheelsOnlyUvxLaunchArgs(manifest, backend, target.launchArgs) };
+  const sourceMismatch = backend === "npx" || backend === "uvx" ? (options.packageSourceMismatch?.[backend] ?? []) : [];
+  if (sourceMismatch.length > 0 && (options.operation === "health" || options.skipHealth !== true)) {
+    blockers.push({ code: "PACKAGE_SOURCE_UNVERIFIED", message: packageSourceMismatchMessage(sourceMismatch) });
+  }
 
   return {
     ok: true,

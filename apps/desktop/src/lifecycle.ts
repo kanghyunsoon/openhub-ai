@@ -532,7 +532,7 @@ export async function planForRenderer(operation: LifecycleOperation, session: Li
 }
 
 /** 실패 코드별 다음 행동(고정 문장, 카탈로그 guide.<CODE>). 코드는 Core LifecycleResult 계약 그대로다. */
-const GUIDED_CODES = ["PLAN_STALE", "CLIENT_LAUNCHER_UNAVAILABLE", "TOOL_CONFIG_DRIFT", "TOOL_CONFIG_STALE", "CONFIG_DRIFT", "CONFIG_RESTORE_FAILED", "COMPENSATION_INCOMPLETE", "MANUAL_SETUP_REQUIRED"] as const;
+const GUIDED_CODES = ["PLAN_STALE", "CLIENT_LAUNCHER_UNAVAILABLE", "TOOL_CONFIG_DRIFT", "TOOL_CONFIG_STALE", "CONFIG_DRIFT", "CONFIG_RESTORE_FAILED", "COMPENSATION_INCOMPLETE", "MANUAL_SETUP_REQUIRED", "package-source-unverified"] as const;
 const guidance = (code: string | undefined): string | undefined => ((GUIDED_CODES as readonly string[]).includes(code ?? "") ? tr(("guide." + code) as MessageKey) : undefined);
 const SUCCEEDED = new Set<LifecycleResultV1["status"]>(["updated", "rolled-back", "health-checked", "repaired", "up-to-date"]);
 

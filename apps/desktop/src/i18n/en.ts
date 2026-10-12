@@ -303,6 +303,7 @@ export const en = {
   "guide.CONFIG_RESTORE_FAILED": "Some config changes from this run could not be restored. Changes made meanwhile by other programs were not overwritten. Check the files shown in the result yourself. Version State was not changed.",
   "guide.COMPENSATION_INCOMPLETE": "Some config changes from this run could not be restored. Check the files shown in the result yourself.",
   "guide.MANUAL_SETUP_REQUIRED": "The client configuration cannot be written safely, so nothing was changed.",
+  "guide.package-source-unverified": "A package index or registry setting in your environment variables cannot be passed to the MCP server (for example a URL that contains credentials), so the MCP server was not started. Move the credentials to uv.toml or .npmrc, remove them from the environment variable, and create a new plan.",
   "outcome.succeeded": "{operation} completed ({status})",
   "outcome.partial": "{operation} partially failed ({code}): {guide}",
   "outcome.notRun": "{operation} not run ({code}): {guide}",

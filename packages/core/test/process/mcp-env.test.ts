@@ -138,6 +138,9 @@ async function envRecordingServer(out: string): Promise<string> {
 const HOST = process.platform === "win32" ? ("windows" as const) : process.platform === "darwin" ? ("macos" as const) : ("linux" as const);
 /** 실제 OS에서 node가 뜨는 데 필요한 값 + 합성 자격증명(부모 환경에 섞여 있는 상황). */
 const parentEnv = () => ({ ...process.env, ...SYNTH, DATABASE_URI: "postgresql://probe:synthetic-declared@db/app" });
+/** uv 이름 있는 index 인증(UV_INDEX_CORP_*)을 뺀 원본. 이 쌍은 패키지 출처 설정이라 있으면 uvx Health가 실행되지 않는다(#46 리뷰 A안). */
+const UV_INDEX_AUTH_NAMES = ["UV_INDEX_CORP_PASSWORD", "UV_INDEX_CORP_USERNAME"];
+const parentEnvWithoutUvIndexAuth = () => Object.fromEntries(Object.entries(parentEnv()).filter(([k]) => !UV_INDEX_AUTH_NAMES.includes(k)));
 
 describe("실제 자식 process가 받는 환경", () => {
   const LIMITS = { startupMs: 20_000, handshakeMs: 10_000, totalMs: 45_000 };
@@ -170,7 +173,8 @@ describe("실제 자식 process가 받는 환경", () => {
   it("handshake: 허용 목록 환경으로 띄운 MCP 서버는 합성 key를 하나도 받지 못하고 선언된 값만 받는다(선언해도 코드 주입 변수는 제외)", async () => {
     const out = path.join(scratch, "handshake.json");
     const script = await envRecordingServer(out);
-    const source = () => ({ ...parentEnv(), LD_PRELOAD: "/synthetic/evil.so", DYLD_INSERT_LIBRARIES: "/synthetic/evil.dylib", NODE_PATH: "/synthetic/node" });
+    // uvx backend: uv index 인증 쌍을 빼야 실행된다(있으면 아래 테스트처럼 spawn 0). 나머지 합성 key 20종은 그대로 둔다.
+    const source = () => ({ ...parentEnvWithoutUvIndexAuth(), LD_PRELOAD: "/synthetic/evil.so", DYLD_INSERT_LIBRARIES: "/synthetic/evil.dylib", NODE_PATH: "/synthetic/node" });
     const declaredNames = ["DATABASE_URI", "NODE_OPTIONS", "PYTHONPATH", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "NODE_PATH"];
     const outcome = await runHandshake([process.execPath, script], scratch, LIMITS, HOST, { killTree: createTreeKiller({ cwd: scratch }), sourceEnv: source }, { mark: () => undefined }, { backend: "uvx", declaredNames });
     expect(outcome.status).toBe("healthy");
@@ -180,6 +184,18 @@ describe("실제 자식 process가 받는 환경", () => {
     expect(seen["DATABASE_URI"]).toBe("postgresql://probe:synthetic-declared@db/app");
     expect(Object.keys(seen).some((k) => k.toUpperCase() === "PATH")).toBe(true);
   }, 30_000);
+
+  it("handshake(합성 key 22종 전부, uv index 인증 포함): uvx는 패키지 출처를 확인할 수 없어 spawn 0이고 결과에 값이 없다", async () => {
+    const out = path.join(scratch, "handshake-blocked.json");
+    const script = await envRecordingServer(out);
+    const spawned: unknown[] = [];
+    const spawner = (exe: string, args: readonly string[], options: HealthSpawnOptions) => (spawned.push(exe), nodeHealthSpawner(exe, args, options));
+    const outcome = await runHandshake([process.execPath, script], scratch, LIMITS, HOST, { killTree: createTreeKiller({ cwd: scratch }), sourceEnv: parentEnv, spawner }, { mark: () => undefined }, { backend: "uvx", declaredNames: ["DATABASE_URI"] });
+    expect(outcome).toMatchObject({ status: "launch-failed", reason: "package-source-unverified" });
+    expect(spawned).toEqual([]);
+    expect(outcome.excerpt).toContain("UV_INDEX_CORP_PASSWORD");
+    for (const value of Object.values(SYNTH)) expect(JSON.stringify(outcome)).not.toContain(value);
+  });
 
   // 재현(이전 HEAD 3027da6): 원본 없이 띄우면 부모 process.env의 합성 key가 그대로 전달됐다(이 자리의 테스트가 누출을 단언했다).
   // 수정 뒤 같은 시나리오: 원본 누락·빈 원본·예외를 던지는 원본 모두 부모 환경을 쓰지 않는다(fail-closed).
@@ -217,7 +233,8 @@ describe("실제 자식 process가 받는 환경", () => {
     const script = await envRecordingServer(out);
     const spawned: (Record<string, string> | undefined)[] = [];
     const healthSpawner = (_exe: string, _args: readonly string[], options: HealthSpawnOptions) => (spawned.push(options.env), nodeHealthSpawner(process.execPath, [script], options));
-    const env: LifecycleEnvironment = { loadEntries: async () => entries, probe: () => h.env.probe(), tempBase: h.base, now: () => new Date("2026-10-12T00:00:00.000Z"), configFs: h.env.configFs!, healthSpawner, ...(withSource ? { mcpSourceEnv: parentEnv } : {}) };
+    // uvx(postgres): uv index 인증 쌍이 있으면 Health가 실행되지 않으므로(아래 별도 테스트) 나머지 합성 key 20종으로 실제 실행을 본다.
+    const env: LifecycleEnvironment = { loadEntries: async () => entries, probe: () => h.env.probe(), tempBase: h.base, now: () => new Date("2026-10-12T00:00:00.000Z"), configFs: h.env.configFs!, healthSpawner, ...(withSource ? { mcpSourceEnv: parentEnvWithoutUvIndexAuth } : {}) };
     const request: LifecycleRequest = { operation: "health", toolId: "postgres-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, platform: HOST, includeUser: false, targets: CURSOR };
     const built = await planLifecycleRequest(request, env);
     if (!built.ok) throw new Error(built.code);

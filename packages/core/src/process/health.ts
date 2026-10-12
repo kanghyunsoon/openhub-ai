@@ -6,7 +6,7 @@ import { isVerifiedLifecyclePlan, type HealthStep, type VerifiedLifecyclePlan } 
 import type { RecommendPlatform } from "../recommendation/index";
 import { EXEC_EXCERPT_BYTES, OutputTail, redactExcerpt, type ExecSpawner } from "./executor";
 import { TOOL_CONFIG_PLACEHOLDER, substituteToolConfig } from "../tool-config/index";
-import { mcpProcessEnv, type McpChildEnvInput, type McpSourceEnv } from "./mcp-env";
+import { mcpPackageSourceMismatchOf, mcpProcessEnv, packageSourceMismatchMessage, type McpChildEnvInput, type McpSourceEnv } from "./mcp-env";
 
 /**
  * MCP Health Check(TASK-041, D-019). 승인된 LifecyclePlan의 health 단계로만 MCP 서버를 실행해 handshake를 확인한다.
@@ -37,7 +37,9 @@ export type HealthFailureReason =
   | "tools-list-error"
   | "output-limit"
   | "termination-failed"
-  | "unsupported-health-check";
+  | "unsupported-health-check"
+  /** v0.2.1(#46 리뷰): Prepare와 같은 패키지 출처를 확인할 수 없어 실행하지 않았다(spawn 0). */
+  | "package-source-unverified";
 export const HEALTH_OUTPUT_KILL_BYTES = 1024 * 1024;
 export const HEALTH_SHUTDOWN_GRACE_MS = 2000;
 export const HEALTH_KILL_WAIT_MS = 5000;
@@ -208,6 +210,9 @@ export async function runHealthCheck(verified: VerifiedLifecyclePlan, options: H
     argv = sub.args;
   }
   if (argv === null) return { ok: true, result: result("launch-failed", "launcher-not-found", environmentUnverified) };
+  // 실행 직전에 다시 확인한다(계획 뒤 환경이 바뀐 경우 포함). 출처를 확인할 수 없으면 spawn 0이고 다른 출처로 fallback하지 않는다.
+  const sourceMismatch = mcpPackageSourceMismatchOf(options.sourceEnv, verified.plan.backend);
+  if (sourceMismatch.length > 0) return { ok: true, result: result("launch-failed", "package-source-unverified", environmentUnverified, { excerpt: packageSourceMismatchMessage(sourceMismatch) }) };
 
   const base = options.tempBase;
   const cwd = await mkdtemp(path.join(base, "openhub-health-"));
@@ -248,6 +253,8 @@ export function runHandshake(
   observer: HandshakeObserver,
   envInput: McpChildEnvInput,
 ): Promise<HandshakeOutcome> {
+  const sourceMismatch = mcpPackageSourceMismatchOf(options.sourceEnv, envInput.backend);
+  if (sourceMismatch.length > 0) return Promise.resolve({ status: "launch-failed", reason: "package-source-unverified", toolCount: null, terminated: true, excerpt: packageSourceMismatchMessage(sourceMismatch) });
   return handshake(argv, cwd, timeouts, platform, { ...options, healthCheckType: "mcp-handshake", tempBase: cwd }, mcpProcessEnv(options.sourceEnv, envInput), observer);
 }
 

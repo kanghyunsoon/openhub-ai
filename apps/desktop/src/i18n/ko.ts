@@ -305,6 +305,7 @@ export const ko: Readonly<Record<keyof typeof en, string>> = {
   "guide.CONFIG_RESTORE_FAILED": "이번에 바꾼 설정 일부를 원래대로 되돌리지 못했습니다. 그 사이 다른 프로그램이 바꾼 내용은 덮어쓰지 않았습니다. 결과에 표시된 파일을 직접 확인하세요. Version State는 바꾸지 않았습니다.",
   "guide.COMPENSATION_INCOMPLETE": "이번에 바꾼 설정 일부를 원래대로 되돌리지 못했습니다. 결과에 표시된 파일을 직접 확인하세요.",
   "guide.MANUAL_SETUP_REQUIRED": "Client 설정에 안전하게 쓸 수 없어 아무것도 바꾸지 않았습니다.",
+  "guide.package-source-unverified": "환경변수의 패키지 index·registry 설정(예: 인증 정보가 든 URL)을 MCP 서버에 넘길 수 없어 MCP 서버를 실행하지 않았습니다. 인증 정보는 uv.toml·.npmrc로 옮기고 환경변수에서 지운 뒤 새 계획을 만드세요.",
   "outcome.succeeded": "{operation} 완료({status})",
   "outcome.partial": "{operation} 부분 실패({code}): {guide}",
   "outcome.notRun": "{operation} 실행 안 함({code}): {guide}",

@@ -1,4 +1,6 @@
 import type { InstallBackend } from "../installer/plan";
+import { npmChildEnv } from "./npx-prepare";
+import { uvChildEnv } from "./uvx-prepare";
 
 /**
  * MCP 서버 자식 process 환경(v0.2.1 보안 보완). Health·Benchmark가 외부 MCP 서버를 실행할 때 부모 환경 전체를 상속하지 않는다.
@@ -26,6 +28,10 @@ import type { InstallBackend } from "../installer/plan";
  * 기본값은 닫힘(fail-closed): 원본이 없으면 빈 원본으로 거른다. 부모 환경을 그대로 상속하는 경로는 없다(health.ts는 항상 이 결과로 spawn한다).
  * 코드 주입 변수(NODE_OPTIONS·PYTHONPATH·LD_PRELOAD·DYLD_* 등)는 Manifest가 선언해도 넘기지 않고, Registry 검증에서 선언 자체를 거부한다.
  * 이 제한은 sandbox가 아니다: MCP 서버는 여전히 사용자 권한으로 홈 폴더 파일·네트워크·다른 프로그램에 접근할 수 있다.
+ *
+ * 패키지 출처 불변성(v0.2.1 #46 리뷰, A안): Prepare가 uv·npm에 넘기는 index·registry 설정을 여기서 같은 값으로 넘길 수 없으면
+ * (인증 정보·query가 든 URL, uv 이름 있는 index 인증, 환경변수로만 둔 npm scope registry) Health·Benchmark를 실행하지 않는다
+ * (mcpPackageSourceMismatch, spawn 0). 공개 index로 fallback하지 않고 offline 모드로 우회하지 않는다(cache가 index URL로 나뉘어 출처를 증명하지 못함).
  */
 
 const BASE = new Set([
@@ -48,6 +54,8 @@ const BACKEND: Readonly<Record<InstallBackend, ReadonlySet<string>>> = {
 /** 이름만으로 자격증명으로 보이는 변수. 허용 목록에 있어도 넘기지 않는다(선언된 이름은 예외: Manifest 검토·승인 대상). */
 const CREDENTIAL_NAME = /(?:TOKEN|SECRET|PASSWORD|PASSWD|_AUTH|AUTH_|API_?KEY|CREDENTIAL|PRIVATE_KEY)/u;
 const URL_USERINFO = /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/@\s]+@/u;
+/** query·fragment가 붙은 URL. token·key 같은 인증 값이 들어 있을 수 있어 MCP 서버에 넘기지 않는다(v0.2.1 #46 리뷰). */
+const URL_QUERY_OR_FRAGMENT = /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s]*[?#]/u;
 
 /** 실행할 코드·라이브러리·모듈 경로를 바꾸는 변수. Manifest가 선언해도 넘기지 않는다. */
 export const MCP_ENV_CODE_INJECTION_NAMES: readonly string[] = [
@@ -89,11 +97,65 @@ export function mcpServerChildEnv(source: Readonly<Record<string, string | undef
     }
     const allowed = BASE.has(upper) || LOCALE.test(upper) || backend.has(upper);
     if (!allowed || CREDENTIAL_NAME.test(upper)) continue;
-    // index·registry URL에 계정이 들어 있으면 넘기지 않는다(프록시는 네트워크 경로라 예외, 문서화된 한계).
-    if ((backend.has(upper) && upper !== "UV_CONFIG_FILE") && URL_USERINFO.test(value)) continue;
+    // index·registry URL에 계정·query·fragment가 들어 있으면 넘기지 않는다(프록시는 네트워크 경로라 예외, 문서화된 한계).
+    // 넘기지 않은 출처 설정은 mcpPackageSourceMismatch가 잡아 Health·Benchmark를 실행하지 않는다(다른 출처로 fallback 없음).
+    if (backend.has(upper) && upper !== "UV_CONFIG_FILE" && (URL_USERINFO.test(value) || URL_QUERY_OR_FRAGMENT.test(value))) continue;
     out[name] = value;
   }
   return out;
+}
+
+// ---------------------------------------------------------------- 패키지 출처 불변성(v0.2.1 #46 리뷰, A안)
+
+/** uv가 패키지를 받을 출처·인증을 정하는 환경변수(이름은 대문자). */
+const UV_SOURCE = new Set(["UV_INDEX", "UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX_STRATEGY", "UV_INSECURE_HOST", "UV_CONFIG_FILE", "UV_NO_CONFIG"]);
+const UV_INDEX_AUTH = /^UV_INDEX_[A-Z0-9_]+_(?:USERNAME|PASSWORD)$/u;
+/** npm이 패키지를 받을 registry를 정하는 환경변수: npm_config_registry, npm_config_@scope:registry(대소문자 무관). */
+const isNpmRegistryName = (name: string) => {
+  const lower = name.toLowerCase();
+  if (!lower.startsWith("npm_config_")) return false;
+  const key = lower.slice("npm_config_".length);
+  return key === "registry" || key.endsWith(":registry");
+};
+const isSourceSetting = (backend: InstallBackend, name: string) =>
+  backend === "uvx" ? UV_SOURCE.has(name.toUpperCase()) || UV_INDEX_AUTH.test(name.toUpperCase()) : backend === "npx" ? isNpmRegistryName(name) : false;
+
+/**
+ * Prepare가 uv·npm에 넘기는 패키지 출처 설정 중 MCP 서버(Health·Benchmark) 환경에 같은 값으로 들어가지 않는 변수 이름(대문자, 정렬).
+ * 빈 배열이 아니면 Health·Benchmark가 Prepare와 같은 출처의 패키지를 쓴다고 확인할 수 없으므로 실행하지 않는다(spawn 0).
+ * 예: 계정·query가 든 UV_INDEX_URL·NPM_CONFIG_REGISTRY, UV_INDEX_<NAME>_PASSWORD, 환경변수로만 둔 npm scope registry.
+ * 값은 돌려주지 않는다. uv.toml·.npmrc의 설정은 uv·npm이 직접 읽어 양쪽이 같으므로 여기에 해당하지 않는다.
+ */
+export function mcpPackageSourceMismatch(source: Readonly<Record<string, string | undefined>>, backend: InstallBackend): string[] {
+  if (backend !== "uvx" && backend !== "npx") return [];
+  const prepared = backend === "uvx" ? uvChildEnv(source) : npmChildEnv(source);
+  const child = mcpServerChildEnv(source, { backend, declaredNames: [] });
+  const childUpper = new Map(Object.entries(child).map(([k, v]) => [k.toUpperCase(), v]));
+  const out = new Set<string>();
+  for (const [name, value] of Object.entries(prepared)) {
+    if (!isSourceSetting(backend, name)) continue;
+    if (childUpper.get(name.toUpperCase()) !== value) out.add(name.toUpperCase());
+  }
+  return [...out].sort();
+}
+
+/** 원본 함수가 없거나 예외를 던지면 빈 원본(불일치 없음; 이때 MCP 서버 환경도 비어 출처 설정이 없다). */
+export function mcpPackageSourceMismatchOf(sourceEnv: McpSourceEnv | undefined, backend: InstallBackend): string[] {
+  let source: Readonly<Record<string, string | undefined>> = {};
+  try {
+    source = sourceEnv?.() ?? {};
+  } catch {
+    source = {};
+  }
+  return mcpPackageSourceMismatch(source, backend);
+}
+
+/** 사용자 안내(이름만, 값 없음). */
+export function packageSourceMismatchMessage(names: readonly string[]): string {
+  return (
+    "패키지 출처 설정(" + names.join(", ") + ")에 인증 정보가 든 URL 등 MCP 서버에 넘길 수 없는 값이 있어, Health·Benchmark가 준비(Prepare)와 같은 출처의 패키지를 쓴다고 확인할 수 없습니다. " +
+    "실행하지 않았습니다. 인증 정보는 uv.toml·.npmrc로 옮기고 환경변수에서 지운 뒤 새 계획을 만드세요"
+  );
 }
 
 export type McpSourceEnv = () => Readonly<Record<string, string | undefined>>;

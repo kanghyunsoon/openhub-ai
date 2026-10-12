@@ -45,6 +45,18 @@ Notes:
 - Pinokio scripts run inside Pinokio's own process, not as a child of OpenHub.
 - Health does not pass npm or uv registry credentials. A tool that still downloads packages during Health (a floating version without Prepare) from a private registry can therefore fail Health; exact-version tools are prepared before Health and do not download then.
 
+### Package source must stay the same (Health and Benchmark)
+
+Prepare downloads packages with your npm or uv settings, including a private index or registry. Health and Benchmark must start the server from **the same source**. If a package-source setting in an environment variable cannot be passed to the MCP server unchanged, OpenHub does not start it at all (no process is started, and there is no fallback to the public PyPI or npm registry):
+
+- an index or registry URL that contains credentials or a query or fragment: `UV_INDEX_URL`, `UV_INDEX`, `UV_DEFAULT_INDEX`, `UV_EXTRA_INDEX_URL`, `NPM_CONFIG_REGISTRY` (any letter case);
+- uv named-index credentials (`UV_INDEX_<NAME>_USERNAME`, `UV_INDEX_<NAME>_PASSWORD`);
+- npm scope registries set only in environment variables (`npm_config_@scope:registry`).
+
+The plan is blocked (`PACKAGE_SOURCE_UNVERIFIED`; Benchmark: `BENCHMARK_PACKAGE_SOURCE_UNVERIFIED`) and the message names the variables, never their values. OpenHub checks again right before starting the server; if the environment changed after approval, the run stops with `PLAN_STALE` and you need a new plan and approval. Why: measured with uv 0.12.3 and npm, running the same pinned command without that setting re-resolves from the default public index. Offline mode is not used as a workaround: the cache is keyed by index URL, so it cannot prove which source a cached package came from.
+
+What to do: put the index or registry and its credentials in `uv.toml` or `.npmrc` and remove them from the environment variable. uv and npm read those files themselves, so Prepare, Health and the client use the same source, and OpenHub does not hand the credentials to the MCP server. (The server still runs as your user and could read those files; see "not a sandbox" above.) Credentials embedded in a URL path cannot be told apart from an ordinary path and are not detected.
+
 ## Untrusted data
 
 Release notes, repository descriptions, discovery candidates and AI summaries are untrusted text. They are shown as plain text, never executed and never used as approval. See [Discovery trust](discovery-trust.md) and [LLM privacy](llm-privacy.md).

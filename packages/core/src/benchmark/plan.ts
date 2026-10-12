@@ -21,6 +21,7 @@ import { PROJECT_KEY_PATTERN, artifactIdentitySchema, entryKeyOf, type ToolState
 import { TOOL_CONFIG_PLACEHOLDER } from "../tool-config/index";
 import { configEntryDigest } from "../lifecycle/status";
 import { healthEnvNotice } from "../lifecycle/preview";
+import { mcpPackageSourceMismatchOf, packageSourceMismatchMessage, type McpSourceEnv } from "../process/mcp-env";
 import { wheelsOnlyUvxLaunchArgs } from "../installer/backends";
 import { projectKeyFor, readLifecycleState, type StateErrorCode } from "../lifecycle/store";
 
@@ -41,7 +42,7 @@ export const BENCHMARK_TIMEOUTS = Object.freeze({ startupMs: 20_000, handshakeMs
 export const BENCHMARK_METHODS = ["initialize", "notifications/initialized", "tools/list"] as const;
 export const BENCHMARK_APPROVAL_REQUIREMENTS = ["base", "environment-unverified", "artifact-fetch"] as const;
 export type BenchmarkApprovalRequirement = (typeof BENCHMARK_APPROVAL_REQUIREMENTS)[number];
-export const BENCHMARK_BLOCKER_CODES = ["BENCHMARK_NOT_MANAGED", "BENCHMARK_ARTIFACT_UNLOCKED", "BENCHMARK_CONFIG_DRIFT", "BENCHMARK_UNSUPPORTED", "BENCHMARK_ARTIFACT_MISMATCH"] as const;
+export const BENCHMARK_BLOCKER_CODES = ["BENCHMARK_NOT_MANAGED", "BENCHMARK_ARTIFACT_UNLOCKED", "BENCHMARK_CONFIG_DRIFT", "BENCHMARK_UNSUPPORTED", "BENCHMARK_ARTIFACT_MISMATCH", "BENCHMARK_PACKAGE_SOURCE_UNVERIFIED"] as const;
 export type BenchmarkBlockerCode = (typeof BENCHMARK_BLOCKER_CODES)[number];
 export const BENCHMARK_PLAN_CHANGE_KINDS = ["state", "artifact", "launch", "config", "registry", "manifest", "target"] as const;
 export type BenchmarkPlanChange = (typeof BENCHMARK_PLAN_CHANGE_KINDS)[number];
@@ -117,6 +118,8 @@ export interface BenchmarkPlanOptions {
   client?: InstallClient;
   scope?: ConfigScope;
   fs?: ConfigFs;
+  /** v0.2.1(#46 리뷰): MCP 서버 환경의 원본(보통 process.env). 패키지 출처를 Prepare와 같게 유지할 수 없으면 blocker다(값은 Plan에 넣지 않는다). */
+  mcpSourceEnv?: McpSourceEnv;
 }
 export type BenchmarkPlanErrorCode = "TOOL_NOT_FOUND" | "BENCHMARK_TARGET_AMBIGUOUS" | StateErrorCode;
 export type BenchmarkPlanResult = { ok: true; planned: PlannedBenchmark } | { ok: false; code: BenchmarkPlanErrorCode; message: string };
@@ -173,6 +176,9 @@ export async function planBenchmark(options: BenchmarkPlanOptions): Promise<Benc
     }
     // v0.2.1(#45 리뷰): 고정 버전 wheel-only uvx는 Benchmark도 --no-build로 실행한다(기록이 이전 형식이어도 소스 빌드 없음).
     if (args.length > 0) launch = { executable: state.backend, args: wheelsOnlyUvxLaunchArgs(manifest, state.backend, args), envNames: manifest.env.filter((e) => e.required).map((e) => e.name).sort(), cwd: "isolated" };
+    // v0.2.1(#46 리뷰): Prepare와 같은 패키지 출처를 MCP 서버 환경에 유지할 수 없으면 실행하지 않는다(이름만 안내, 값 없음).
+    const sourceMismatch = mcpPackageSourceMismatchOf(options.mcpSourceEnv, state.backend);
+    if (sourceMismatch.length > 0) blockers.push({ code: "BENCHMARK_PACKAGE_SOURCE_UNVERIFIED", message: packageSourceMismatchMessage(sourceMismatch).slice(0, 400) });
   }
   const requirements: BenchmarkApprovalRequirement[] = ["base"];
   if (manifest.env.some((e) => e.required)) requirements.push("environment-unverified");
