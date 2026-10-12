@@ -150,7 +150,23 @@ describe("uvx Prepare: 설치 실행", () => {
     expect(h.spawns).toEqual([["uvx", ...uvxPrepareArgs(TARGET, "wheels-only")], ["uvx", ...uvxVerifyArgs(TARGET, "wheels-only")]]);
     expect(h.log.indexOf("spawn")).toBeLessThan(h.log.indexOf("write"));
     const config = JSON.parse(await readFile(path.join(h.projectRoot, ".cursor", "mcp.json"), "utf8"));
-    expect(config.mcpServers.postgres).toMatchObject({ command: "uvx", args: ["--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"] });
+    // v0.2.1(#45 리뷰): 준비한 고정 버전 wheel-only 도구는 Client도 --no-build로 실행한다(cache가 지워져도 검토되지 않은 sdist를 빌드하지 않는다).
+    expect(config.mcpServers.postgres).toMatchObject({ command: "uvx", args: ["--no-build", "--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"] });
+  });
+
+  it("Client 실행 인자의 --no-build: 고정 버전 wheel-only에만 붙고, 떠 있는 명령은 그대로이며, Manifest에 이미 있으면 중복하지 않는다", async () => {
+    const pinnedPlan = (await plannedOf(await createHarness(scratch, { entries: pinned }), (await createHarness(scratch, { entries: pinned })).request("postgres-mcp", CURSOR))).plan;
+    expect(pinnedPlan.launch?.args.slice(0, 2)).toEqual(["--no-build", "--from"]);
+    expect(pinnedPlan.artifact).toMatchObject({ pinned: true, preparation: "uv-cache" });
+    // Health도 같은 인자로 실행한다(launch.args).
+    const floating = await createHarness(scratch, { entries: seed });
+    const floatingPlan = (await plannedOf(floating, floating.request("postgres-mcp", CURSOR))).plan;
+    expect(floatingPlan.launch?.args).not.toContain("--no-build");
+    const explicit = await createHarness(scratch, { entries: withPostgres({ command: "uvx --no-build --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted" }) });
+    const explicitPlan = (await plannedOf(explicit, explicit.request("postgres-mcp", CURSOR))).plan;
+    expect(explicitPlan.launch?.args.filter((a) => a === "--no-build")).toHaveLength(1);
+    expect(explicitPlan.artifact).toMatchObject({ pinned: true, preparation: "uv-cache" });
+    expect(explicitPlan.steps[0]).toMatchObject({ args: uvxPrepareArgs(TARGET, "wheels-only") });
   });
 
   it("준비가 실패하면(wheel 없음) 설정 파일을 바꾸지 않고 소스 빌드로 재시도하지 않는다", async () => {

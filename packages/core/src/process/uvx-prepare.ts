@@ -45,6 +45,8 @@ export interface UvxPrepareTarget {
  * 그 밖(떠 있는 버전, 다른 uv 플래그, --from 없음)은 null이다(launch-on-demand 유지).
  */
 export function uvxPrepareTarget(launchArgs: readonly string[]): UvxPrepareTarget | null {
+  // Client 실행 인자 앞의 --no-build(v0.2.1, uvxClientLaunchArgs)는 준비 대상 해석과 무관하다.
+  if (launchArgs[0] === "--no-build") launchArgs = launchArgs.slice(1);
   if (launchArgs[0] !== "--from") return null;
   const from = launchArgs[1];
   if (from === undefined || !isPinnedPythonSpec(from)) return null;
@@ -61,6 +63,15 @@ export function uvxPrepareTarget(launchArgs: readonly string[]): UvxPrepareTarge
 }
 
 const envArgs = (t: UvxPrepareTarget) => ["--from", t.from, ...t.withPins.flatMap((w) => ["--with", w])];
+
+/**
+ * 고정 버전 wheel-only uvx 도구의 Client 실행 인자(v0.2.1, #45 리뷰). Prepare가 --no-build로 준비한 것과 같이 Client도 --no-build로 실행한다.
+ * 그래야 cache가 지워졌거나 Client가 다시 해석할 때도 검토되지 않은 sdist를 빌드하지 않고 실패한다(자동 허용 fallback 없음).
+ * 이미 앞에 있으면 그대로 둔다.
+ */
+export function uvxClientLaunchArgs(args: readonly string[]): string[] {
+  return args[0] === "--no-build" ? [...args] : ["--no-build", ...args];
+}
 
 /** 준비 단계 인자(고정 형식). */
 export function uvxPrepareArgs(target: UvxPrepareTarget, policy: UvxBuildPolicy): string[] {

@@ -15,7 +15,7 @@ import {
   type KernelPrompter,
   type KernelVerified,
 } from "../installer/approval-v1";
-import { BACKEND_ADAPTERS, DOCKER_PULL_TIMEOUT_MS, clientLaunchSpec, npxPrepareStepFor, uvxBuildPolicyOf, uvxPrepareStepFor } from "../installer/backends";
+import { BACKEND_ADAPTERS, DOCKER_PULL_TIMEOUT_MS, clientLaunchSpec, npxPrepareStepFor, uvxBuildPolicyOf, uvxPrepareStepFor, wheelsOnlyUvxLaunchArgs } from "../installer/backends";
 import { isPinnedArtifact, isValidDockerImage, npxArtifact, parseNpmSpec, tokenizeManifestCommand } from "../installer/command";
 import { parseNpxPrepareArgs } from "../process/npx-prepare";
 import type { UvSourceSettings, UvxBuildPolicy, UvxSourceBuildEntry } from "../process/uvx-prepare";
@@ -736,6 +736,10 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
       }
     }
   }
+  // v0.2.1(#45 리뷰): 고정 버전 wheel-only uvx 대상은 Client 설정과 OpenHub Health 모두 --no-build로 실행한다.
+  // update는 Manifest에서 다시 만든 인자에 이미 있다. rollback·health는 Version State 기록을 쓰므로, --no-build 이전 형식의 기록이면 여기서 붙인다
+  // (버전·패키지는 그대로이고 소스 빌드만 막는다). 고정되지 않은(launch-on-demand) 명령은 바꾸지 않는다.
+  target = { ...target, launchArgs: wheelsOnlyUvxLaunchArgs(manifest, backend, target.launchArgs) };
 
   return {
     ok: true,

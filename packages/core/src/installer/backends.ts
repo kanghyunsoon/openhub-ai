@@ -4,8 +4,9 @@ import type { HealthResult, InstallContext, InstallPlan, InstallResult, InstallT
 import { isPinnedArtifact, isPinnedPythonSpec, isValidDockerImage, npxArtifact, tokenizeManifestCommand, uvxArtifact } from "./command";
 import type { InstallBackend, InstallPlanV1, RunStep } from "./plan";
 import { NPX_PREPARE_STEP_ID, NPX_PREPARE_TIMEOUT_MS, npxPrepareArgs } from "../process/npx-prepare";
-import { UVX_PREPARE_STEP_ID, UVX_PREPARE_TIMEOUT_MS, normalizePyName, uvxPrepareArgs, uvxPrepareTarget, type UvxBuildPolicy, type UvxSourceBuildEntry } from "../process/uvx-prepare";
+import { UVX_PREPARE_STEP_ID, UVX_PREPARE_TIMEOUT_MS, normalizePyName, uvxClientLaunchArgs, uvxPrepareArgs, uvxPrepareTarget, type UvxBuildPolicy, type UvxSourceBuildEntry } from "../process/uvx-prepare";
 import { NPX_CLI_PLACEHOLDER, TOOL_CONFIG_PLACEHOLDER, toolConfigIssues } from "../tool-config/index";
+import { installCandidates } from "./router";
 
 /**
  * npx·uvx·docker Adapter(TASK-031, D-012·D-015). Adapter는 Plan 단계만 만들고 프로세스를 실행하지 않는다.
@@ -116,6 +117,8 @@ function planLaunchOnDemand(manifest: Manifest, step: InstallStep, backend: "npx
   if (!policy.ok) return { ok: false, kind: "rejected", reason: policy.reason };
   const prepare = backend === "npx" ? npxPrepareStepFor(backend, ref.spec, pinned) : uvxPrepareStepFor(args, policy.policy, policy.sourceBuild);
   if (policy.policy === "source-build-reviewed" && prepare === null) return { ok: false, kind: "rejected", reason: "source-build-reviewed는 정확한 버전(--from pkg==X.Y.Z, --with dep==A.B.C)으로 고정된 uvx 명령에서만 씁니다" };
+  // v0.2.1: 준비하는(고정 버전) wheel-only uvx 도구는 Client도 --no-build로 실행한다. 고정되지 않은 명령(launch-on-demand)은 바꾸지 않는다.
+  if (backend === "uvx" && prepare !== null && policy.policy === "wheels-only") args = uvxClientLaunchArgs(args);
   return {
     ok: true,
     value: {
@@ -164,6 +167,18 @@ export function uvxBuildPolicyOf(step: InstallStep, backend: InstallBackend): Uv
     entries.push({ package: normalizePyName(e["package"]), version: e["version"], sha256: e["sha256"] });
   }
   return { ok: true, policy: "source-build-reviewed", sourceBuild: entries.sort((a, b) => (a.package < b.package ? -1 : a.package > b.package ? 1 : 0)) };
+}
+
+/**
+ * v0.2.1(#45 리뷰): 고정 버전 wheel-only uvx 실행 인자에는 --no-build를 붙인다(이미 있으면 그대로). Client 설정·Health·Benchmark가 같은 규칙을 쓴다.
+ * Version State에 --no-build 이전 형식으로 기록된 인자(rollback 대상·Health·Benchmark)도 소스 빌드 없이 실행하게 한다. 버전·패키지는 바꾸지 않는다.
+ * 고정되지 않은 명령(launch-on-demand)·다른 backend·검토된 소스 빌드 정책(v0.2.1에서 차단)은 그대로 둔다.
+ */
+export function wheelsOnlyUvxLaunchArgs(manifest: Manifest, backend: InstallBackend, args: readonly string[]): string[] {
+  if (backend !== "uvx" || uvxPrepareTarget(args) === null) return [...args];
+  const candidate = installCandidates(manifest).find((c) => c.step.adapter === "uvx");
+  const policy = candidate === undefined ? undefined : uvxBuildPolicyOf(candidate.step, "uvx");
+  return policy !== undefined && policy.ok && policy.policy === "wheels-only" ? uvxClientLaunchArgs(args) : [...args];
 }
 
 /** 정확한 버전 환경의 uvx Prepare 단계(v0.2.1). 준비할 수 없는 형식이면 null(launch-on-demand 유지). */

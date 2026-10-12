@@ -1,5 +1,5 @@
 import os from "node:os";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -72,7 +72,7 @@ async function installAndHealth(toolId: string, entries: RegistryEntry[]) {
   const result = await runInstallTransaction(planned, await approveAll(planned), request, env);
   const doc = JSON.parse(await readFile(path.join(h.projectRoot, ".mcp.json"), "utf8"));
   expect(doc.mcpServers.notes).toEqual({ command: "uvx", args: ["notes-mcp==1.0.0"] });
-  if (result.status !== "succeeded") return { planned, result, health: null };
+  if (result.status !== "succeeded") return { planned, result, health: null, config: doc };
   expect(await recordInstallInState(planned, result, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() })).toMatchObject({ ok: true });
   const life: LifecycleEnvironment = { loadEntries: async () => entries, probe: () => h.env.probe(), tempBase: h.isoBase, now: () => new Date(), runHealth: runHealthCheck, uvChildEnv: () => uvChildEnv(process.env) };
   const req = { operation: "health" as const, toolId, projectRoot: h.projectRoot, homeDir: h.homeDir, platform, includeUser: false, targets: CLAUDE };
@@ -80,7 +80,29 @@ async function installAndHealth(toolId: string, entries: RegistryEntry[]) {
   if (!plan.ok) throw new Error(plan.code);
   const ok = await requestLifecycleApproval(plan.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
   if (ok.status !== "approved") throw new Error(ok.status);
-  return { planned, result, health: await runLifecycleTransaction(plan.planned, ok.approval, req, life) };
+  return { planned, result, health: await runLifecycleTransaction(plan.planned, ok.approval, req, life), config: doc };
+}
+
+/** Client 설정에 기록된 명령을 그대로(같은 command·args) 실행해 MCP initialize 응답을 받는다. Client가 하는 실행과 같다. */
+function clientHandshake(command: string, args: readonly string[], extraEnv: Record<string, string>): Promise<{ ok: boolean; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(command, [...args], { shell: false, env: { ...process.env, ...extraEnv }, stdio: ["pipe", "pipe", "pipe"] });
+    let out = "";
+    let err = "";
+    const done = (ok: boolean) => {
+      clearTimeout(timer);
+      child.kill();
+      resolve({ ok, stderr: err });
+    };
+    const timer = setTimeout(() => done(false), 120_000);
+    child.stdout.on("data", (d: Buffer) => {
+      out += d.toString("utf8");
+      if (/"serverInfo"/u.test(out)) done(true);
+    });
+    child.stderr.on("data", (d: Buffer) => (err += d.toString("utf8")));
+    child.on("close", () => done(/"serverInfo"/u.test(out)));
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "openhub-e2e", version: "0" } } }) + "\n");
+  });
 }
 
 describe.skipIf(skip)("v0.2.1 uvx Prepare 실제 uv(빈 cache)", () => {
@@ -123,10 +145,42 @@ describe.skipIf(skip)("v0.2.1 uvx Prepare 실제 uv(빈 cache)", () => {
       expect(r.stderr).toMatch(/hash/iu);
     }), 900_000);
 
+  // #45 리뷰: Client가 나중에 직접 uvx를 실행할 때(cache 삭제·재해석)도 검토되지 않은 sdist를 빌드하면 안 된다.
+  it("수정 전 재현: --no-build 없는 Client 명령(v0.2.0 형식)은 빈 cache에서 검토되지 않은 sdist(proxy-tools)를 빌드한다", () =>
+    withUvCache(async () => {
+      const r = spawnSync("uvx", ["--from", "serena-agent==1.7.0", "python", "-c", "pass"], { encoding: "utf8", shell: false, timeout: 600_000 });
+      expect(r.status).toBe(0);
+      expect(r.stderr).toMatch(/Built proxy-tools==0\.1\.0/u);
+    }), 900_000);
+
+  it("수정 후: --no-build Client 명령은 빈 cache(삭제된 cache)에서 소스 빌드 없이 실패한다", () =>
+    withUvCache(async () => {
+      const r = spawnSync("uvx", ["--no-build", "--from", "serena-agent==1.7.0", "serena", "start-mcp-server"], { encoding: "utf8", shell: false, timeout: 600_000 });
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).not.toMatch(/Built /u);
+      expect(r.stderr).toMatch(/proxy-tools/u);
+    }), 900_000);
+
   it.skipIf(DB === undefined)("postgres-mcp 0.3.0 + mcp 1.30.0: 준비 뒤 첫 Health가 healthy다", () =>
     withUvCache(async () => {
       const r = await installAndHealth("postgres-mcp", override("postgres-mcp", { command: "uvx --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted" }));
       expect(r.result).toMatchObject({ status: "succeeded", verification: { prepared: "cached" } });
       expect(r.health).toMatchObject({ status: "health-checked", health: { status: "healthy" } });
+      // Client 설정은 Prepare·Health와 같은 고정 패키지를 --no-build로 실행한다.
+      const entry = r.config.mcpServers.postgres as { command: string; args: string[] };
+      expect(entry.command).toBe("uvx");
+      expect(entry.args).toEqual(["--no-build", "--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]);
+      // 재실행: 기록된 Client 명령 그대로, 오프라인(UV_OFFLINE=1)으로 준비된 cache만 써서 MCP initialize에 응답한다.
+      const offline = await clientHandshake(entry.command, entry.args, { UV_OFFLINE: "1", DATABASE_URI: DB! });
+      expect(offline.ok, offline.stderr.slice(-2000)).toBe(true);
+      expect(offline.stderr).not.toMatch(/Built /u);
+    }), 900_000);
+
+  it.skipIf(DB === undefined)("postgres-mcp: cache를 지운 뒤 Client 명령(--no-build)은 wheel만 받아 빌드 없이 시작한다", () =>
+    withUvCache(async () => {
+      const args = ["--no-build", "--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"];
+      const fresh = await clientHandshake("uvx", args, { DATABASE_URI: DB! });
+      expect(fresh.ok, fresh.stderr.slice(-2000)).toBe(true);
+      expect(fresh.stderr).not.toMatch(/Built /u);
     }), 900_000);
 });
