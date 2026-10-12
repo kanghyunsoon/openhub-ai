@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  OPENHUB_CORE_VERSION,
   defaultHostEnvironment,
   entryKeyOf,
   lifecycleStatus,
@@ -15,6 +16,7 @@ import {
   probeBackends,
   projectKeyFor,
   readLifecycleState,
+  recoveryAvailability,
   requestLifecycleApproval,
   runLifecycleTransaction,
   toRecommendPlatform,
@@ -369,6 +371,21 @@ interface Snapshot {
   raw: Map<string, LifecycleToolStatus>;
 }
 
+/**
+ * 중단된 작업(interrupted-update)의 안내(v0.2.1, 복구는 CLI 전용). Core recoveryAvailability(읽기만, 쓰기·실행·network 0)로
+ * 지금 가능한 방법(undo·discard·manual)을 고르고, 정확한 명령·CLI를 얻는 방법·복구 뒤 확인 방법을 붙인다.
+ */
+async function interruptedGuidance(toolId: string, projectRoot: string, deps: LifecycleDeps): Promise<string> {
+  const r = await recoveryAvailability({ toolId, projectRoot, homeDir: deps.homeDir, ...(deps.configFs === undefined ? {} : { fs: deps.configFs }) }).catch(() => null);
+  const how =
+    r === null || r.available === "manual"
+      ? tr("life.recover.manual", { toolId, reasons: r === null ? "-" : r.blockers.join(", ") || "-" })
+      : r.available === "discard"
+        ? tr("life.recover.discard", { toolId })
+        : tr("life.recover.undo", { toolId });
+  return tr("life.recover.lead") + " " + how + " " + tr("life.recover.cli", { version: OPENHUB_CORE_VERSION });
+}
+
 async function snapshot(session: LifecycleSession, deps: LifecycleDeps): Promise<Snapshot | LifecycleStatusResponse> {
   const dir = session.projectDir();
   if (dir === undefined) return { status: "no-project" };
@@ -396,6 +413,8 @@ async function snapshot(session: LifecycleSession, deps: LifecycleDeps): Promise
     // Repair 버튼: 오류 상태만 보고 켜지 않는다. Core가 지금 ready Repair Plan을 만들 수 있을 때만(파일 읽기·PATH 탐색만, 실행·쓰기·network 0).
     let canRepair = false;
     let warning = warningFor(item.state);
+    // v0.2.1: 중단된 작업은 Desktop에서 복구하지 않는다(CLI 전용). 지금 가능한 복구 방법과 정확한 명령·CLI 설치·확인 방법을 알린다(읽기만).
+    if (item.state === "interrupted-update" && item.toolId !== null) warning = await interruptedGuidance(item.toolId, dir, deps);
     if (REPAIR_STATES.has(item.state) && item.toolId !== null && (item.scope === "project" || includeUser)) {
       const request = repairRequest(item.toolId, item, dir, deps, platform, includeUser);
       const built = await planLifecycleRequest(request, env).catch(() => null);
