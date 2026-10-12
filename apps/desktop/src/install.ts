@@ -14,8 +14,8 @@ import {
   planInstall,
   probeBackends,
   readLifecycleState,
-  recordInstallInState,
   requestApproval,
+  runInstallAndRecord,
   runInstallTransaction,
   toRecommendPlatform,
   verifyInstallation,
@@ -529,10 +529,9 @@ export async function runForRenderer(session: InstallSession, deps: InstallDeps,
     // 대화상자가 열린 동안 손상됐어도 Client 설정을 쓰지 않는다(설정만 바뀌고 Version State 기록이 빠지는 상태를 만들지 않는다).
     const after = await unreadableState(deps);
     if (after !== undefined) return after;
-    const result = await runInstallTransaction(pending.planned, outcome.approval, pending.request, env);
-    const view = buildInstallResultView(result, pending.planned.plan);
-    await recordDesktopInstall(pending.planned, result, pending.request, deps, view);
-    return { status: "done", result: view };
+    // (v0.2.1 B) 설치와 Version State 기록은 Core가 하나의 작업 잠금 안에서 한다. 그 사이 손상·경쟁으로 기록이 실패하면 설정을 되돌린 실패 결과다.
+    const { result } = await runInstallAndRecord(pending.planned, outcome.approval, pending.request, env, { now: deps.now ?? (() => new Date()) });
+    return { status: "done", result: buildInstallResultView(result, pending.planned.plan) };
   } catch {
     return { status: "error", code: "install-failed", message: tr("install.runFailed") };
   }
@@ -542,17 +541,6 @@ export async function runForRenderer(session: InstallSession, deps: InstallDeps,
 async function unreadableState(deps: InstallDeps): Promise<{ status: "error"; code: string; message: string } | undefined> {
   const read = await readLifecycleState({ homeDir: deps.homeDir, ...(deps.configFs === undefined ? {} : { fs: deps.configFs }) });
   return read.ok ? undefined : { status: "error", code: read.code, message: stateUnreadableText(read.code) };
-}
-
-/** 설치가 succeeded이면 Version State에 기록한다(TASK-038). 실행 직전에 읽기를 확인하므로 여기서 실패하는 경우는 그 사이 경쟁뿐이며 결과 화면 경고로 보여 준다. */
-async function recordDesktopInstall(planned: PlannedInstall, result: InstallResultV1, request: InstallRequest, deps: InstallDeps, view: InstallResultView): Promise<void> {
-  const recorded = await recordInstallInState(planned, result, {
-    projectRoot: request.projectRoot,
-    homeDir: request.homeDir,
-    ...(deps.configFs === undefined ? {} : { fs: deps.configFs }),
-    now: deps.now ?? (() => new Date()),
-  });
-  if (!recorded.ok) view.warnings.push(tr("install.stateRecordFailed", { code: recorded.code }));
 }
 
 /** IPC 핸들러 등록. install:plan은 toolId와 Client 선택만, 나머지는 toolId만 쓴다(그 밖의 인자는 무시한다). */

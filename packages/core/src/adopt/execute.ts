@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { nodeConfigFs, type ConfigFs } from "../installer/config-writer";
 import { entryKeyOf, serializeLifecycleState, toolStateSchema, type ToolState } from "../lifecycle/state";
-import { commitLifecycleState, readLifecycleState } from "../lifecycle/store";
+import { commitLifecycleState, readLifecycleState, withOperationLock } from "../lifecycle/store";
 import { ADOPT_PLAN_CHANGE_KINDS, verifyApprovedAdoptPlan, type AdoptApproval, type AdoptPlanResult, type VerifiedAdoptPlan } from "./plan";
 
 /**
@@ -61,8 +61,18 @@ export function adoptedToolState(verified: VerifiedAdoptPlan, now: Date): ToolSt
 const result = (toolId: string, over: Partial<AdoptResultV1>): AdoptResultV1 =>
   adoptResultSchema.parse({ schemaVersion: ADOPT_RESULT_SCHEMA_VERSION, kind: ADOPT_RESULT_KIND, status: "failed", toolId, planDigest: null, entryKey: null, revision: null, changed: [], error: null, ...over });
 
-/** 승인 검증 → Version State write 1회. 승인 Approval은 이 호출에서 소모된다(1회용). */
+/**
+ * 승인 검증 → Version State write 1회. 승인 Approval은 이 호출에서 소모된다(1회용).
+ * (v0.2.1 B) 승인이 있는 실행은 작업 잠금 안에서 한다. 다른 작업이 진행 중이면 failed / OPERATION_IN_PROGRESS(쓰기 0).
+ */
 export async function executeAdopt(approval: AdoptApproval | undefined, options: ExecuteAdoptOptions): Promise<AdoptResultV1> {
+  if (approval === undefined) return executeAdoptLocked(approval, options);
+  const locked = await withOperationLock({ homeDir: options.homeDir, purpose: "adopt", ...(options.fs === undefined ? {} : { fs: options.fs }) }, () => executeAdoptLocked(approval, options));
+  if (locked.ok) return locked.value;
+  return result(options.toolId, { status: "failed", planDigest: approval.planDigest, error: { code: locked.code, message: locked.message } });
+}
+
+async function executeAdoptLocked(approval: AdoptApproval | undefined, options: ExecuteAdoptOptions): Promise<AdoptResultV1> {
   const fs = options.fs ?? nodeConfigFs;
   const gate = await verifyApprovedAdoptPlan(approval, options.regenerate);
   if (!gate.ok) {

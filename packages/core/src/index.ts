@@ -19,10 +19,12 @@ export * from "./installer/backends";
 export * from "./installer/config-writer";
 export * from "./installer/result";
 export * from "./installer/transaction";
+export * from "./installer/install-and-record";
 export * from "./installer/verify";
 export * from "./installer/preview";
 export * from "./lifecycle/state";
 export * from "./lifecycle/store";
+export * from "./lifecycle/lock";
 export * from "./lifecycle/status";
 export * from "./lifecycle/resolver";
 export * from "./lifecycle/plan";
@@ -54,3 +56,5 @@ export * from "./packaging/paths";
 // 선택적 LLM 요약(CLI opt-in 표시 전용, D-023). 내부 모듈은 이 파일을 import하지 않는다.
 export * from "./release/summary-llm";
 export * from "./tool-config/index";
+export * from "./lifecycle/journal";
+export * from "./lifecycle/recovery";

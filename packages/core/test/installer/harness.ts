@@ -34,6 +34,8 @@ export interface HarnessOptions {
   packageJson?: string;
   /** npx Prepare 가짜 npm의 동작(기본 ok). */
   npmPrepare?: "ok" | "fail" | "incomplete" | "hang" | "wrong-version";
+  /** 이미 있는 project·home을 쓴다(다른 프로세스와 같은 디렉터리를 공유하는 v0.2.1 동시성 테스트용). */
+  dirs?: { base: string; projectRoot: string; homeDir: string };
 }
 
 export interface Harness {
@@ -52,12 +54,14 @@ export interface Harness {
 }
 
 export async function createHarness(scratch: string, options: HarnessOptions): Promise<Harness> {
-  const base = await mkdtemp(path.join(scratch, "case-"));
-  const projectRoot = path.join(base, "project");
-  const homeDir = path.join(base, "home");
-  const isoBase = path.join(base, "tmp");
-  for (const d of [projectRoot, homeDir, isoBase]) await mkdir(d);
-  await writeFile(path.join(projectRoot, "package.json"), options.packageJson ?? '{ "name": "demo", "private": true }\n');
+  const base = options.dirs?.base ?? (await mkdtemp(path.join(scratch, "case-")));
+  const projectRoot = options.dirs?.projectRoot ?? path.join(base, "project");
+  const homeDir = options.dirs?.homeDir ?? path.join(base, "home");
+  const isoBase = options.dirs === undefined ? path.join(base, "tmp") : await mkdtemp(path.join(base, "tmp-"));
+  if (options.dirs === undefined) {
+    for (const d of [projectRoot, homeDir, isoBase]) await mkdir(d);
+    await writeFile(path.join(projectRoot, "package.json"), options.packageJson ?? '{ "name": "demo", "private": true }\n');
+  }
   const log: string[] = [];
   const spawns: string[][] = [];
   const writes: string[] = [];

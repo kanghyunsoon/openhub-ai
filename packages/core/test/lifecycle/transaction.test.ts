@@ -152,7 +152,8 @@ describe("REQ-040 REQ-043 REQ-050 Update transaction", () => {
     const result = await run(c);
     expect(result.status).toBe("updated");
     const phases = c.log.filter((l) => l.startsWith("phase:") || l === "health:run");
-    expect(phases).toEqual(["phase:approval-check", "phase:regenerate", "phase:digest-compare", "phase:probe", "phase:prepare", "phase:config-replace", "phase:health", "health:run", "phase:state-commit"]);
+    // (v0.2.1 P0-3) config-replaced(교체 직후)·journal-cleanup(commit 뒤 작업 기록 정리) 단계가 추가됐다(강제 종료 지점 검증용).
+    expect(phases).toEqual(["phase:approval-check", "phase:regenerate", "phase:digest-compare", "phase:probe", "phase:prepare", "phase:config-replace", "phase:config-replaced", "phase:health", "health:run", "phase:state-commit", "phase:journal-cleanup"]);
     expect(c.exec.calls).toEqual([["docker", "pull", "ghcr.io/github/github-mcp-server@" + DIGEST]]);
   });
 

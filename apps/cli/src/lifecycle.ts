@@ -5,6 +5,7 @@ import {
   INSTALL_CLIENTS,
   LIFECYCLE_APPROVAL_MESSAGES,
   LIFECYCLE_STATE_LOGICAL_PATH,
+  damagedJournalMessage,
   defaultHostEnvironment,
   formatLifecyclePlanPreview,
   formatLifecycleResult,
@@ -19,6 +20,7 @@ import {
   planLifecycleRequest,
   probeBackends,
   readLifecycleState,
+  recoveryAvailability,
   requestLifecycleApproval,
   runLifecycleTransaction,
   serializeLifecyclePlan,
@@ -33,10 +35,13 @@ import {
   type LifecycleOperation,
   type LifecycleRequest,
   type LifecycleResultV1,
+  type LifecycleToolStatus,
+  type RecoveryAvailability,
   type TreeKiller,
 } from "@openhub/core";
 import { registryDirOf } from "./paths";
 import { createTtyPrompter, type InstallCommandIO, type InstallPrompter } from "./install";
+import { runRecover } from "./recover";
 import { updateImpactHeader } from "./release";
 
 /**
@@ -145,6 +150,7 @@ export async function runLifecycle(argv: readonly string[], io: LifecycleCommand
   if (sub === "status") return runStatus(rest, io, usage);
   if (sub === "health") return runLifecycleOperation("health", rest, io, usage);
   if (sub === "repair") return runLifecycleOperation("repair", rest, io, usage);
+  if (sub === "recover") return runRecover(rest, io, usage);
   io.err("알 수 없는 lifecycle 하위 명령: " + (sub ?? "(없음)") + "\n\n" + usage);
   return 2;
 }
@@ -193,9 +199,11 @@ async function runStatus(argv: readonly string[], io: LifecycleCommandIO, usage:
     }
   }
   if (values.json) {
-    io.out(JSON.stringify({ items: status.items, ...(values.check ? { checks } : {}) }, null, 2));
+    const recovery = await recoveryOf(status.items, projectRoot, homeDir, io);
+    io.out(JSON.stringify({ items: status.items, ...(values.check ? { checks } : {}), ...(status.journalsUnreadable > 0 ? { journalsUnreadable: status.journalsUnreadable } : {}), ...(recovery.length > 0 ? { recovery } : {}) }, null, 2));
     return 0;
   }
+  if (status.journalsUnreadable > 0) io.err("경고: " + damagedJournalMessage(status.journalsUnreadable));
   if (status.items.length === 0) io.out("OpenHub Version State에 기록된 도구가 없습니다(" + LIFECYCLE_STATE_LOGICAL_PATH + ").");
   for (const item of status.items) {
     for (const line of formatLifecycleStatusItem(item)) io.out(line);
@@ -212,8 +220,29 @@ async function runStatus(argv: readonly string[], io: LifecycleCommandIO, usage:
     }
     io.out("");
   }
+  // (v0.2.1) 중간에 끝난 작업(Journal)이 남은 도구마다 지금 복구할 수 있는지와 정확한 명령을 알린다(읽기 전용).
+  for (const r of await recoveryOf(status.items, projectRoot, homeDir, io)) {
+    io.out(
+      r.available === "undo"
+        ? "복구 가능  " + r.toolId + ": openhub lifecycle recover " + r.toolId + " — 승인하면 OpenHub가 쓰다 만 항목을 변경 전으로 되돌립니다"
+        : r.available === "discard"
+          ? "복구 가능  " + r.toolId + ": openhub lifecycle recover " + r.toolId + " --discard — 설정은 이미 일관된 상태이고 작업 기록만 지우면 됩니다"
+          : "자동 복구 불가  " + r.toolId + " (" + r.blockers.join(", ") + "): OpenHub는 덮어쓰지 않습니다. openhub lifecycle recover " + r.toolId + " --json으로 상태를 확인하고 설정 파일을 직접 확인하세요",
+    );
+  }
   if (!values["include-host"]) io.out("사용자 범위 설정은 확인하지 않았습니다(--include-host로 켭니다).");
   return 0;
+}
+
+/** status 항목 중 interrupted-update인 도구의 복구 가능 여부(도구별 1회). */
+async function recoveryOf(items: readonly LifecycleToolStatus[], projectRoot: string, homeDir: string, io: LifecycleCommandIO): Promise<RecoveryAvailability[]> {
+  const tools = [...new Set(items.filter((i) => i.state === "interrupted-update" && i.toolId !== null).map((i) => i.toolId!))].sort();
+  const out: RecoveryAvailability[] = [];
+  for (const toolId of tools) {
+    const r = await recoveryAvailability({ toolId, projectRoot, homeDir, ...(io.configFs === undefined ? {} : { fs: io.configFs }) });
+    if (r !== null) out.push(r);
+  }
+  return out;
 }
 
 /** openhub update | rollback | lifecycle health <toolId> … */
