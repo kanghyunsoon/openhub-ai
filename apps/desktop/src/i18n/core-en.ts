@@ -59,7 +59,7 @@ const NOTICE_EN: Readonly<Record<string, string>> = {
   "npx-prepare": "Before writing configuration, the npm package of this version is downloaded into the npx cache. The MCP server is not started, but npm may run install scripts of dependencies during installation (as on the client's first start). If an incomplete cache entry of the same package and version exists, only that entry is removed and downloaded again.",
   "uvx-prepare": "Before writing the client configuration, OpenHub downloads and installs the Python packages for this exact version into uv's cache. The MCP server is not started during this step.",
   "uvx-source-build": "Some packages of this tool are only available as source and are built on your computer. Building runs third-party build code. OpenHub reviewed this tool's dependency list, but not the build code itself.",
-  "uvx-custom-index": "A custom Python package index is configured, so uv downloads packages from that index. If the index settings change after approval, the plan does not run.",
+  "uvx-custom-index": "Custom Python package source settings are configured (index environment variables or uv.toml), so uv downloads packages according to them. If these settings change after approval, the plan does not run.",
   "database-credential-scope": "This tool acts with the permissions of the database credentials in its environment variable. The MCP server's read-only setting does not reduce database permissions, so use a database account with read permission only.",
   "health-execution": "Health Check runs the MCP server (third-party code) in an isolated temporary directory and may download packages or images.",
   "client-wrapper-not-verified": "Health Check verifies the artifact. It does not verify the cmd /d /c npx wrapper in the client configuration itself.",
@@ -139,6 +139,11 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   OPERATION_IN_PROGRESS: "Another OpenHub operation is in progress (for example an update waiting for Health). Nothing was changed. Try again when it finishes.",
   OPERATION_LOCK_FAILED: "OpenHub could not create its operation lock in the state folder, so nothing was run or changed.",
   UP_TO_DATE: "The tool is already at the target version.",
+  UVX_CONFIG_UNSUPPORTED: "A uv configuration file (uv.toml) could not be read or is not valid TOML, so the uvx preparation step was not planned. Fix the file and create a new plan. No configuration file was changed.",
+  UVX_SOURCE_BUILD_CUSTOM_INDEX: "A custom package index is set (environment variable or uv.toml), so the reviewed source build is blocked. It is only allowed from the default PyPI index, where OpenHub can verify the reviewed file. No configuration file was changed.",
+  UVX_SOURCE_UNVERIFIED: "The reviewed source package could not be verified on PyPI (missing, different sha256, or network error), so nothing was built. No configuration file was changed.",
+  UVX_UNREVIEWED_SOURCE_BUILD: "A package that is not on the reviewed list needs a source build, so OpenHub stopped before building it. The Manifest needs review. No configuration file was changed.",
+  UVX_SOURCE_BUILD_MISMATCH: "The packages built from source did not match the reviewed list, so the preparation failed. No configuration file was changed.",
 };
 
 /** 대문자 차단·오류 code 또는 notice code 하나의 영어 문장(없으면 undefined). */
@@ -504,6 +509,11 @@ const INSTALL_CODE_EN: Readonly<Record<string, string>> = {
   UVX_PREPARE_VERIFY_FAILED: "The prepared environment could not be found again without network (offline check failed). No configuration file was changed.",
   UVX_PREPARE_REJECTED: "The uvx preparation step only accepts exact Python package versions. No configuration file was changed.",
   UVX_PREPARE_UNAVAILABLE: "The uvx preparation step could not run in this environment. No configuration file was changed.",
+  UVX_CONFIG_UNSUPPORTED: "A uv configuration file (uv.toml) could not be read or is not valid TOML, so the uvx preparation step was not planned. Fix the file and create a new plan. No configuration file was changed.",
+  UVX_SOURCE_BUILD_CUSTOM_INDEX: "A custom package index is set (environment variable or uv.toml), so the reviewed source build is blocked. It is only allowed from the default PyPI index, where OpenHub can verify the reviewed file. No configuration file was changed.",
+  UVX_SOURCE_UNVERIFIED: "The reviewed source package could not be verified on PyPI (missing, different sha256, or network error), so nothing was built. No configuration file was changed.",
+  UVX_UNREVIEWED_SOURCE_BUILD: "A package that is not on the reviewed list needs a source build, so OpenHub stopped before building it. The Manifest needs review. No configuration file was changed.",
+  UVX_SOURCE_BUILD_MISMATCH: "The packages built from source did not match the reviewed list, so the preparation failed. No configuration file was changed.",
   STATE_RECORD_FAILED: "Version State could not be recorded, so the configuration written by this install was restored to its original content. Check the cause and install again.",
 };
 

@@ -19,7 +19,7 @@ import {
 import { executeLifecyclePreparation, type ExecSpawner, type IsolatedDir } from "../process/executor";
 import { createTreeKiller, runHealthCheck, type HealthCheckResult, type HealthRunOptions, type HealthRunReport, type HealthSpawner, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
 import type { BackendProbeReport } from "../process/probe";
-import { uvIndexFingerprint } from "../process/uvx-prepare";
+import { uvSourceSettings, type UvConfigReader, type UvxPrepareContext } from "../process/uvx-prepare";
 import type { RecommendPlatform } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
 import { replaceConfigEntry } from "./config-replace";
@@ -87,6 +87,10 @@ export interface LifecycleEnvironment {
   npmChildEnv?: () => Record<string, string>;
   /** v0.2.1 uvx Prepare의 uv 자식 process 환경(보통 uvChildEnv(process.env)). 패키지 index fingerprint도 여기서 만든다. */
   uvChildEnv?: () => Record<string, string>;
+  /** uv 설정 파일(uv.toml) 읽기. 테스트 주입용, 기본은 실제 파일. */
+  readUvConfig?: UvConfigReader;
+  /** 검토된 소스 빌드의 PyPI 확인 HTTP(테스트 주입용, 기본 globalThis.fetch). */
+  uvxFetch?: UvxPrepareContext["fetch"];
   /** Health 실행기(테스트 주입용). 기본 runHealthCheck. */
   runHealth?: (verified: VerifiedLifecyclePlan, options: HealthRunOptions) => Promise<HealthRunReport>;
   /** operation별 Plan 생성기 교체(테스트 주입용). 기본은 planLifecycle(update·rollback·health). */
@@ -115,7 +119,7 @@ export async function planLifecycleRequest(request: LifecycleRequest, env: Lifec
     ...(request.skipHealth === undefined ? {} : { skipHealth: request.skipHealth }),
     ...(env.fetch === undefined ? {} : { fetch: env.fetch }),
     ...(env.timeoutMs === undefined ? {} : { timeoutMs: env.timeoutMs }),
-    ...(env.uvChildEnv === undefined ? {} : { uvIndex: uvIndexFingerprint(env.uvChildEnv()) }),
+    ...(env.uvChildEnv === undefined ? {} : { uvSource: await uvSourceSettings(env.uvChildEnv(), request.platform, env.readUvConfig) }),
     ...(env.configFs === undefined ? {} : { fs: env.configFs }),
     ...(env.toolConfigFs === undefined ? {} : { toolConfigFs: env.toolConfigFs }),
     ...(env.windowsNpx === undefined ? {} : { clientLauncher: env.windowsNpx }),
@@ -300,7 +304,7 @@ async function runTransaction(planned: PlannedLifecycle, approval: LifecycleAppr
     ...(hasNpxPrepare
       ? { npx: { platform: plan.platform, windowsNpx, killTree: env.killTree ?? createTreeKiller({ cwd: env.tempBase }), ...(env.npmChildEnv === undefined ? {} : { childEnv: env.npmChildEnv() }) } }
       : {}),
-    ...(hasUvxPrepare ? { uvx: { platform: plan.platform, killTree: env.killTree ?? createTreeKiller({ cwd: env.tempBase }), ...(env.uvChildEnv === undefined ? {} : { childEnv: env.uvChildEnv() }) } } : {}),
+    ...(hasUvxPrepare ? { uvx: { platform: plan.platform, killTree: env.killTree ?? createTreeKiller({ cwd: env.tempBase }), ...(env.uvChildEnv === undefined ? {} : { childEnv: env.uvChildEnv() }), ...(env.readUvConfig === undefined ? {} : { readUvConfig: env.readUvConfig }), ...(env.uvxFetch === undefined ? {} : { fetch: env.uvxFetch }) } } : {}),
   });
   if (!prep.ok) return finalize({ planned: verified, status: "approval-required", code: prep.code, retryable: true });
   steps.push(...prep.steps);

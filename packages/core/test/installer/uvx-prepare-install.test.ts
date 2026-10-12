@@ -34,7 +34,8 @@ const withPostgres = (options: Record<string, unknown>): RegistryEntry[] =>
   seed.map((e) => (e.manifest.name === "postgres-mcp" ? { ...e, manifest: { ...e.manifest, install: { ...e.manifest.install, options } } } : e));
 const manifestOf = (entries: RegistryEntry[]) => entries.find((e) => e.manifest.name === "postgres-mcp")!.manifest;
 const pinned = withPostgres({ command: PIN });
-const SOURCE_BUILD = { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1.0", source: "pypi-sdist" }] };
+const PROXY_SHA = "ccb3751f529c047e2d8a58440d86b205303cf0fe8146f784d1cbcd94f0a28010";
+const SOURCE_BUILD = { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1.0", source: "pypi-sdist", sha256: PROXY_SHA }] };
 const sourceBuild = withPostgres({ command: PIN, prepare: SOURCE_BUILD });
 const CURSOR = [{ client: "cursor" as const, scope: "project" as const }];
 
@@ -88,6 +89,7 @@ describe("uvx Prepare: 설치 계획", () => {
     const h = await createHarness(scratch, { entries: sourceBuild });
     const { plan } = await plannedOf(h, h.request("postgres-mcp", CURSOR));
     expect(plan.steps[0]).toMatchObject({ id: "uvx-prepare", args: uvxPrepareArgs(TARGET, "source-build-reviewed") });
+    expect(plan.steps[0]).toMatchObject({ sourceBuild: [{ package: "proxy-tools", version: "0.1.0", sha256: PROXY_SHA }] });
     expect(plan.approvalRequirements).toContain("source-build");
     expect(plan.warnings.map((w) => w.code)).toEqual(expect.arrayContaining(["uvx-prepare", "uvx-source-build"]));
   });
@@ -98,8 +100,13 @@ describe("uvx Prepare: 설치 계획", () => {
       { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [] } },
       { command: PIN, prepare: { build: "wheels-only", sourceBuild: SOURCE_BUILD.sourceBuild } },
       { command: PIN, prepare: { build: "anything" } },
-      { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1", source: "pypi-sdist" }] } },
-      { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1.0", source: "https://example.invalid/x.tar.gz" }] } },
+      { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1", source: "pypi-sdist", sha256: PROXY_SHA }] } },
+      { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1.0", source: "https://example.invalid/x.tar.gz", sha256: PROXY_SHA }] } },
+      // v0.2.1 #45: sha256 없음·형식 오류·중복(이름 정규화 후)은 거부한다.
+      { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1.0", source: "pypi-sdist" }] } },
+      { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1.0", source: "pypi-sdist", sha256: PROXY_SHA.toUpperCase() }] } },
+      { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1.0", source: "pypi-sdist", sha256: PROXY_SHA.slice(1) }] } },
+      { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [SOURCE_BUILD.sourceBuild[0], { package: "Proxy_Tools", version: "0.1.0", source: "pypi-sdist", sha256: PROXY_SHA }] } },
       { command: PIN, prepare: { build: "wheels-only", extra: true } },
       { command: "uvx postgres-mcp --access-mode=restricted", prepare: SOURCE_BUILD },
     ];
@@ -226,3 +233,106 @@ describe("uvx Prepare: 설치 실행", () => {
     expect((await runInstallTransaction(again.result.planned, approval2, request, env)).status).toBe("succeeded");
   });
 });
+
+describe("uvx Prepare: uv 설정 파일(uv.toml)과 소스 빌드 제한(v0.2.1 #45)", () => {
+  /** 합성 사용자 환경: 플랫폼과 무관하게 사용자 uv.toml 한 개만 보이게 한다. */
+  const UV_ENV = { APPDATA: "/appdata", HOME: "/home/u" };
+  const userToml = (get: () => string | null) => async (file: string) => {
+    const f = file.split("\\").join("/");
+    return f === "/appdata/uv/uv.toml" || f === "/home/u/.config/uv/uv.toml" ? get() : null;
+  };
+  const INDEX = (pass: string, host = "idx.example") => '[[index]]\nname = "corp"\nurl = "https://ci-user:' + pass + "@" + host + '/simple"\ndefault = true\n';
+
+  it("uv.toml에 사용자 지정 index가 있으면 검토된 소스 빌드는 계획 단계에서 막히고, wheel만 쓰는 준비는 fingerprint·고지와 함께 허용된다", async () => {
+    const toml = INDEX("Toml-Pass-1");
+    const source = await createHarness(scratch, { entries: sourceBuild });
+    const blocked = await planInstall(source.request("postgres-mcp", CURSOR), { ...source.env, uvChildEnv: () => UV_ENV, readUvConfig: userToml(() => toml) });
+    if (!blocked.result.ok) throw new Error(blocked.result.code);
+    expect(blocked.result.planned.plan.status).toBe("blocked");
+    expect(blocked.result.planned.plan.warnings.map((w) => w.code)).toContain("UVX_SOURCE_BUILD_CUSTOM_INDEX");
+
+    const wheels = await createHarness(scratch, { entries: pinned });
+    const ok = await planInstall(wheels.request("postgres-mcp", CURSOR), { ...wheels.env, uvChildEnv: () => UV_ENV, readUvConfig: userToml(() => toml) });
+    if (!ok.result.ok) throw new Error(ok.result.code);
+    expect(ok.result.planned.plan.status).toBe("installable");
+    expect(ok.result.planned.plan.steps[0]).toMatchObject({ executable: "uvx", index: { custom: true } });
+    expect(ok.result.planned.plan.warnings.map((w) => w.code)).toContain("uvx-custom-index");
+    const json = JSON.stringify(ok.result.planned.plan);
+    for (const s of ["Toml-Pass-1", "ci-user", "idx.example", "appdata", "/home/u"]) expect(json).not.toContain(s);
+  });
+
+  it("cache-dir 같은 출처와 무관한 uv.toml은 Plan을 바꾸지 않는다(기존 사용자 영향 없음)", async () => {
+    const h = await createHarness(scratch, { entries: pinned });
+    const request = h.request("postgres-mcp", CURSOR);
+    const plain = await plannedOf(h, request);
+    const withToml = await planInstall(request, { ...h.env, uvChildEnv: () => UV_ENV, readUvConfig: userToml(() => 'cache-dir = "/c"\n') });
+    if (!withToml.result.ok) throw new Error(withToml.result.code);
+    expect(withToml.result.planned.planDigest).toBe(plain.planDigest);
+  });
+
+  it("승인 뒤 uv.toml의 index가 바뀌거나 새로 생기면 PLAN_STALE이고 준비·쓰기 0이다(비밀번호만 바뀌면 그대로 실행)", async () => {
+    const h = await createHarness(scratch, { entries: pinned });
+    const request = h.request("postgres-mcp", CURSOR);
+    let toml: string | null = INDEX("Toml-Pass-1");
+    const env = { ...h.env, uvChildEnv: () => UV_ENV, readUvConfig: userToml(() => toml) };
+    for (const next of [INDEX("Toml-Pass-1", "other.example"), null]) {
+      toml = INDEX("Toml-Pass-1");
+      const built = await planInstall(request, env);
+      if (!built.result.ok) throw new Error(built.result.code);
+      const approval = await approveAll(built.result.planned);
+      toml = next;
+      h.reset();
+      expect(await runInstallTransaction(built.result.planned, approval, request, env)).toMatchObject({ status: "stale", code: "PLAN_STALE" });
+      expect(h.spawns).toEqual([]);
+      expect(existsSync(path.join(h.projectRoot, ".cursor", "mcp.json"))).toBe(false);
+    }
+    // index가 없던 계획에 승인 뒤 index가 생겨도 PLAN_STALE이다.
+    toml = null;
+    const fresh = await planInstall(request, env);
+    if (!fresh.result.ok) throw new Error(fresh.result.code);
+    const freshApproval = await approveAll(fresh.result.planned);
+    toml = INDEX("Toml-Pass-1");
+    expect(await runInstallTransaction(fresh.result.planned, freshApproval, request, env)).toMatchObject({ status: "stale", code: "PLAN_STALE" });
+    // 같은 index에서 비밀번호만 바뀌면 같은 계획이다.
+    toml = INDEX("Toml-Pass-1");
+    const again = await planInstall(request, env);
+    if (!again.result.ok) throw new Error(again.result.code);
+    const approval2 = await approveAll(again.result.planned);
+    toml = INDEX("Toml-Pass-2");
+    expect((await runInstallTransaction(again.result.planned, approval2, request, env)).status).toBe("succeeded");
+  });
+
+  it("uv.toml이 TOML이 아니면 uvx 준비 계획을 막는다(UVX_CONFIG_UNSUPPORTED, 원문 비노출)", async () => {
+    const h = await createHarness(scratch, { entries: pinned });
+    const built = await planInstall(h.request("postgres-mcp", CURSOR), { ...h.env, uvChildEnv: () => UV_ENV, readUvConfig: userToml(() => 'index-url = "https://u:Broken-Pass@idx') });
+    if (!built.result.ok) throw new Error(built.result.code);
+    expect(built.result.planned.plan.status).toBe("blocked");
+    expect(built.result.planned.plan.warnings.map((w) => w.code)).toContain("UVX_CONFIG_UNSUPPORTED");
+    expect(JSON.stringify(built.result.planned.plan)).not.toContain("Broken-Pass");
+  });
+
+  it("소스 빌드 확인이 실행 중 실패하면(PyPI sha256 불일치) 빌드 0회, 설정 파일·Version State 불변이다", async () => {
+    const h = await createHarness(scratch, { entries: sourceBuild });
+    const existing = '{\n  "mcpServers": {\n    "notes": { "command": "uvx", "args": ["notes-mcp==1.0.0"] }\n  }\n}\n';
+    await mkdir(path.join(h.projectRoot, ".cursor"), { recursive: true });
+    await writeFile(path.join(h.projectRoot, ".cursor", "mcp.json"), existing);
+    const request = h.request("postgres-mcp", CURSOR);
+    const env = { ...h.env, uvChildEnv: () => ({}), readUvConfig: async () => null };
+    const built = await planInstall(request, env);
+    if (!built.result.ok) throw new Error(built.result.code);
+    const approval = await approveAll(built.result.planned);
+    const urls: string[] = [];
+    const uvxFetch = async (url: string) => {
+      urls.push(url);
+      return new Response(JSON.stringify({ urls: [{ packagetype: "sdist", filename: "proxy_tools-0.1.0.tar.gz", url: "https://files.pythonhosted.org/p/proxy_tools-0.1.0.tar.gz", digests: { sha256: "e".repeat(64) } }] }), { status: 200 });
+    };
+    h.reset();
+    const result = await runInstallTransaction(built.result.planned, approval, request, { ...env, uvxFetch });
+    expect(result).toMatchObject({ status: "failed", code: "UVX_SOURCE_UNVERIFIED", verification: { prepared: "failed", configured: false } });
+    expect(urls).toEqual(["https://pypi.org/pypi/proxy-tools/0.1.0/json"]);
+    expect(h.spawns).toEqual([]);
+    expect(await readFile(path.join(h.projectRoot, ".cursor", "mcp.json"), "utf8")).toBe(existing);
+    expect(existsSync(path.join(h.homeDir, ".openhub", "state", "lifecycle.json"))).toBe(false);
+  });
+});
+

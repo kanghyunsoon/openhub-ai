@@ -18,7 +18,8 @@ import {
 import { BACKEND_ADAPTERS, DOCKER_PULL_TIMEOUT_MS, clientLaunchSpec, npxPrepareStepFor, uvxBuildPolicyOf, uvxPrepareStepFor } from "../installer/backends";
 import { isPinnedArtifact, isValidDockerImage, npxArtifact, parseNpmSpec, tokenizeManifestCommand } from "../installer/command";
 import { parseNpxPrepareArgs } from "../process/npx-prepare";
-import type { UvxBuildPolicy } from "../process/uvx-prepare";
+import type { UvSourceSettings, UvxBuildPolicy, UvxSourceBuildEntry } from "../process/uvx-prepare";
+import { uvSourceBlockers } from "../installer/plan-builder";
 import { configTargetFor, inspectConfigTarget, nodeConfigFs, readConfiguredEntry, type ConfigFs } from "../installer/config-writer";
 import {
   CONFIG_SCOPES,
@@ -212,7 +213,7 @@ export const lifecyclePlanSchema = z
       if (step.kind === "run" && step.executable === "npx" && (plan.backend !== "npx" || parseNpxPrepareArgs(step.args) === null)) {
         ctx.addIssue({ code: "custom", path: ["steps", i], message: "npx 준비 단계는 npx backend의 정확한 버전 spec만 받을 수 있습니다" });
       }
-      if (step.kind === "run" && step.index !== undefined && step.executable !== "uvx") ctx.addIssue({ code: "custom", path: ["steps", i, "index"], message: "index fingerprint는 uvx 준비 단계에만 있다" });
+      if (step.kind === "run" && (step.index !== undefined || step.sourceBuild !== undefined) && step.executable !== "uvx") ctx.addIssue({ code: "custom", path: ["steps", i, "index"], message: "index fingerprint·sourceBuild는 uvx 준비 단계에만 있다" });
       if (step.kind === "run" && step.executable === "uvx") {
         const issue = uvxPrepareStepIssue(step, plan.backend, plan.target.clientSpec.args, plan.approvalRequirements);
         if (issue !== undefined) ctx.addIssue({ code: "custom", path: ["steps", i], message: issue });
@@ -270,7 +271,7 @@ export interface LifecyclePlanAssemblyInput {
   /** tool config Tool(v0.2.0): 검토된 내용과 scope별 현재 상태. 있으면 update·rollback·repair가 tool-config 단계를 갖는다. */
   toolConfig?: { content: string; current: readonly { scope: ConfigScope; current: ToolConfigStateInput }[] };
   /** v0.2.1 uvx Prepare: Manifest의 빌드 정책과 사용자 지정 index fingerprint(없으면 null). uvx backend에서만. */
-  uvPrepare?: { policy: UvxBuildPolicy; index: string | null };
+  uvPrepare?: { policy: UvxBuildPolicy; index: string | null; sourceBuild: readonly UvxSourceBuildEntry[] };
 }
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -321,7 +322,7 @@ export function assembleLifecyclePlan(input: LifecyclePlanAssemblyInput): Planne
     }
     // v0.2.1 uvx Prepare: 정확한 버전 환경(--from·--with 모두 고정)이면 설정을 바꾸기 전에 uv cache에 준비한다.
     if (backend === "uvx" && input.uvPrepare !== undefined) {
-      const prepare = uvxPrepareStepFor(input.target.launchArgs, input.uvPrepare.policy);
+      const prepare = uvxPrepareStepFor(input.target.launchArgs, input.uvPrepare.policy, input.uvPrepare.sourceBuild);
       if (prepare !== null) steps.push(input.uvPrepare.index === null ? prepare : { ...prepare, index: { custom: true, digest: input.uvPrepare.index } });
     }
     if (backend === "docker") {
@@ -449,6 +450,8 @@ export interface LifecyclePlanOptions {
   launcherCheckFs?: LauncherCheckFs;
   /** v0.2.1 uvx Prepare: 사용자 지정 패키지 index fingerprint(uvIndexFingerprint). 생략·null이면 기본 index. */
   uvIndex?: string | null;
+  /** v0.2.1 uvx Prepare: 환경변수와 uv.toml의 패키지 출처 설정(uvSourceSettings). 있으면 uvIndex 대신 fingerprint를 쓴다. */
+  uvSource?: UvSourceSettings;
 }
 
 export type LifecyclePlanErrorCode =
@@ -721,13 +724,16 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
   }
 
   // v0.2.1 uvx Prepare: Manifest의 검토된 빌드 정책(D3)과 사용자 지정 index fingerprint(D8). health는 설정을 쓰지 않아 준비하지 않는다.
-  let uvPrepare: { policy: UvxBuildPolicy; index: string | null } | undefined;
+  let uvPrepare: { policy: UvxBuildPolicy; index: string | null; sourceBuild: readonly UvxSourceBuildEntry[] } | undefined;
   if (backend === "uvx" && options.operation !== "health") {
     const candidate = installCandidates(manifest).find((c) => c.step.adapter === "uvx");
     if (candidate !== undefined) {
       const policy = uvxBuildPolicyOf(candidate.step, "uvx");
       if (!policy.ok) return { ok: false, code: "MANIFEST_COMMAND_REJECTED", message: policy.reason };
-      uvPrepare = { policy: policy.policy, index: options.uvIndex ?? null };
+      uvPrepare = { policy: policy.policy, index: options.uvSource !== undefined ? options.uvSource.fingerprint : (options.uvIndex ?? null), sourceBuild: policy.sourceBuild };
+      if (target !== undefined && uvxPrepareStepFor(target.launchArgs, policy.policy, policy.sourceBuild) !== null) {
+        blockers.push(...uvSourceBlockers([policy.policy === "source-build-reviewed" ? { sourceBuild: policy.sourceBuild } : {}], options.uvSource));
+      }
     }
   }
 

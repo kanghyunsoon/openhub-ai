@@ -72,7 +72,7 @@ async function installed() {
     if (outcome.status !== "approved") throw new Error(outcome.status);
     return { plan: built.planned.plan, result: await runLifecycleTransaction(built.planned, outcome.approval, request(operation), e) };
   };
-  return { h, files, env, run };
+  return { h, files, env, run, request };
 }
 
 describe("uvx Prepare: update·rollback", () => {
@@ -121,5 +121,33 @@ describe("uvx Prepare: update·rollback", () => {
     const { plan } = await c.run("health", c.env(spawns));
     expect(plan.steps.some((s) => s.kind === "run")).toBe(false);
     expect(spawns).toEqual([]);
+  });
+
+  it("update 계획도 uv.toml의 패키지 출처 설정을 fingerprint로 담고, 승인 뒤 바뀌면 PLAN_STALE이다(준비·쓰기 0)", async () => {
+    const c = await installed();
+    const before = await c.files();
+    let toml: string | null = '[[index]]\nurl = "https://ci-user:Toml-Pass@idx.example/simple"\ndefault = true\n';
+    const spawns: string[][] = [];
+    const e: LifecycleEnvironment = { ...c.env(spawns), uvChildEnv: () => ({ HOME: "/home/u" }), readUvConfig: async (f) => (f === "/home/u/.config/uv/uv.toml" ? toml : null) };
+    const built = await planLifecycleRequest(c.request("update"), e);
+    if (!built.ok) throw new Error(built.code);
+    expect(built.planned.plan.steps[0]).toMatchObject({ executable: "uvx", index: { custom: true } });
+    expect(JSON.stringify(built.planned.plan)).not.toContain("Toml-Pass");
+    const outcome = await requestLifecycleApproval(built.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
+    if (outcome.status !== "approved") throw new Error(outcome.status);
+    toml = '[[index]]\nurl = "https://other.example/simple"\ndefault = true\n';
+    const result = await runLifecycleTransaction(built.planned, outcome.approval, c.request("update"), e);
+    expect(result).toMatchObject({ code: "PLAN_STALE" });
+    expect(spawns).toEqual([]);
+    expect(await c.files()).toEqual(before);
+  });
+
+  it("uv.toml을 읽을 수 없으면 update 계획이 막힌다(UVX_CONFIG_UNSUPPORTED)", async () => {
+    const c = await installed();
+    const e: LifecycleEnvironment = { ...c.env([]), uvChildEnv: () => ({ HOME: "/home/u" }), readUvConfig: async () => "broken = [" };
+    const built = await planLifecycleRequest(c.request("update"), e);
+    if (!built.ok) throw new Error(built.code);
+    expect(built.planned.plan.status).not.toBe("ready");
+    expect(JSON.stringify(built.planned.plan)).toContain("UVX_CONFIG_UNSUPPORTED");
   });
 });

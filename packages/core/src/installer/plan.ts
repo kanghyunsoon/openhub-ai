@@ -55,7 +55,7 @@ export const UVX_PREPARE_NOTICE = "클라이언트 설정을 쓰기 전에 이 �
 export const UVX_SOURCE_BUILD_NOTICE =
   "이 도구의 일부 패키지는 소스로만 제공되어 내 컴퓨터에서 빌드됩니다. 빌드 과정에서 제3자 빌드 코드가 실행됩니다. OpenHub는 이 도구의 의존성 목록은 검토했지만 빌드 코드 자체는 검토하지 않았습니다.";
 /** 사용자 지정 패키지 index 고지(v0.2.1). URL·계정은 Plan에 넣지 않는다. */
-export const UVX_CUSTOM_INDEX_NOTICE = "사용자 지정 Python 패키지 index 설정이 있어 uv가 그 index에서 패키지를 받습니다. 승인 뒤 index 설정이 바뀌면 실행하지 않습니다.";
+export const UVX_CUSTOM_INDEX_NOTICE = "사용자 지정 Python 패키지 출처 설정(index 환경변수 또는 uv.toml)이 있어 uv가 그 설정대로 패키지를 받습니다. 승인 뒤 이 설정이 바뀌면 실행하지 않습니다.";
 export function requiredEnvNotice(name: string): string {
   return `이 도구는 실행 시 ${name} 환경변수가 필요합니다. OpenHub는 값이나 설정 여부를 확인하거나 저장하지 않습니다.`;
 }
@@ -91,6 +91,11 @@ export const runStepSchema = z.strictObject({
   timeoutMs: z.number().int().positive(),
   /** uvx Prepare 전용(v0.2.1): 사용자 지정 패키지 index fingerprint(URL·계정 없음). 기본 index면 없다. */
   index: z.strictObject({ custom: z.literal(true), digest: z.string().regex(/^sha256:[0-9a-f]{64}$/u) }).optional(),
+  /** uvx 검토된 소스 빌드 전용(v0.2.1): 빌드를 허용하는 패키지·정확한 버전·PyPI sdist sha256. 이 목록 밖의 소스 빌드는 실행하지 않는다. */
+  sourceBuild: z
+    .array(z.strictObject({ package: z.string().regex(/^[a-z0-9][a-z0-9-]*$/u), version: z.string().regex(/^\d+\.\d+\.\d+$/u), sha256: z.string().regex(/^[0-9a-f]{64}$/u) }))
+    .min(1)
+    .optional(),
 });
 export type RunStep = z.output<typeof runStepSchema>;
 
@@ -104,6 +109,7 @@ export function uvxPrepareStepIssue(step: RunStep, backend: string | null | unde
   const target = uvxPrepareTarget(launchArgs);
   if (target === null || JSON.stringify(target) !== JSON.stringify(parsed.target)) return "uvx 준비 단계의 --from·--with가 launch 대상과 다릅니다";
   if (parsed.policy === "source-build-reviewed" && !approvals.includes("source-build")) return "소스 빌드 준비 단계에는 source-build 승인이 필요합니다";
+  if ((parsed.policy === "source-build-reviewed") !== (step.sourceBuild !== undefined)) return "소스 빌드 준비 단계에는 검토 목록(sourceBuild)이 있어야 하고, wheel만 쓰는 단계에는 없어야 한다";
   if (step.timeoutMs > 600_000) return "uvx 준비 단계 timeout은 10분을 넘을 수 없습니다";
   return undefined;
 }
@@ -256,7 +262,7 @@ export const installPlanSchema = z
     }
     // npx Prepare는 고정 인자·정확한 버전이고, artifact(npm-cache)와 같은 spec이어야 한다.
     plan.steps.forEach((step, i) => {
-      if (step.kind === "run" && step.index !== undefined && step.executable !== "uvx") ctx.addIssue({ code: "custom", path: ["steps", i, "index"], message: "index fingerprint는 uvx 준비 단계에만 있다" });
+      if (step.kind === "run" && (step.index !== undefined || step.sourceBuild !== undefined) && step.executable !== "uvx") ctx.addIssue({ code: "custom", path: ["steps", i, "index"], message: "index fingerprint·sourceBuild는 uvx 준비 단계에만 있다" });
       if (step.kind === "run" && step.executable === "uvx") {
         const issue = uvxPrepareStepIssue(step, plan.launch?.executable, plan.launch?.args, plan.approvalRequirements);
         const spec = parseUvxPrepareArgs(step.args)?.target.from;
