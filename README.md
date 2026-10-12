@@ -14,7 +14,7 @@ Get the files from the [latest release](https://github.com/kanghyunsoon/openhub-
 | Linux x64 with a desktop session | `OpenHub-AI-<version>-x86_64.AppImage` |
 | macOS | No download. You can build from source (see [Supported platforms](docs/supported-platforms.md)). |
 
-Also download `SHA256SUMS` and check the file before you run it:
+Also download `SHA256SUMS` and compare the file before you run it. This only shows that your download is identical to the file published on the release page (not damaged or swapped in transit). It does **not** prove who built it and is not a malware scan: `SHA256SUMS` comes from the same release page.
 
 ```powershell
 # Windows (PowerShell): the printed hash must equal the line for this file in SHA256SUMS
@@ -28,7 +28,7 @@ sha256sum -c SHA256SUMS --ignore-missing
 
 ## What You Need
 
-The app itself needs nothing else. Each MCP server, however, is started by a program that must already be installed. You only need the program for the tools you actually install:
+The app itself needs nothing else. Each MCP server, however, is started by a program that must already be installed. You only need the program for the tools you actually install. The check commands below only print the version of a program you installed yourself; they do not run any MCP server. OpenHub runs an MCP server (third-party code) only after you approve a plan: to prepare it, to check its Health, or to benchmark it.
 
 | To install | You need | Check with |
 | --- | --- | --- |
@@ -40,7 +40,7 @@ You also need at least one AI client: Claude Code, Codex or Cursor. If a require
 
 ## Install
 
-**Windows.** Run `OpenHub-AI-Setup-<version>-x64.exe`. The installer is **unsigned**, so Windows SmartScreen or Smart App Control may warn before it runs ("Windows protected your PC"). If the SHA256 matched, choose *More info* → *Run anyway*. Start OpenHub AI from the Start menu.
+**Windows.** Run `OpenHub-AI-Setup-<version>-x64.exe`. The installer is **unsigned**, so Windows SmartScreen or Smart App Control may warn before it runs ("Windows protected your PC"). An unsigned installer cannot prove who published it. Run it only if you downloaded it yourself from this repository's release page and the SHA256 matches; if you are unsure, do not run it (you can use the CLI package or build from source instead). Windows offers *More info* → *Run anyway*; whether to use it is your decision, and organisations may block it. Start OpenHub AI from the Start menu.
 
 **Linux.** Make the AppImage executable and run it:
 
@@ -79,7 +79,7 @@ Tools that need a secret (for example `GITHUB_PERSONAL_ACCESS_TOKEN` or `DATABAS
 | *backend not found* / *BACKEND_UNAVAILABLE* | The program for this tool (Node.js, uv or Docker) is not installed or not on PATH. Install it (see What You Need), restart OpenHub, plan again. Nothing was changed. |
 | `PLAN_STALE` | A file, version or setting changed after you approved. Review the new plan and approve again. |
 | Health failed | The server did not start or answer in time. For an update or rollback, the previous configuration is restored and Version State is not changed. Check required environment variables, Docker running, then try again. |
-| *interrupted-update* | An update, rollback or repair stopped midway (app closed or killed). Other operations on that tool are blocked until it is recovered. Recovery is done with the CLI: see [Troubleshooting](docs/troubleshooting.md). |
+| *interrupted-update* | An update, rollback or repair stopped midway (app closed or killed). Other operations on that tool are blocked until it is recovered. From v0.2.1, recover with the CLI (`openhub lifecycle recover <toolId>`); INSTALLED shows the exact command. v0.2.0 has no recovery command: fix the entry by hand as described in the [v0.2.0 known issues](docs/known-issues-v0.2.0.md). See [Troubleshooting](docs/troubleshooting.md). |
 | `OPERATION_IN_PROGRESS` | Another OpenHub window or terminal is changing tools. Wait and retry. |
 
 Run `openhub doctor` (CLI) to see which programs were found. More in [Troubleshooting](docs/troubleshooting.md).
@@ -88,9 +88,14 @@ Run `openhub doctor` (CLI) to see which programs were found. More in [Troublesho
 
 There is no remove command yet. To stop using a tool OpenHub installed:
 
-1. Close the AI client.
-2. Open the configuration file shown in INSTALLED (for example `.mcp.json`) and delete only that server's entry (for example `"memory": { … }` under `mcpServers`; in `.codex/config.toml`, the `[mcp_servers.<name>]` table). Leave the other entries alone.
-3. OpenHub keeps its own record, so INSTALLED and `openhub lifecycle status` now show `missing-config` for that tool. This is expected and harmless. Installing the tool again later works and clears it.
+1. Close the AI client and any OpenHub window.
+2. **Make a copy of the configuration file first** (for example copy `.mcp.json` to `.mcp.json.bak`), so you can put it back if something goes wrong.
+3. Open the configuration file shown in INSTALLED and delete only that server's entry:
+   - JSON files (`.mcp.json`, `.cursor/mcp.json`, `~/.cursor/mcp.json`): delete the `"<name>": { … }` member under `mcpServers` and fix the comma between the remaining members. Make sure the file is still valid JSON.
+   - TOML files (`.codex/config.toml`, `~/.codex/config.toml`): delete the `[mcp_servers.<name>]` header line and every line after it up to (not including) the next `[...]` header, plus any sub-tables of that server such as `[mcp_servers.<name>.env]`. Do not touch other `[mcp_servers.…]` tables.
+4. OpenHub keeps its own record, so INSTALLED and `openhub lifecycle status` now show `missing-config` for that tool. This is expected and harmless. Installing the tool again later works and clears it.
+
+This procedure was checked against the current code: the other entries stay byte-for-byte the same, the removed tool shows `missing-config`, and a later install returns it to `state-consistent`.
 
 To remove the app: on Windows use *Settings → Apps → OpenHub AI → Uninstall*; on Linux delete the AppImage file. Your client configuration files are not changed by uninstalling. OpenHub's records stay in `~/.openhub`; delete that folder if you want to remove them too.
 
@@ -109,6 +114,16 @@ Pinokio support targets pterm 0.0.25. Default tests use a fake pinokiod; real Pi
 ## Known Issues
 
 Read the [known issues for v0.2.0](docs/known-issues-v0.2.0.md) before you start: switching projects during install, interrupted updates, Postgres MCP Pro on a new machine, and the slow first start of uvx tools on Windows.
+
+The download is v0.2.0. This README also describes the code on `main`, which is not released yet. Differences:
+
+| | v0.2.0 (current release) | v0.2.1 (not released) |
+| --- | --- | --- |
+| Interrupted update, rollback or repair | Manual fix of the entry (see known issues) | `openhub lifecycle recover <toolId>` (CLI), with approval |
+| Desktop guidance for an interrupted operation | Not detected as interrupted (shows config-drift) | Exact command, how to get the CLI, how to confirm |
+| Two OpenHub windows or terminals changing tools at once | Can lose a record | One change at a time (`OPERATION_IN_PROGRESS`) |
+| Environment passed to MCP servers during Health and Benchmark | Your whole environment | Planned: only OS variables and the variables the tool declares (in review) |
+| First start of uvx tools (Postgres MCP Pro, Serena) on Windows | Can hit the Health time limit | Planned: packages prepared before Health (in review) |
 
 ## Demo
 
@@ -166,7 +181,7 @@ openhub project recommend ./my-project
 | `openhub lifecycle status` | Version State, drift and health of installed tools |
 | `openhub update <toolId>` / `openhub rollback <toolId>` | Update or roll back with health check |
 | `openhub lifecycle health <toolId>` | Approved health check |
-| `openhub lifecycle recover <toolId>` | Review and approve recovery of an interrupted operation |
+| `openhub lifecycle recover <toolId>` | Review and approve recovery of an interrupted operation (v0.2.1 and later) |
 | `openhub adopt <toolId>` | Register an already configured tool |
 | `openhub releases <toolId>` / `openhub impact <toolId>` | Release notes, summary, update impact |
 | `openhub discover --view trending` | Discover views |

@@ -14,7 +14,7 @@ OpenHub AI는 프로젝트를 살펴보고 AI 코딩 Client(Claude Code·Codex·
 | 데스크톱 환경이 있는 Linux x64 | `OpenHub-AI-<버전>-x86_64.AppImage` |
 | macOS | 배포 파일 없음. 소스로 빌드할 수 있습니다([지원 플랫폼](docs/supported-platforms.md)). |
 
-`SHA256SUMS`도 함께 받아 실행 전에 파일을 확인하세요.
+`SHA256SUMS`도 함께 받아 실행 전에 비교하세요. 이 비교는 받은 파일이 release 페이지에 게시된 파일과 같다는 것(전송 중 손상·바꿔치기 없음)만 보여 줍니다. `SHA256SUMS`도 같은 release 페이지에서 오므로 **누가 만들었는지 증명하지 않으며 악성코드 검사도 아닙니다**.
 
 ```powershell
 # Windows(PowerShell): 출력된 hash가 SHA256SUMS의 해당 파일 줄과 같아야 합니다
@@ -28,7 +28,7 @@ sha256sum -c SHA256SUMS --ignore-missing
 
 ## 필요한 프로그램
 
-앱 자체는 다른 프로그램이 필요 없습니다. 다만 각 MCP 서버는 미리 설치된 프로그램이 실행하므로, 실제로 설치할 도구에 필요한 프로그램만 있으면 됩니다.
+앱 자체는 다른 프로그램이 필요 없습니다. 다만 각 MCP 서버는 미리 설치된 프로그램이 실행하므로, 실제로 설치할 도구에 필요한 프로그램만 있으면 됩니다. 아래 확인 명령은 직접 설치한 프로그램의 버전만 출력하며 MCP 서버를 실행하지 않습니다. OpenHub는 MCP 서버(제3자 코드)를 계획을 승인한 뒤에만 실행합니다(준비, Health 확인, 벤치마크).
 
 | 설치할 도구 | 필요한 프로그램 | 확인 방법 |
 | --- | --- | --- |
@@ -40,7 +40,7 @@ AI Client(Claude Code·Codex·Cursor) 중 하나도 있어야 합니다. 필요�
 
 ## 설치
 
-**Windows.** `OpenHub-AI-Setup-<버전>-x64.exe`를 실행합니다. 설치 파일은 **서명되지 않아** Windows SmartScreen·Smart App Control 경고("Windows의 PC 보호")가 나올 수 있습니다. SHA256이 일치했다면 *추가 정보* → *실행*을 고릅니다. 시작 메뉴에서 OpenHub AI를 엽니다.
+**Windows.** `OpenHub-AI-Setup-<버전>-x64.exe`를 실행합니다. 설치 파일은 **서명되지 않아** Windows SmartScreen·Smart App Control 경고("Windows의 PC 보호")가 나올 수 있습니다. 서명이 없으면 게시자를 증명할 수 없습니다. 이 저장소의 release 페이지에서 직접 받았고 SHA256이 일치할 때만 실행하세요. 확신이 없으면 실행하지 마세요(CLI 패키지나 소스 빌드를 쓸 수 있습니다). Windows는 *추가 정보* → *실행*을 제공하지만 이를 쓸지는 사용자 판단이며, 조직에서 막혀 있을 수 있습니다. 시작 메뉴에서 OpenHub AI를 엽니다.
 
 **Linux.** AppImage에 실행 권한을 주고 실행합니다.
 
@@ -79,7 +79,7 @@ chmod +x OpenHub-AI-<버전>-x86_64.AppImage
 | *backend not found* / *BACKEND_UNAVAILABLE* | 이 도구를 실행할 프로그램(Node.js·uv·Docker)이 없거나 PATH에 없습니다. 설치하고(필요한 프로그램 참고) OpenHub를 다시 시작한 뒤 다시 계획하세요. 바뀐 것은 없습니다. |
 | `PLAN_STALE` | 승인 뒤 파일·버전·설정이 바뀌었습니다. 새 계획을 확인하고 다시 승인하세요. |
 | Health 실패 | 서버가 시작되지 않았거나 시간 안에 응답하지 않았습니다. 업데이트·롤백이면 이전 설정으로 되돌리고 Version State는 바꾸지 않습니다. 필요한 환경변수, Docker 실행 여부를 확인한 뒤 다시 시도하세요. |
-| *interrupted-update* | 업데이트·롤백·복구가 중간에 끝났습니다(앱 종료 등). 복구할 때까지 그 도구의 다른 작업이 막힙니다. 복구는 CLI로 합니다: [문제 해결](docs/troubleshooting.md). |
+| *interrupted-update* | 업데이트·롤백·복구가 중간에 끝났습니다(앱 종료 등). 복구할 때까지 그 도구의 다른 작업이 막힙니다. v0.2.1부터 CLI(`openhub lifecycle recover <toolId>`)로 복구하며 INSTALLED가 정확한 명령을 보여 줍니다. v0.2.0에는 복구 명령이 없어 [v0.2.0 알려진 문제](docs/known-issues-v0.2.0.ko.md)대로 항목을 직접 고칩니다. [문제 해결](docs/troubleshooting.md)도 보세요. |
 | `OPERATION_IN_PROGRESS` | 다른 OpenHub 창이나 터미널이 도구를 바꾸는 중입니다. 끝난 뒤 다시 시도하세요. |
 
 CLI의 `openhub doctor`로 어떤 프로그램을 찾았는지 볼 수 있습니다. 자세한 내용은 [문제 해결](docs/troubleshooting.md)을 보세요.
@@ -88,9 +88,14 @@ CLI의 `openhub doctor`로 어떤 프로그램을 찾았는지 볼 수 있습니
 
 아직 제거 명령은 없습니다. OpenHub가 설치한 도구를 그만 쓰려면:
 
-1. AI Client를 닫습니다.
-2. INSTALLED에 표시된 설정 파일(예: `.mcp.json`)을 열어 그 서버 항목만 지웁니다(예: `mcpServers` 아래 `"memory": { … }`, `.codex/config.toml`에서는 `[mcp_servers.<이름>]` 표). 다른 항목은 건드리지 마세요.
-3. OpenHub는 자체 기록을 유지하므로 INSTALLED와 `openhub lifecycle status`에 그 도구가 `missing-config`로 보입니다. 정상이며 해가 없습니다. 나중에 다시 설치하면 정상 상태로 돌아옵니다.
+1. AI Client와 OpenHub 창을 닫습니다.
+2. **먼저 설정 파일을 복사해 둡니다**(예: `.mcp.json` → `.mcp.json.bak`). 문제가 생기면 되돌릴 수 있습니다.
+3. INSTALLED에 표시된 설정 파일을 열어 그 서버 항목만 지웁니다.
+   - JSON 파일(`.mcp.json`, `.cursor/mcp.json`, `~/.cursor/mcp.json`): `mcpServers` 아래 `"<이름>": { … }` 멤버를 지우고 남은 멤버 사이의 쉼표를 맞춥니다. 파일이 올바른 JSON인지 확인하세요.
+   - TOML 파일(`.codex/config.toml`, `~/.codex/config.toml`): `[mcp_servers.<이름>]` 머리 줄부터 다음 `[...]` 머리 줄 직전까지와, `[mcp_servers.<이름>.env]` 같은 그 서버의 하위 표만 지웁니다. 다른 `[mcp_servers.…]` 표는 건드리지 마세요.
+4. OpenHub는 자체 기록을 유지하므로 INSTALLED와 `openhub lifecycle status`에 그 도구가 `missing-config`로 보입니다. 정상이며 해가 없습니다. 나중에 다시 설치하면 정상 상태로 돌아옵니다.
+
+이 절차는 현재 코드로 확인했습니다: 다른 항목은 바이트 단위로 그대로이고, 지운 도구는 `missing-config`로 보이며, 다시 설치하면 `state-consistent`가 됩니다.
 
 앱 제거: Windows는 *설정 → 앱 → OpenHub AI → 제거*, Linux는 AppImage 파일을 지웁니다. 앱을 제거해도 Client 설정 파일은 바뀌지 않습니다. OpenHub 기록은 `~/.openhub`에 남으며, 지우려면 그 폴더를 삭제하세요.
 
@@ -109,6 +114,16 @@ Pinokio 지원은 pterm 0.0.25 기준입니다. 기본 테스트는 가짜 pinok
 ## 알려진 문제
 
 시작 전에 [v0.2.0 알려진 문제](docs/known-issues-v0.2.0.ko.md)를 읽어 주세요: 설치 중 프로젝트 전환, 중단된 업데이트, 새 PC의 Postgres MCP Pro, Windows에서 uvx 도구의 느린 첫 실행.
+
+다운로드 파일은 v0.2.0입니다. 이 README는 아직 배포하지 않은 `main` 코드도 설명합니다. 차이:
+
+| | v0.2.0(현재 release) | v0.2.1(미배포) |
+| --- | --- | --- |
+| 중단된 업데이트·롤백·복구 | 항목을 직접 고침(알려진 문제 참고) | `openhub lifecycle recover <toolId>`(CLI), 승인 후 복구 |
+| 중단된 작업의 Desktop 안내 | 중단으로 인식하지 못함(config-drift로 보임) | 정확한 명령·CLI 받는 방법·확인 방법 |
+| OpenHub 창·터미널 두 개가 동시에 도구 변경 | 기록이 사라질 수 있음 | 한 번에 하나(`OPERATION_IN_PROGRESS`) |
+| Health·Benchmark가 MCP 서버에 넘기는 환경 | 내 환경 전체 | 예정: OS 변수와 도구가 선언한 변수만(리뷰 중) |
+| Windows에서 uvx 도구(Postgres MCP Pro, Serena) 첫 실행 | Health 시간 제한에 걸릴 수 있음 | 예정: Health 전에 패키지 준비(리뷰 중) |
 
 ## 데모
 
@@ -166,7 +181,7 @@ openhub project recommend ./my-project
 | `openhub lifecycle status` | 설치한 도구의 Version State·drift·Health |
 | `openhub update <toolId>` / `openhub rollback <toolId>` | Health Check와 함께 업데이트·롤백 |
 | `openhub lifecycle health <toolId>` | 승인 후 Health Check |
-| `openhub lifecycle recover <toolId>` | 중단된 작업의 복구를 확인·승인 |
+| `openhub lifecycle recover <toolId>` | 중단된 작업의 복구를 확인·승인(v0.2.1부터) |
 | `openhub adopt <toolId>` | 이미 설정된 도구 등록 |
 | `openhub releases <toolId>` / `openhub impact <toolId>` | release notes·요약·업데이트 영향 |
 | `openhub discover --view trending` | Discover 보기 |
