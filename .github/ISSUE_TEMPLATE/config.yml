@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/kanghyunsoon/openhub-ai/security/advisories/new
+    about: Do not open a public issue for security problems. Use a private advisory as described in SECURITY.md.
+  - name: Questions and ideas
+    url: https://github.com/kanghyunsoon/openhub-ai/blob/main/CONTRIBUTING.md
+    about: Read CONTRIBUTING.md first; it explains how issues and pull requests work here.
