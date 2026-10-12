@@ -1,6 +1,6 @@
 # uvx Prepare (v0.2.1 design)
 
-Status: **design approved** (2026-10-11). Implementation: #45 (Draft). Companion to [npx Prepare](npx-prepare.md).
+Status: **design approved** (2026-10-11), **source-build section revised** (2026-10-12, after the #45 review). Implementation: #45 (Draft). Companion to [npx Prepare](npx-prepare.md).
 
 Labels: **Fact** (measured), **Decision** (approved), **Open** (known limit, not blocking).
 
@@ -39,12 +39,12 @@ uvx [--no-build] --compile-bytecode --from <pkg>==<X.Y.Z> [--with <dep>==<A.B.C>
 | --- | --- |
 | D1 | Prepare only exact versions: `--from <pkg>==X.Y.Z` and every `--with` also `==X.Y.Z`. Floating specs stay launch-on-demand. |
 | D2 | Registry Manifests for uvx tools are pinned to reviewed versions (postgres-mcp `0.3.0` with `mcp==1.30.0`; serena-agent `1.7.0` after verification), which turns on Prepare and the exact update flow. The pins are made in the Registry PR (#39), not in the engine PR. |
-| D3 | Wheels only by default (`--no-build`). A source build is allowed only for a Manifest with a reviewed flag that lists each source-built package (name, exact version, source), plus a separate `source-build` approval and a third-party-code notice. Rejecting that approval means zero builds. There is no automatic fallback from wheels-only to a source build. |
+| D3 | Wheels only by default (`--no-build`). A source build is allowed only for a Manifest with a reviewed flag that lists each source-built package (name, exact version, `pypi-sdist` source, sha256 of the sdist file), plus a separate `source-build` approval and a third-party-code notice. Rejecting that approval means zero builds. There is no automatic fallback from wheels-only to a source build. **The list is enforced as an allowlist** (see "Reviewed source build"): only listed packages are built; any other package that needs a build stops Prepare before it is built. |
 | D4 | Order: plan → approval → **Prepare** → offline verify → client config write → Health. A Prepare or verify failure means zero config changes and Version State unchanged. |
 | D5 | Health startup limit stays 20 s. Prepare has its own limit of at most 10 min (600 000 ms, same as npx Prepare). |
 | D6 | On timeout, failure or cancel, the uv process tree is killed and its exit confirmed (same mechanism as npx Prepare). If the exit cannot be confirmed, the result says so. |
 | D7 | No version change after approval: the plan digest covers the Prepare argv, and the runner re-checks that the spec and `--with` pins equal the launch target. A Manifest change → `PLAN_STALE`. |
-| D8 | Child environment is an allowlist (below). AI/API keys, tokens, cloud credentials and database URLs are never passed. Package-index settings are fingerprinted into the plan (without credentials), so an index change between approval and run → `PLAN_STALE`. No credentials in logs, results or the plan. |
+| D8 | Child environment is an allowlist (below). AI/API keys, tokens, cloud credentials and database URLs are never passed. Package-source settings from environment variables **and from the user/system `uv.toml`** are fingerprinted into the plan (without credentials), so a change between approval and run → `PLAN_STALE`. A reviewed source build is only allowed with the default PyPI index. No credentials in logs, results or the plan. |
 | D9 | OpenHub never deletes uv cache entries. |
 
 ## Design
@@ -72,11 +72,46 @@ uvx [--no-build] --compile-bytecode --from <pkg>==<X.Y.Z> [--with <dep>==<A.B.C>
       prepare:
         build: source-build-reviewed      # default: wheels-only
         sourceBuild:
-          - { package: proxy-tools, version: 0.1.0, source: pypi-sdist }
+          - { package: proxy-tools, version: 0.1.0, source: pypi-sdist, sha256: ccb3751f529c047e2d8a58440d86b205303cf0fe8146f784d1cbcd94f0a28010 }
   ```
 
-  `wheels-only` (default) → `--no-build`. `source-build-reviewed` → no build flag, plus the `source-build` approval and notice. Registry validation rejects `source-build-reviewed` without a `sourceBuild` list, a list on a wheels-only Manifest, unknown keys, and non-exact versions.
+  `wheels-only` (default) → `--no-build`. `source-build-reviewed` → the reviewed source-build procedure below, plus the `source-build` approval and notice. Registry validation rejects `source-build-reviewed` without a `sourceBuild` list, a list on a wheels-only Manifest, unknown keys, non-exact versions, a missing or malformed sha256 (64 lowercase hex), and duplicate packages (after PEP 503 name normalization). The list (name, version, sha256) is copied into the plan step, so it is covered by the plan digest.
 - Verify: `uvx --offline [--no-build] --from … --with … python -c pass` must succeed (network forbidden), so the client's later start finds the same environment.
+
+### Reviewed source build (revised 2026-10-12)
+
+**What dropping `--no-build` would allow (Fact).** Without `--no-build`, uv builds *every* package in the resolved dependency graph that has no usable wheel for this platform and Python: any sdist-only package (serena: `proxy-tools`), and any package whose wheels do not match the platform, at any depth. The Manifest list alone does not limit this. The first #45 draft (`f4c5b76`) only dropped `--no-build`, so the `sourceBuild` list was informational: a new sdist-only dependency in a future release, or a platform without a wheel, would have been built without review. That draft is superseded.
+
+**What uv offers (Fact, uv 0.12.3, checked by running it).** `--no-build`, `--no-build-package <pkg>`, `--find-links`, `--constraints`, `--build-constraints`, `--no-config`. There is **no** option that allows only a listed set of source distributions to be built. `--require-hashes` exists only for `uv pip` and `uv build`, not for `uvx`.
+
+**Procedure (implemented in #45, `process/uvx-prepare.ts`).**
+
+1. Before anything runs, the package-source settings are checked again (environment and `uv.toml`, below). A custom index → stop (`UVX_SOURCE_BUILD_CUSTOM_INDEX`). An unreadable `uv.toml` → stop (`UVX_CONFIG_UNSUPPORTED`).
+2. For each listed package: read `https://pypi.org/pypi/<pkg>/<version>/json`, take the sdist whose sha256 equals the reviewed value, download it only from `files.pythonhosted.org` (no redirects, size and time limits) and check the sha256 of the downloaded bytes. Any mismatch or network error → `UVX_SOURCE_UNVERIFIED`, nothing is built.
+3. Build only those verified files: `uv build --wheel --out-dir <tmp> <file>`. The produced wheel names (normalized name and version) must equal the list exactly, else `UVX_SOURCE_BUILD_MISMATCH`.
+4. Resolve the whole environment **with building forbidden**: `uvx --no-build --find-links <tmp> --from … --with … python -c <list installed distributions>`. If this succeeds, no other package needs a build. If uv reports a package without a usable wheel, Prepare stops before building it (`UVX_UNREVIEWED_SOURCE_BUILD`). A listed package that is not part of the environment → `UVX_SOURCE_BUILD_MISMATCH`.
+5. Fill the client's cache entry: `uvx --compile-bytecode --constraints <exact versions from step 4> --no-build-package <every other package> --from … --with … python -c pass`. uv may build only the listed package (all others are forbidden by `--no-build-package`). Every `Built <name>==<version>` line uv prints is compared with the list; any other → `UVX_SOURCE_BUILD_MISMATCH`.
+6. Offline verify, as for every Prepare.
+
+Step 5 exists because the client's own `uvx` start does not know about `--find-links`: an environment built only from the step 3 wheels was not reused by the client on a fresh cache, which then re-resolved to the PyPI sdist and ran its metadata build. With step 5, the client start after Prepare showed zero build or metadata steps (Windows, uv 0.12.3).
+
+A failure in any step → Prepare `failed`, zero client-config writes, Version State unchanged (D4).
+
+**What this does not guarantee (Open).**
+
+- The build backend of a listed package still runs third-party code. The review covers the list, the file hash and the version, not the build code (this is what the `source-build` approval says).
+- Step 3 builds the verified file; step 5 lets uv fetch the sdist from PyPI again by name and version. Both come from the same PyPI file (custom indexes are blocked), but uv itself does not check the sha256 in step 5.
+- Transitive versions are fixed with constraints only during Prepare. The client's later start does not carry those constraints; it reuses the prepared cache entry. If the uv cache is cleaned (`uv cache clean` or `prune`) or the client uses a different cache, the client resolves again on its own, outside OpenHub's control, and could build a new sdist-only dependency.
+- No per-tool hash lock for wheels.
+
+### uv configuration files (revised 2026-10-12)
+
+- **Fact (uv docs "Configuration files"; checked with uv 0.12.3):** `uvx` ignores `uv.toml` and `pyproject.toml` in the current directory, but reads the user file (Windows `%APPDATA%\uv\uv.toml`, otherwise `$XDG_CONFIG_HOME/uv/uv.toml` or `~/.config/uv/uv.toml`) and the system file (Windows `%PROGRAMDATA%\uv\uv.toml`, otherwise `$XDG_CONFIG_DIRS/uv/uv.toml` or `/etc/uv/uv.toml`). An `index-url` in the user file was used by `uvx`. `UV_CONFIG_FILE` points to another file; `UV_NO_CONFIG` (`--no-config`) disables discovery.
+- Prepare must use the same settings as the client, so OpenHub does **not** add `--no-config`. It reads the same files instead (paths from the allowlisted environment, read-only, at most 1 MiB), plus `UV_CONFIG_FILE` if set, and passes `UV_CONFIG_FILE`, `UV_NO_CONFIG` and `XDG_CONFIG_DIRS` to uv so Prepare and the client read the same files.
+- Every key except a short list that cannot change package sources (`cache-dir`, `no-cache`, `native-tls`, concurrency, `link-mode`, `compile-bytecode`, `python-preference`, `python-downloads`, `preview`, `required-version`, …) counts as a package-source setting: indexes, `find-links`, `no-index`, constraints and overrides, `no-build` and `no-binary`, `exclude-newer`, and keys added by future uv versions. This errs toward treating a file as relevant.
+- Fingerprint: those keys, with `user:password@` removed from URLs and the values of keys whose name contains password, token, secret or credential dropped, hashed together with the index environment variables. The file text, its path and credentials are never in the plan, results or logs. A change after approval → `PLAN_STALE`. A password-only change does not change the fingerprint. A `uv.toml` that only sets, for example, `cache-dir` leaves the plan unchanged.
+- Any package-source setting → the plan carries `index: { custom: true, digest }` and the `uvx-custom-index` notice, and a reviewed source build is blocked at plan time (`UVX_SOURCE_BUILD_CUSTOM_INDEX`) and again right before running.
+- An unreadable or invalid `uv.toml` blocks the uvx Prepare plan (`UVX_CONFIG_UNSUPPORTED`). uv itself could not use it either.
 
 ### Cache
 
@@ -90,7 +125,8 @@ uvx [--no-build] --compile-bytecode --from <pkg>==<X.Y.Z> [--with <dep>==<A.B.C>
 - Not passed: AI provider keys, `GITHUB_TOKEN` / `GH_TOKEN`, cloud credentials, database URLs such as `DATABASE_URI`, MCP connection strings, `PYTHONPATH`, `PYTHONSTARTUP`, and every other user variable.
 - Index credentials (`UV_INDEX_<NAME>_USERNAME` / `_PASSWORD`, credentials in an index URL) are passed only if the user already configured them for uv. They are never logged, never in results, never in the plan.
 - Index fingerprint (D8): the plan records whether a custom index is set and a sha256 over the index variable names and their URLs with user/password removed. Password variables contribute only their names. A change between approval and run gives a different plan digest → `PLAN_STALE`. A custom index adds the `uvx-custom-index` notice.
-- Open: an index configured only in `uv.toml` is read by both Prepare and the client, so there is no mismatch, but it is not part of the fingerprint. An index set only in the client's own environment is not visible to OpenHub.
+- `uv.toml` settings are part of the same fingerprint (see "uv configuration files").
+- Open: an index set only in the client's own environment (for example in the client's MCP entry or its launcher) is not visible to OpenHub.
 
 ### Approval text (draft)
 
@@ -102,7 +138,7 @@ uvx [--no-build] --compile-bytecode --from <pkg>==<X.Y.Z> [--with <dep>==<A.B.C>
 ### TOCTOU and version changes
 
 - Only exact versions are prepared. The verify step runs offline, so it cannot pull a different version.
-- Open: a re-uploaded or yanked release is not detected by uv without hash checking. Hash locking per tool is not part of v0.2.1.
+- Open: a re-uploaded or yanked release is not detected by uv without hash checking. Hash locking per tool is not part of v0.2.1; only the reviewed source-build files are hash-checked (step 2 above).
 - The plan digest covers the Prepare argv. A Manifest change between approval and run → `PLAN_STALE`.
 
 ## Resolved questions
