@@ -1,7 +1,7 @@
 # Contributing to OpenHub AI
 
 Thank you for helping. Code, documentation and Registry contributions are all welcome.
-+
+
 ## How work is organized
 
 - **Issues first.** Before writing code, look at the [open issues](https://github.com/kanghyunsoon/openhub-ai/issues) and open pull requests. If nothing covers your idea, open an issue with the template that fits (bug, feature, Registry contribution) and wait for a maintainer to agree on the scope. Small documentation fixes can go straight to a pull request.
