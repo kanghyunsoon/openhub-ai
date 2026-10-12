@@ -1,0 +1,72 @@
+name: Bug report
+description: Something does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Security problems must not be reported here**; use a private advisory (see SECURITY.md).
+        Do not paste tokens, passwords, connection strings or personal paths. Replace them with placeholders.
+  - type: input
+    id: version
+    attributes:
+      label: OpenHub version
+      description: Output of `openhub --version`, or the version in the installer or AppImage file name you used, for example 0.2.0.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did it happen?
+      options: [Desktop app, CLI, Both, Not sure]
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system
+      description: For example Windows 11 x64, Ubuntu 24.04 x64.
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: AI client and tool (if relevant)
+      description: For example Cursor, project scope, memory-mcp.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and messages
+      description: Include the error code shown (for example PLAN_STALE, OPERATION_IN_PROGRESS).
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "Output of openhub doctor --json (optional)"
+      description: It contains no tokens or absolute paths. Check before pasting.
+      render: json
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and pull requests.
+          required: true
+        - label: I removed secrets and personal paths from this report.
+          required: true

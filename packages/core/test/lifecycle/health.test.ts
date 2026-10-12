@@ -143,7 +143,7 @@ function fake(script: Script = {}, killResult = true) {
     if (killResult) children.at(-1)?.close(null);
     return killResult;
   };
-  const run = (verified: VerifiedLifecyclePlan, over: Partial<HealthRunOptions> = {}) => runHealthCheck(verified, { healthCheckType: "mcp-handshake", spawner, killTree, tempBase, ...over });
+  const run = (verified: VerifiedLifecyclePlan, over: Partial<HealthRunOptions> = {}) => runHealthCheck(verified, { healthCheckType: "mcp-handshake", spawner, killTree, tempBase, sourceEnv: () => ({}), ...over });
   return { spawns, options, children, kills, run };
 }
 const healthOf = async (r: Awaited<ReturnType<typeof runHealthCheck>>) => {
@@ -176,7 +176,7 @@ describe("REQ-044 MCP Health Check", () => {
 
     const uvx = fake();
     await uvx.run(await verifiedFor("postgres-mcp"));
-    expect(uvx.spawns[0]).toEqual(["uvx", "--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]);
+    expect(uvx.spawns[0]).toEqual(["uvx", "postgres-mcp", "--access-mode=restricted"]);
     const docker = fake();
     await docker.run(await verifiedFor("github-mcp-server", "update"));
     expect(docker.spawns[0]).toEqual(["docker", "run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server@" + DIGEST]);
@@ -303,7 +303,7 @@ describe("REQ-044 MCP Health Check", () => {
     );
     const realSpawner = (_exe: string, _args: readonly string[], opts: HealthSpawnOptions) => nodeHealthSpawner(process.execPath, [script], opts);
     const verified = await verifiedFor("postgres-mcp", "health", HOST);
-    const real = await healthOf(await runHealthCheck(verified, { healthCheckType: "mcp-handshake", spawner: realSpawner, tempBase: os.tmpdir() }));
+    const real = await healthOf(await runHealthCheck(verified, { healthCheckType: "mcp-handshake", spawner: realSpawner, tempBase: os.tmpdir(), sourceEnv: () => ({}) }));
     expect(real).toMatchObject({ status: "healthy", toolCount: 1, terminated: true, environmentUnverified: true });
     const grandPid = Number(await readFile(pidFile, "utf8"));
     const alive = () => {
@@ -318,7 +318,9 @@ describe("REQ-044 MCP Health Check", () => {
     expect(alive()).toBe(false);
   }, 30_000);
 
-  it("AC-041-08 spawn 옵션에 env key가 없고 Health 중 process.env 접근이 0회이며 required env면 environmentUnverified다", async () => {
+  // v0.2.1(fail-closed 결정): 예전 계약 "spawn 옵션에 env key가 없다"(부모 환경 상속)는 외부 MCP에 부모의 API key를 넘겼다.
+  // 이제 spawn 옵션에는 항상 env가 있고, 원본이 없으면 빈 원본으로 거른 값({})이다. Health 중 process.env 접근 0회는 그대로다.
+  it("AC-041-08 spawn 옵션 env는 항상 거른 값(원본 없으면 {})이고 Health 중 process.env 접근이 0회이며 required env면 environmentUnverified다", async () => {
     const verified = await verifiedFor("postgres-mcp");
     const f = fake();
     const original = process.env;
@@ -335,7 +337,7 @@ describe("REQ-044 MCP Health Check", () => {
       process.env = original;
     }
     expect(touched).toEqual([]);
-    expect(Object.keys(f.options[0]!)).not.toContain("env");
+    expect(f.options[0]!).toHaveProperty("env", {});
     expect(result).toMatchObject({ status: "healthy", environmentUnverified: true });
     expect((await healthOf(await fake().run(await verifiedFor("memory-mcp")))).environmentUnverified).toBe(false);
   });
@@ -360,8 +362,7 @@ describe("REQ-044 MCP Health Check", () => {
     const verified = await verifiedFor("memory-mcp");
     const forged = { plan: verified.plan, planDigest: verified.planDigest, acknowledgements: verified.acknowledgements, channel: "cli-tty" } as VerifiedLifecyclePlan;
     expect(await f.run(forged)).toMatchObject({ ok: false, code: "APPROVAL_REQUIRED" });
-    // v0.2.1: postgres Manifest가 0.3.0으로 고정돼 있어 새 정확한 버전을 지정한다(--to).
-    const skipped = await verifiedFor("postgres-mcp", "update", "linux", { skipHealth: true, to: "0.3.1" });
+    const skipped = await verifiedFor("postgres-mcp", "update", "linux", { skipHealth: true });
     expect(skipped.plan.steps.some((s) => s.kind === "health")).toBe(false);
     expect(await f.run(skipped)).toMatchObject({ ok: false, code: "APPROVAL_REQUIRED" });
     const h = await createHarness(scratch, { entries: seed });

@@ -4,8 +4,9 @@ import type { HealthResult, InstallContext, InstallPlan, InstallResult, InstallT
 import { isPinnedArtifact, isPinnedPythonSpec, isValidDockerImage, npxArtifact, tokenizeManifestCommand, uvxArtifact } from "./command";
 import type { InstallBackend, InstallPlanV1, RunStep } from "./plan";
 import { NPX_PREPARE_STEP_ID, NPX_PREPARE_TIMEOUT_MS, npxPrepareArgs } from "../process/npx-prepare";
-import { UVX_PREPARE_STEP_ID, UVX_PREPARE_TIMEOUT_MS, uvxPrepareArgs, uvxPrepareTarget, type UvxBuildPolicy } from "../process/uvx-prepare";
+import { UVX_PREPARE_STEP_ID, UVX_PREPARE_TIMEOUT_MS, normalizePyName, uvxClientLaunchArgs, uvxPrepareArgs, uvxPrepareTarget, type UvxBuildPolicy, type UvxSourceBuildEntry } from "../process/uvx-prepare";
 import { NPX_CLI_PLACEHOLDER, TOOL_CONFIG_PLACEHOLDER, toolConfigIssues } from "../tool-config/index";
+import { installCandidates } from "./router";
 
 /**
  * npx·uvx·docker Adapter(TASK-031, D-012·D-015). Adapter는 Plan 단계만 만들고 프로세스를 실행하지 않는다.
@@ -114,8 +115,10 @@ function planLaunchOnDemand(manifest: Manifest, step: InstallStep, backend: "npx
   const pinned = isPinnedArtifact(backend, ref) && (backend !== "uvx" || uvxWithPinsExact(args));
   const policy = uvxBuildPolicyOf(step, backend);
   if (!policy.ok) return { ok: false, kind: "rejected", reason: policy.reason };
-  const prepare = backend === "npx" ? npxPrepareStepFor(backend, ref.spec, pinned) : uvxPrepareStepFor(args, policy.policy);
+  const prepare = backend === "npx" ? npxPrepareStepFor(backend, ref.spec, pinned) : uvxPrepareStepFor(args, policy.policy, policy.sourceBuild);
   if (policy.policy === "source-build-reviewed" && prepare === null) return { ok: false, kind: "rejected", reason: "source-build-reviewed는 정확한 버전(--from pkg==X.Y.Z, --with dep==A.B.C)으로 고정된 uvx 명령에서만 씁니다" };
+  // v0.2.1: 준비하는(고정 버전) wheel-only uvx 도구는 Client도 --no-build로 실행한다. 고정되지 않은 명령(launch-on-demand)은 바꾸지 않는다.
+  if (backend === "uvx" && prepare !== null && policy.policy === "wheels-only") args = uvxClientLaunchArgs(args);
   return {
     ok: true,
     value: {
@@ -127,20 +130,17 @@ function planLaunchOnDemand(manifest: Manifest, step: InstallStep, backend: "npx
   };
 }
 
-/** Manifest의 검토된 소스 빌드 패키지 한 줄(v0.2.1). */
-export interface UvxSourceBuildEntry {
-  package: string;
-  version: string;
-  source: "pypi-sdist";
-}
 export type UvxBuildPolicyResult = { ok: true; policy: UvxBuildPolicy; sourceBuild: UvxSourceBuildEntry[] } | { ok: false; reason: string };
 
 const PY_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const EXACT_VERSION = /^\d+\.\d+\.\d+$/u;
+const SHA256_HEX = /^[0-9a-f]{64}$/u;
 
 /**
  * install.options.prepare(v0.2.1, D3). 기본 wheels-only. source-build-reviewed는 소스 빌드할 패키지 목록(이름·정확한 버전·출처)이
  * 반드시 있어야 하고, wheels-only에는 목록이 없어야 한다. 알 수 없는 key·uvx가 아닌 backend의 prepare는 거부한다.
+ * 각 항목은 PyPI sdist 파일의 sha256을 가져야 하고 같은 패키지는 한 번만 쓴다. v0.2.1: 형식 검사만 하고 이 정책의 Plan은 차단한다
+ * (UVX_SOURCE_BUILD_DISABLED). 형식을 남기는 이유는 이후 정책 결정 때 schema를 바꾸지 않기 위해서다.
  */
 export function uvxBuildPolicyOf(step: InstallStep, backend: InstallBackend): UvxBuildPolicyResult {
   const raw = step.options?.["prepare"];
@@ -158,13 +158,27 @@ export function uvxBuildPolicyOf(step: InstallStep, backend: InstallBackend): Uv
   const entries: UvxSourceBuildEntry[] = [];
   for (const item of list) {
     const e = item as Record<string, unknown>;
-    if (typeof item !== "object" || item === null || Object.keys(e).some((k) => !["package", "version", "source"].includes(k))) return { ok: false, reason: "sourceBuild 항목 형식이 올바르지 않습니다" };
+    if (typeof item !== "object" || item === null || Object.keys(e).some((k) => !["package", "version", "source", "sha256"].includes(k))) return { ok: false, reason: "sourceBuild 항목 형식이 올바르지 않습니다" };
     if (typeof e["package"] !== "string" || !PY_NAME.test(e["package"])) return { ok: false, reason: "sourceBuild 패키지 이름이 올바르지 않습니다" };
     if (typeof e["version"] !== "string" || !EXACT_VERSION.test(e["version"])) return { ok: false, reason: "sourceBuild 버전은 정확한 버전(X.Y.Z)이어야 합니다" };
     if (e["source"] !== "pypi-sdist") return { ok: false, reason: "sourceBuild 출처는 pypi-sdist만 지원합니다" };
-    entries.push({ package: e["package"], version: e["version"], source: "pypi-sdist" });
+    if (typeof e["sha256"] !== "string" || !SHA256_HEX.test(e["sha256"])) return { ok: false, reason: "sourceBuild 항목에는 PyPI sdist 파일의 sha256(64자리 소문자 hex)이 필요합니다" };
+    if (entries.some((x) => normalizePyName(x.package) === normalizePyName(e["package"] as string))) return { ok: false, reason: "sourceBuild에 같은 패키지가 두 번 있습니다" };
+    entries.push({ package: normalizePyName(e["package"]), version: e["version"], sha256: e["sha256"] });
   }
-  return { ok: true, policy: "source-build-reviewed", sourceBuild: entries };
+  return { ok: true, policy: "source-build-reviewed", sourceBuild: entries.sort((a, b) => (a.package < b.package ? -1 : a.package > b.package ? 1 : 0)) };
+}
+
+/**
+ * v0.2.1(#45 리뷰): 고정 버전 wheel-only uvx 실행 인자에는 --no-build를 붙인다(이미 있으면 그대로). Client 설정·Health·Benchmark가 같은 규칙을 쓴다.
+ * Version State에 --no-build 이전 형식으로 기록된 인자(rollback 대상·Health·Benchmark)도 소스 빌드 없이 실행하게 한다. 버전·패키지는 바꾸지 않는다.
+ * 고정되지 않은 명령(launch-on-demand)·다른 backend·검토된 소스 빌드 정책(v0.2.1에서 차단)은 그대로 둔다.
+ */
+export function wheelsOnlyUvxLaunchArgs(manifest: Manifest, backend: InstallBackend, args: readonly string[]): string[] {
+  if (backend !== "uvx" || uvxPrepareTarget(args) === null) return [...args];
+  const candidate = installCandidates(manifest).find((c) => c.step.adapter === "uvx");
+  const policy = candidate === undefined ? undefined : uvxBuildPolicyOf(candidate.step, "uvx");
+  return policy !== undefined && policy.ok && policy.policy === "wheels-only" ? uvxClientLaunchArgs(args) : [...args];
 }
 
 /** 정확한 버전 환경의 uvx Prepare 단계(v0.2.1). 준비할 수 없는 형식이면 null(launch-on-demand 유지). */
@@ -172,10 +186,12 @@ function uvxWithPinsExact(args: readonly string[]): boolean {
   return args.every((a, i) => i === 0 || args[i - 1] !== "--with" || isPinnedPythonSpec(a));
 }
 
-export function uvxPrepareStepFor(launchArgs: readonly string[], policy: UvxBuildPolicy): RunStep | null {
+export function uvxPrepareStepFor(launchArgs: readonly string[], policy: UvxBuildPolicy, sourceBuild: readonly UvxSourceBuildEntry[] = []): RunStep | null {
   const target = uvxPrepareTarget(launchArgs);
   if (target === null) return null;
-  return { id: UVX_PREPARE_STEP_ID, kind: "run", executable: "uvx", args: uvxPrepareArgs(target, policy), cwd: "isolated", network: true, timeoutMs: UVX_PREPARE_TIMEOUT_MS };
+  const step: RunStep = { id: UVX_PREPARE_STEP_ID, kind: "run", executable: "uvx", args: uvxPrepareArgs(target, policy), cwd: "isolated", network: true, timeoutMs: UVX_PREPARE_TIMEOUT_MS };
+  // 검토 목록은 Plan digest에 들어간다(승인 뒤 목록·sha256이 바뀌면 PLAN_STALE).
+  return policy === "source-build-reviewed" ? { ...step, sourceBuild: sourceBuild.map((e) => ({ ...e })) } : step;
 }
 
 /** 정확한 버전으로 고정된 npx 패키지의 Prepare 단계. 고정되지 않았거나 npx가 아니면 null(launch-on-demand 유지). */

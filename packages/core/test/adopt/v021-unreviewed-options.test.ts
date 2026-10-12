@@ -40,13 +40,6 @@ describe("v0.2.1 P0-6 Adopt: 검토되지 않은 실행 옵션", () => {
     ["postgres access-mode=unrestricted", "postgres-mcp", "postgres", { command: "uvx", args: ["postgres-mcp", "--access-mode=unrestricted"] }],
     ["postgres access-mode 없음", "postgres-mcp", "postgres", { command: "uvx", args: ["postgres-mcp"] }],
     ["postgres uvx --index-url", "postgres-mcp", "postgres", { command: "uvx", args: ["--index-url", "https://pypi.example.test/simple", "postgres-mcp", "--access-mode=restricted"] }],
-    // v0.2.1 #39: 검토된 postgres 실행 인자는 mcp SDK를 1.x로 고정한다. v0.2.0 형식(고정 없음)과 SDK 버전을 바꾼 항목은 검토된 인자가 아니다.
-    ["postgres v0.2.0 형식(mcp 고정 없음)", "postgres-mcp", "postgres", { command: "uvx", args: ["postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }],
-    ["postgres mcp SDK 2.x로 바꿈", "postgres-mcp", "postgres", { command: "uvx", args: ["--from", "postgres-mcp", "--with", "mcp==2.3.0", "postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }],
-    // v0.2.1 #39: Manifest가 postgres-mcp==0.3.0으로 고정됐으므로(Adopt 규칙: 고정된 버전은 같아야 한다) 버전이 없는 --from과 다른 버전은 검토된 인자가 아니다.
-    ["postgres --from 버전 없음(이전 #39 형식)", "postgres-mcp", "postgres", { command: "uvx", args: ["--from", "postgres-mcp", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }],
-    ["postgres 검토되지 않은 버전", "postgres-mcp", "postgres", { command: "uvx", args: ["--from", "postgres-mcp==0.2.3", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }],
-    ["serena 버전 없음(v0.2.0 형식)", "serena", "serena", { command: "uvx", args: ["--from", "serena-agent", "serena", "start-mcp-server"] }],
     ["kubernetes --read-only 없음", "kubernetes-mcp-server", "kubernetes", { command: "npx", args: ["-y", "kubernetes-mcp-server@0.0.67", "--toolsets", "core"] }],
   ];
   for (const [name, toolId, server, entry] of unreviewed) {
@@ -64,10 +57,10 @@ describe("v0.2.1 P0-6 Adopt: 검토되지 않은 실행 옵션", () => {
     ["memory 정확한 버전 고정(Manifest가 버전을 고정하지 않음)", "memory-mcp", "memory", { command: "npx", args: ["-y", MEMORY + "@2026.8.31"] }],
     ["memory Windows cmd wrapper", "memory-mcp", "memory", { command: "cmd", args: ["/d", "/c", "npx", "-y", MEMORY + "@2026.8.31"] }, "windows"],
     ["memory Windows에서 wrapper 없는 npx", "memory-mcp", "memory", { command: "npx", args: ["-y", MEMORY + "@1.2.3"] }, "windows"],
-    ["postgres Windows", "postgres-mcp", "postgres", { command: "uvx", args: ["--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }, "windows"],
+    ["postgres Windows", "postgres-mcp", "postgres", { command: "uvx", args: ["postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }, "windows"],
     ["mongodb Manifest 그대로", "mongodb-mcp-server", "mongodb", { command: "npx", args: ["-y", "mongodb-mcp-server@3.0.5", ...MONGO], env: { MDB_MCP_CONNECTION_STRING: "${MDB_MCP_CONNECTION_STRING}" } }],
-    ["postgres Manifest 그대로(0.3.0 + mcp 1.30.0)", "postgres-mcp", "postgres", { command: "uvx", args: ["--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }],
-    ["serena Manifest 그대로(serena-agent 1.7.0)", "serena", "serena", { command: "uvx", args: ["--from", "serena-agent==1.7.0", "serena", "start-mcp-server"] }],
+    ["postgres Manifest 그대로", "postgres-mcp", "postgres", { command: "uvx", args: ["postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }],
+    ["postgres 정확한 버전 고정", "postgres-mcp", "postgres", { command: "uvx", args: ["postgres-mcp==0.3.0", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }],
   ];
   for (const [name, toolId, server, entry, platform] of reviewed) {
     it(name + " → 지금처럼 ready", async () => {
@@ -76,4 +69,35 @@ describe("v0.2.1 P0-6 Adopt: 검토되지 않은 실행 옵션", () => {
       expect(p.plan.status).toBe("ready");
     });
   }
+});
+
+describe("v0.2.1 #45 리뷰: 고정 버전 wheel-only uvx의 Client 실행 인자(--no-build)", () => {
+  // Registry Manifest는 바꾸지 않고 메모리에서만 postgres-mcp를 정확한 버전(wheel-only Prepare 대상)으로 바꾼다.
+  const PIN = "uvx --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted";
+  const pinned = (entries as RegistryEntry[]).map((e) => (e.manifest.name === "postgres-mcp" ? { ...e, manifest: { ...e.manifest, install: { ...e.manifest.install, options: { command: PIN } } } } : e));
+  async function planPinned(entry: unknown): Promise<PlannedAdopt> {
+    const base = await mkdtemp(path.join(scratch, "pinned-"));
+    const projectRoot = path.join(base, "project");
+    const homeDir = path.join(base, "home");
+    await mkdir(projectRoot, { recursive: true });
+    await mkdir(homeDir, { recursive: true });
+    await writeFile(path.join(projectRoot, ".mcp.json"), JSON.stringify({ mcpServers: { postgres: entry } }, null, 2) + "\n");
+    const r = await planAdopt({ toolId: "postgres-mcp", projectRoot, homeDir, entries: pinned, platform: "linux", client: "claude-code", scope: "project" });
+    if (!r.ok) throw new Error(r.code + " " + r.message);
+    return r.planned;
+  }
+  const env = { DATABASE_URI: "${DATABASE_URI}" };
+  const args = ["--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"];
+
+  it("OpenHub 표준 형식(--no-build 포함)은 같은 도구로 식별되어 편입할 수 있다", async () => {
+    const p = await planPinned({ command: "uvx", args: ["--no-build", ...args], env });
+    expect(p.plan.blockers).toEqual([]);
+    expect(p.plan.status).toBe("ready");
+  });
+
+  it("--no-build가 빠진 항목은 검토된 실행 인자와 달라(소스 빌드 가능) 편입하지 않는다", async () => {
+    const p = await planPinned({ command: "uvx", args, env });
+    expect(p.plan.status).toBe("blocked");
+    expect(codes(p)).toContain("ADOPT_ENTRY_UNSUPPORTED");
+  });
 });

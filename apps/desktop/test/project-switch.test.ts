@@ -2,7 +2,6 @@ import "./locale-ko";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { floatingPostgresRegistry } from "./fixture-registry";
 import { afterAll, describe, expect, it } from "vitest";
 import { loadRegistry, recordInstallInState, runInstallTransaction, type BackendProbeReport, type FetchLike, type HealthRunReport } from "@openhub/core";
 import { INSTALL_PLAN_CHANNEL, INSTALL_RUN_CHANNEL, InstallSession, registerInstall, type InstallRunResponse, type NativeDialogLike } from "../src/install";
@@ -16,8 +15,7 @@ import { approveAll, createHarness, plannedOf } from "../../../packages/core/tes
  * install·update·rollback·health(repair는 repair.test.ts)에 같은 규칙을 적용한다. 실제 파일, 가짜 resolver·Health·executor.
  */
 const ROOT = path.resolve(import.meta.dirname, "../../..");
-// v0.2.1 #39: postgres-mcp만 버전 없는 형식으로 둔 Registry 사본(Desktop update 흐름 확인용, fixture-registry.ts 참고).
-const REGISTRY = await floatingPostgresRegistry(ROOT);
+const REGISTRY = path.join(ROOT, "registry");
 const SEED_SNAPSHOT = path.join(ROOT, "packages/core/test/fixtures/recommendation/metadata.seed-synthetic.json");
 const { entries } = await loadRegistry(REGISTRY);
 const scratch = await mkdtemp(path.join(tmpdir(), "openhub-desktop-switch-"));

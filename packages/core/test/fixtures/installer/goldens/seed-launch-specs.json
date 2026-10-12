@@ -165,19 +165,11 @@
       "backend": "uvx",
       "launch": {
         "args": [
-          "--from",
-          "postgres-mcp==0.3.0",
-          "--with",
-          "mcp==1.30.0",
           "postgres-mcp",
           "--access-mode=restricted"
         ],
         "clientSpec": {
           "args": [
-            "--from",
-            "postgres-mcp==0.3.0",
-            "--with",
-            "mcp==1.30.0",
             "postgres-mcp",
             "--access-mode=restricted"
           ],
@@ -195,14 +187,14 @@
       "launch": {
         "args": [
           "--from",
-          "serena-agent==1.7.0",
+          "serena-agent",
           "serena",
           "start-mcp-server"
         ],
         "clientSpec": {
           "args": [
             "--from",
-            "serena-agent==1.7.0",
+            "serena-agent",
             "serena",
             "start-mcp-server"
           ],
@@ -396,19 +388,11 @@
       "backend": "uvx",
       "launch": {
         "args": [
-          "--from",
-          "postgres-mcp==0.3.0",
-          "--with",
-          "mcp==1.30.0",
           "postgres-mcp",
           "--access-mode=restricted"
         ],
         "clientSpec": {
           "args": [
-            "--from",
-            "postgres-mcp==0.3.0",
-            "--with",
-            "mcp==1.30.0",
             "postgres-mcp",
             "--access-mode=restricted"
           ],
@@ -426,14 +410,14 @@
       "launch": {
         "args": [
           "--from",
-          "serena-agent==1.7.0",
+          "serena-agent",
           "serena",
           "start-mcp-server"
         ],
         "clientSpec": {
           "args": [
             "--from",
-            "serena-agent==1.7.0",
+            "serena-agent",
             "serena",
             "start-mcp-server"
           ],

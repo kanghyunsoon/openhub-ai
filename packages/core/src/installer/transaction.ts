@@ -4,7 +4,7 @@ import type { BackendProbeReport } from "../process/probe";
 import { probeToRecommendContext } from "../process/probe";
 import { executeVerifiedPlan, type ExecSpawner, type IsolatedDir, type StepOutcome } from "../process/executor";
 import { createTreeKiller, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
-import { uvIndexFingerprint } from "../process/uvx-prepare";
+import { uvSourceSettings, type UvConfigReader } from "../process/uvx-prepare";
 import { recommend, type MetadataSnapshot, type RecommendPlatform, type RecommendationReport } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
 import { verifyApprovedPlan, type InstallApproval, type VerifiedPlan } from "./approval-v1";
@@ -13,6 +13,7 @@ import { canonicalize, type ConfigPatchStep, type ConfigScope, type InstallClien
 import { buildInstallPlan, type PlanBuildResult } from "./plan-builder";
 import { installResultSchema, preparedStateOf, type InstallResultV1, type InstallVerification } from "./result";
 import { projectKeyFromRealpath } from "../lifecycle/state";
+import { withOperationLock } from "../lifecycle/store";
 import {
   ToolConfigError,
   inspectToolConfig,
@@ -36,7 +37,7 @@ import type { ConfigScope as Scope, ServerEntry, ToolConfigStep } from "./plan";
  * - 대상 config 외 파일을 쓰지 않고 audit 파일을 만들지 않는다. 결과는 메모리 객체다.
  */
 
-export type TransactionPhase = "approval-check" | "regenerate" | "digest-compare" | "probe" | "prepare" | "config-write" | "verify";
+export type TransactionPhase = "approval-check" | "regenerate" | "digest-compare" | "probe" | "prepare" | "config-write" | "verify" | "record";
 
 export interface InstallRequest {
   toolId: string;
@@ -80,6 +81,8 @@ export interface InstallEnvironment {
   npmChildEnv?: () => Record<string, string>;
   /** v0.2.1 uvx Prepare의 uv 자식 process 환경(보통 uvChildEnv(process.env), CLI·Desktop이 넘긴다). 패키지 index fingerprint도 여기서 만든다. */
   uvChildEnv?: () => Record<string, string>;
+  /** uv 설정 파일(uv.toml) 읽기. 테스트 주입용, 기본은 실제 파일. */
+  readUvConfig?: UvConfigReader;
   /** 확인 단계(TASK-034). 없으면 Prepared·Configured만 확인하고 Detected는 skipped다. */
   verify?: InstallVerifier;
   /** OpenHub 관리 tool config 파일 접근(v0.2.0, 테스트에서 실패를 주입한다). */
@@ -107,8 +110,8 @@ export async function planInstall(request: InstallRequest, env: InstallEnvironme
   const planForms = entry?.manifest.toolConfig === undefined ? undefined : await toolConfigPlanForms(request, env);
   const targets = await Promise.all(request.targets.map((t) => inspectConfigTarget(t.client, t.scope, alias, roots, planForms?.get(t.scope) ?? defaultEntryPlanForm)));
   const toolConfigs = entry?.manifest.toolConfig === undefined ? undefined : await inspectToolConfigs(request, [...new Set(request.targets.map((t) => t.scope))], env);
-  const uvIndex = env.uvChildEnv === undefined ? null : uvIndexFingerprint(env.uvChildEnv());
-  const result = buildInstallPlan({ toolId: request.toolId, entries, report, probes, targets, platform: request.platform, uvIndex, ...(toolConfigs === undefined ? {} : { toolConfigs }) });
+  const uvSource = env.uvChildEnv === undefined ? undefined : await uvSourceSettings(env.uvChildEnv(), request.platform, env.readUvConfig);
+  const result = buildInstallPlan({ toolId: request.toolId, entries, report, probes, targets, platform: request.platform, ...(uvSource === undefined ? {} : { uvSource }), ...(toolConfigs === undefined ? {} : { toolConfigs }) });
   return { result, report, profile };
 }
 
@@ -176,7 +179,7 @@ const requiredEnvOf = (plan: PlannedInstall["plan"]) => plan.requiredEnv.filter(
 async function npxContextFor(plan: VerifiedPlan["plan"], request: InstallRequest, env: InstallEnvironment) {
   const uvx =
     plan.steps.some((s) => s.kind === "run" && s.executable === "uvx") && plan.launch !== null
-      ? { uvx: { platform: plan.launch.platform, killTree: env.killTree ?? createTreeKiller({ cwd: request.projectRoot }), ...(env.uvChildEnv === undefined ? {} : { childEnv: env.uvChildEnv() }) } }
+      ? { uvx: { platform: plan.launch.platform, killTree: env.killTree ?? createTreeKiller({ cwd: request.projectRoot }), ...(env.uvChildEnv === undefined ? {} : { childEnv: env.uvChildEnv() }), ...(env.readUvConfig === undefined ? {} : { readUvConfig: env.readUvConfig }) } }
       : {};
   if (!plan.steps.some((s) => s.kind === "run" && s.executable === "npx") || plan.launch === null) return uvx;
   const platform = plan.launch.platform;
@@ -221,8 +224,30 @@ export const basicVerifier: InstallVerifier = async ({ verified, request, steps,
 
 const CONFIG_RETRYABLE: Readonly<Record<string, boolean>> = { CONFIG_WRITE_FAILED: true, CONFIG_KEY_EXISTS: false, CONFIG_PATH_ESCAPE: false, MANUAL_SETUP_REQUIRED: false, CONFIG_UNPARSEABLE: false, USER_SCOPE_NOT_APPROVED: false, PROJECT_TARGET_IS_USER_CONFIG: false };
 
-/** 승인된 Plan을 실행한다. 승인이 없거나 Plan이 바뀌었으면 아무것도 실행하지 않는다. */
+/**
+ * 승인된 Plan을 실행한다. 승인이 없거나 Plan이 바뀌었으면 아무것도 실행하지 않는다.
+ * (v0.2.1 B) 승인이 있는 실행은 작업 잠금(operation.lock) 안에서 한다. 다른 OpenHub 작업(update의 Health 대기 등)이 진행 중이면
+ * 아무것도 바꾸지 않고 failed / OPERATION_IN_PROGRESS다.
+ */
 export async function runInstallTransaction(planned: PlannedInstall, approval: InstallApproval | undefined, request: InstallRequest, env: InstallEnvironment): Promise<InstallResultV1> {
+  return runInstallTransactionWith(planned, approval, request, env, undefined);
+}
+
+/**
+ * (v0.2.1 B) 설치 확인까지 끝난 뒤 같은 작업 잠금 안에서 부르는 기록 단계. ok가 아니면 이번에 쓴 설정을 되돌리고
+ * STATE_RECORD_FAILED(되돌리지 못하면 COMPENSATION_INCOMPLETE)를 돌려준다. succeeded에 경고만 붙여 끝내지 않는다.
+ */
+export type InstallRecordStep = (succeeded: InstallResultV1) => Promise<{ ok: true } | { ok: false; code: string; retryable: boolean }>;
+
+/** runInstallTransaction + 잠금 안 기록 단계(install-and-record.ts 전용). */
+export async function runInstallTransactionWith(planned: PlannedInstall, approval: InstallApproval | undefined, request: InstallRequest, env: InstallEnvironment, record: InstallRecordStep | undefined): Promise<InstallResultV1> {
+  if (approval === undefined || planned.plan.status === "already-installed") return runInstallLocked(planned, approval, request, env, undefined);
+  const locked = await withOperationLock({ homeDir: request.homeDir, purpose: "install", ...(env.configFs === undefined ? {} : { fs: env.configFs }) }, () => runInstallLocked(planned, approval, request, env, record));
+  if (locked.ok) return locked.value;
+  return notExecuted(planned, "failed", locked.code, locked.code === "OPERATION_IN_PROGRESS", { nextActions: [locked.message] });
+}
+
+async function runInstallLocked(planned: PlannedInstall, approval: InstallApproval | undefined, request: InstallRequest, env: InstallEnvironment, record: InstallRecordStep | undefined): Promise<InstallResultV1> {
   const trace = env.trace ?? (() => undefined);
   trace("approval-check");
   if (planned.plan.status === "already-installed") {
@@ -432,7 +457,7 @@ export async function runInstallTransaction(planned: PlannedInstall, approval: I
       nextActions: [compensationFailed ? COMPENSATION_INCOMPLETE_ACTION : "다시 읽은 설정이 계획과 달라 원래 내용으로 되돌렸습니다", ...checked.nextActions],
     }));
   }
-  return finalize(withToolConfig({
+  const succeeded = finalize(withToolConfig({
     ...base,
     status: "succeeded",
     steps,
@@ -441,5 +466,20 @@ export async function runInstallTransaction(planned: PlannedInstall, approval: I
     verification: checked.verification,
     warnings: checked.warnings,
     nextActions: checked.nextActions,
+  }));
+  if (record === undefined) return succeeded;
+  trace("record");
+  const recorded = await record(succeeded).catch(() => ({ ok: false as const, code: "STATE_WRITE_FAILED", retryable: true }));
+  if (recorded.ok) return succeeded;
+  await compensate();
+  return finalize(withToolConfig({
+    ...base,
+    ...compensationOutcome(receipts.length > 0 || toolUndos.length > 0 ? "partial-compensated" : "failed", "STATE_RECORD_FAILED"),
+    steps,
+    retryable: compensationFailed ? false : recorded.retryable,
+    configChanges: configChangesOf(verified.plan, receipts, restored),
+    verification: checked.verification,
+    warnings: [...checked.warnings, { code: "state-record-failed", message: "Version State를 기록하지 못했습니다(" + recorded.code + ")" }],
+    nextActions: [compensationFailed ? COMPENSATION_INCOMPLETE_ACTION : "Version State를 기록하지 못해(" + recorded.code + ") 이번에 쓴 설정을 원래 내용으로 되돌렸습니다. 원인을 확인한 뒤 다시 설치하세요"],
   }));
 }

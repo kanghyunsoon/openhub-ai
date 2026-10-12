@@ -11,6 +11,7 @@ import type { RecommendPlatform } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
 import { entryKeyOf, type ArtifactIdentity, type LastHealth, type ToolState } from "./state";
 import { commitLifecycleState, projectKeyFor, readLifecycleState, type StateErrorCode } from "./store";
+import { readJournals } from "./journal";
 import { inspectRecordedLauncher, inspectToolConfig, planFormOfEntry, toolConfigLocation, type LauncherCheckFs, type ToolConfigFs } from "../tool-config/index";
 
 /**
@@ -33,6 +34,7 @@ import { inspectRecordedLauncher, inspectToolConfig, planFormOfEntry, toolConfig
  */
 export const LIFECYCLE_ENTRY_STATES = [
   "state-consistent",
+  "interrupted-update",
   "config-drift",
   "missing-config",
   "tool-config-missing",
@@ -155,12 +157,20 @@ export async function recordInstallInState(planned: PlannedInstall, result: Inst
   }
   const states = toolStatesFromInstall(planned, result, projectKey, path.basename(path.resolve(ctx.projectRoot)), ctx.now(), written);
   if (states.length === 0) return { ok: true, recorded: 0 };
-  const read = await readLifecycleState({ homeDir: ctx.homeDir, fs });
-  if (!read.ok) return read;
-  const entries = { ...read.state.entries };
-  for (const s of states) entries[entryKeyOf(s.target)] = s;
-  const committed = await commitLifecycleState({ ...read.state, entries }, read.digest, { homeDir: ctx.homeDir, fs });
-  return committed.ok ? { ok: true, recorded: states.length } : committed;
+  // (v0.2.1 P0-4) 설치 기록은 이 설치의 EntryKey만 덮어쓰는 병합이다. 그 사이 다른 OpenHub 실행이 다른 항목을 커밋했으면(STATE_CONFLICT)
+  // 다시 읽어 병합한다. 횟수를 제한하고, 그래도 안 되면 실패를 돌려준다.
+  let last: InstallRecordResult = { ok: false, code: "STATE_CONFLICT", message: "Version State를 기록하지 못했습니다" };
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const read = await readLifecycleState({ homeDir: ctx.homeDir, fs });
+    if (!read.ok) return read;
+    const entries = { ...read.state.entries };
+    for (const s of states) entries[entryKeyOf(s.target)] = s;
+    const committed = await commitLifecycleState({ ...read.state, entries }, read.digest, { homeDir: ctx.homeDir, fs });
+    if (committed.ok) return { ok: true, recorded: states.length };
+    last = committed;
+    if (committed.code !== "STATE_CONFLICT") break;
+  }
+  return last;
 }
 
 const healthLabel = (h: LastHealth | null): HealthLabel => (h === null ? "unknown" : h.status === "skipped" ? "not-verified" : h.status);
@@ -191,7 +201,8 @@ export interface LifecycleStatusOptions {
   launcherCheckFs?: LauncherCheckFs;
 }
 
-export type LifecycleStatusResult = { ok: true; items: LifecycleToolStatus[] } | { ok: false; code: StateErrorCode; message: string };
+/** journalsUnreadable(v0.2.1): 읽을 수 없는(손상된) 작업 기록 수. 0보다 크면 모든 lifecycle 작업이 JOURNAL_DAMAGED로 막힌다. */
+export type LifecycleStatusResult = { ok: true; items: LifecycleToolStatus[]; journalsUnreadable: number } | { ok: false; code: StateErrorCode; message: string };
 
 const order = (a: LifecycleToolStatus, b: LifecycleToolStatus) =>
   (a.scope === b.scope ? 0 : a.scope === "project" ? -1 : 1) || (a.serverName < b.serverName ? -1 : a.serverName > b.serverName ? 1 : 0) || (a.client < b.client ? -1 : a.client > b.client ? 1 : 0);
@@ -205,6 +216,9 @@ export async function lifecycleStatus(options: LifecycleStatusOptions): Promise<
   const roots = { projectRoot: options.projectRoot, homeDir: options.homeDir, fs };
   const items: LifecycleToolStatus[] = [];
   const tracked = new Set<string>();
+  // (v0.2.1 P0-3) 중간에 끝난 작업의 대상(Journal). OpenHub 자신의 기록이라 사용자 범위를 검사하지 않아도 알 수 있다.
+  const journals = await readJournals(options.homeDir);
+  const interrupted = new Set(journals.ok ? journals.journals.flatMap((j) => j.targets.map((t) => t.entryKey)) : []);
 
   for (const state of Object.values(read.state.entries)) {
     const t = state.target;
@@ -236,6 +250,10 @@ export async function lifecycleStatus(options: LifecycleStatusOptions): Promise<
         }
       }
       entryState = issues[0] ?? "state-consistent";
+    }
+    if (interrupted.has(entryKeyOf(t))) {
+      issues.unshift("interrupted-update");
+      entryState = "interrupted-update";
     }
     items.push({
       toolId: state.toolId,
@@ -290,5 +308,5 @@ export async function lifecycleStatus(options: LifecycleStatusOptions): Promise<
       });
     }
   }
-  return { ok: true, items: items.sort(order) };
+  return { ok: true, items: items.sort(order), journalsUnreadable: journals.ok ? journals.unreadable : 0 };
 }

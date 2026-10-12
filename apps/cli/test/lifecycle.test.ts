@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { containsAbsolutePath, nodeConfigFs, readLifecycleState, type BackendProbeReport, type ConfigFs, type ExecChild, type ExecSpawner, type HealthCheckStatus, type LifecycleEnvironment } from "@openhub/core";
+import { containsAbsolutePath, mcpChildEnvForPlan, nodeConfigFs, readLifecycleState, type BackendProbeReport, type ConfigFs, type ExecChild, type ExecSpawner, type HealthCheckStatus, type LifecycleEnvironment } from "@openhub/core";
 import { runCli } from "../src/cli";
 import type { LifecycleCommandIO } from "../src/lifecycle";
 import { memoryIO } from "./helpers";
@@ -46,6 +46,8 @@ interface RunOptions {
   health?: HealthCheckStatus;
   memoryVersion?: string;
   platform?: string;
+  /** Health 실행기가 받은 옵션(환경 허용 목록 확인용). */
+  onHealth?: (...args: Parameters<NonNullable<LifecycleEnvironment["runHealth"]>>) => void;
 }
 
 async function session(): Promise<Session> {
@@ -79,8 +81,9 @@ async function session(): Promise<Session> {
         writeFile: async (f, d) => (s.writes.push(path.relative(base, f).replace(/\\/gu, "/")), nodeConfigFs.writeFile(f, d)),
         rename: async (a, b) => (s.writes.push("rename:" + path.relative(base, b).replace(/\\/gu, "/")), nodeConfigFs.rename(a, b)),
       };
-      const runHealth: NonNullable<LifecycleEnvironment["runHealth"]> = async (verified) => {
+      const runHealth: NonNullable<LifecycleEnvironment["runHealth"]> = async (verified, options) => {
         s.healthRuns += 1;
+        opts.onHealth?.(verified, options);
         const status = opts.health ?? "healthy";
         return { ok: true, result: { status, reason: status === "healthy" ? null : "tools-list-error", toolCount: status === "healthy" ? 4 : null, environmentUnverified: verified.plan.requiredEnv.some((e) => e.required), terminated: true, excerpt: null } };
       };
@@ -189,8 +192,7 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 CLI lifecycle", () => {
     expect(await windows.run(["update", "memory-mcp"], { answer: () => "n", platform: "win32" })).toBe(1);
     await golden("update-preview-windows.txt", preview(lastStdout));
     const pg = await installed("postgres-mcp", ["claude-code"]);
-    // v0.2.1: postgres Manifest는 0.3.0으로 고정돼 있어 새 정확한 버전을 지정한다(--to).
-    expect(await pg.run(["update", "postgres-mcp", "--to", "0.3.1", "--skip-health"], { answer: () => "n" })).toBe(1);
+    expect(await pg.run(["update", "postgres-mcp", "--skip-health"], { answer: () => "n" })).toBe(1);
     await golden("update-preview-skip-health.txt", preview(lastStdout));
   });
 
@@ -257,16 +259,34 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 CLI lifecycle", () => {
     expect((await readFile(path.join(s.dirs.project, ".mcp.json"))).equals(config)).toBe(true);
   });
 
+  it("v0.2.1 lifecycle health: MCP 서버에 넘기는 환경은 허용 목록이다(부모의 합성 API key·token 0개, PATH는 있음)", async () => {
+    const s = await installed();
+    const synthetic = { OPENAI_API_KEY: "sk-synthetic-cli-0001", ANTHROPIC_API_KEY: "sk-ant-synthetic-cli", GITHUB_TOKEN: "ghp_synthetic_cli_0002", AWS_SECRET_ACCESS_KEY: "synthetic-cli-aws", NPM_TOKEN: "npm_synthetic_cli" };
+    for (const [k, v] of Object.entries(synthetic)) vi.stubEnv(k, v);
+    let seen: Record<string, string> | undefined;
+    // CLI가 원본(process.env)을 넘기고, Core Health가 실제 spawn에 쓰는 환경(mcpChildEnvForPlan)은 허용 목록이다.
+    let passedSource = false;
+    expect(await s.run(["lifecycle", "health", "memory-mcp"], { onHealth: (v, o) => ((passedSource = o.sourceEnv !== undefined), (seen = mcpChildEnvForPlan(v.plan, o.sourceEnv))) })).toBe(0);
+    expect(passedSource).toBe(true);
+    expect(seen).toBeDefined();
+    for (const [k, v] of Object.entries(synthetic)) {
+      expect(seen, k).not.toHaveProperty(k);
+      expect(JSON.stringify(seen)).not.toContain(v);
+    }
+    expect(Object.keys(seen!).some((k) => k.toUpperCase() === "PATH")).toBe(true);
+    expect(lastStdout.join("\n")).toContain("그 밖의 API 키·token·자격증명 환경변수는 넘기지 않습니다");
+  });
+
   it("AC-045-09 모든 출력에 env 값·절대 경로가 0건이다", async () => {
     const secret = "postgresql://admin:Cli-Lifecycle-Secret@db.internal:5432/app";
     vi.stubEnv("DATABASE_URI", secret);
     const s = await installed("postgres-mcp", ["claude-code", "codex"]);
     s.out.length = 0;
     expect(await s.run(["lifecycle", "status", "--check"])).toBe(0);
-    expect(await s.run(["update", "postgres-mcp", "--to", "0.3.1"])).toBe(0);
+    expect(await s.run(["update", "postgres-mcp"])).toBe(0);
     expect(await s.run(["lifecycle", "health", "postgres-mcp"])).toBe(0);
     expect(await s.run(["rollback", "postgres-mcp"], { health: "unhealthy" })).toBe(1);
-    expect(await s.run(["update", "postgres-mcp", "--to", "0.3.1", "--json"], { tty: false })).toBe(0);
+    expect(await s.run(["update", "postgres-mcp", "--json"], { tty: false })).toBe(0);
     for (const line of s.out) {
       expect(line).not.toContain("Cli-Lifecycle-Secret");
       expect(containsAbsolutePath(line), line).toBe(false);

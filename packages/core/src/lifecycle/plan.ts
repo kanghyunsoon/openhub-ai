@@ -15,10 +15,11 @@ import {
   type KernelPrompter,
   type KernelVerified,
 } from "../installer/approval-v1";
-import { BACKEND_ADAPTERS, DOCKER_PULL_TIMEOUT_MS, clientLaunchSpec, npxPrepareStepFor, uvxBuildPolicyOf, uvxPrepareStepFor } from "../installer/backends";
+import { BACKEND_ADAPTERS, DOCKER_PULL_TIMEOUT_MS, clientLaunchSpec, npxPrepareStepFor, uvxBuildPolicyOf, uvxPrepareStepFor, wheelsOnlyUvxLaunchArgs } from "../installer/backends";
 import { isPinnedArtifact, isValidDockerImage, npxArtifact, parseNpmSpec, tokenizeManifestCommand } from "../installer/command";
 import { parseNpxPrepareArgs } from "../process/npx-prepare";
-import type { UvxBuildPolicy } from "../process/uvx-prepare";
+import type { UvSourceSettings, UvxBuildPolicy, UvxSourceBuildEntry } from "../process/uvx-prepare";
+import { uvSourceBlockers } from "../installer/plan-builder";
 import { configTargetFor, inspectConfigTarget, nodeConfigFs, readConfiguredEntry, type ConfigFs } from "../installer/config-writer";
 import {
   CONFIG_SCOPES,
@@ -69,6 +70,8 @@ import { resolveArtifact, type ResolverErrorCode } from "./resolver";
 import { CLIENT_COMMANDS, artifactIdentitySchema, entryKeyOf, type ArtifactIdentity, type ToolState } from "./state";
 import { configEntryDigest, standardEntries } from "./status";
 import { projectKeyFor, readLifecycleState, type StateErrorCode } from "./store";
+import { damagedJournalMessage, pendingFor, readJournals } from "./journal";
+import { packageSourceCheckMessage, type PackageSourceCheck } from "../process/mcp-env";
 
 /**
  * LifecyclePlan v1·Approval·PLAN_STALE 확장(TASK-040, D-020).
@@ -141,6 +144,11 @@ export const healthStepSchema = z.strictObject({
   envNames: z.array(envName),
   cwd: z.literal("isolated"),
   timeouts: timeoutsSchema,
+  /**
+   * v0.2.1(#46 리뷰): 승인한 패키지 출처(index·registry 환경변수) digest. npx·uvx에서 출처 설정이 있을 때만 있다(packageSourceDigest).
+   * 바뀌면 재생성 Plan digest가 달라 PLAN_STALE이고, 실행 직전 다시 계산해 다르면 spawn 0이다.
+   */
+  packageSource: sha256.optional(),
 });
 export type HealthStep = z.output<typeof healthStepSchema>;
 
@@ -211,7 +219,7 @@ export const lifecyclePlanSchema = z
       if (step.kind === "run" && step.executable === "npx" && (plan.backend !== "npx" || parseNpxPrepareArgs(step.args) === null)) {
         ctx.addIssue({ code: "custom", path: ["steps", i], message: "npx 준비 단계는 npx backend의 정확한 버전 spec만 받을 수 있습니다" });
       }
-      if (step.kind === "run" && step.index !== undefined && step.executable !== "uvx") ctx.addIssue({ code: "custom", path: ["steps", i, "index"], message: "index fingerprint는 uvx 준비 단계에만 있다" });
+      if (step.kind === "run" && (step.index !== undefined || step.sourceBuild !== undefined) && step.executable !== "uvx") ctx.addIssue({ code: "custom", path: ["steps", i, "index"], message: "index fingerprint·sourceBuild는 uvx 준비 단계에만 있다" });
       if (step.kind === "run" && step.executable === "uvx") {
         const issue = uvxPrepareStepIssue(step, plan.backend, plan.target.clientSpec.args, plan.approvalRequirements);
         if (issue !== undefined) ctx.addIssue({ code: "custom", path: ["steps", i], message: issue });
@@ -269,7 +277,9 @@ export interface LifecyclePlanAssemblyInput {
   /** tool config Tool(v0.2.0): 검토된 내용과 scope별 현재 상태. 있으면 update·rollback·repair가 tool-config 단계를 갖는다. */
   toolConfig?: { content: string; current: readonly { scope: ConfigScope; current: ToolConfigStateInput }[] };
   /** v0.2.1 uvx Prepare: Manifest의 빌드 정책과 사용자 지정 index fingerprint(없으면 null). uvx backend에서만. */
-  uvPrepare?: { policy: UvxBuildPolicy; index: string | null };
+  uvPrepare?: { policy: UvxBuildPolicy; index: string | null; sourceBuild: readonly UvxSourceBuildEntry[] };
+  /** v0.2.1(#46 리뷰): 승인할 패키지 출처 digest(Health 단계에 넣는다). 없으면 출처 설정이 없거나 npx·uvx가 아니다. */
+  packageSource?: string;
 }
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -308,6 +318,7 @@ export function assembleLifecyclePlan(input: LifecyclePlanAssemblyInput): Planne
     envNames: [...requiredNames],
     cwd: "isolated",
     timeouts: { ...HEALTH_TIMEOUTS },
+    ...(input.packageSource === undefined ? {} : { packageSource: input.packageSource }),
   };
   if (ready && operation === "health") {
     steps.push(healthStep, { id: "health-record", kind: "health-record", entries: entryKeys });
@@ -320,7 +331,7 @@ export function assembleLifecyclePlan(input: LifecyclePlanAssemblyInput): Planne
     }
     // v0.2.1 uvx Prepare: 정확한 버전 환경(--from·--with 모두 고정)이면 설정을 바꾸기 전에 uv cache에 준비한다.
     if (backend === "uvx" && input.uvPrepare !== undefined) {
-      const prepare = uvxPrepareStepFor(input.target.launchArgs, input.uvPrepare.policy);
+      const prepare = uvxPrepareStepFor(input.target.launchArgs, input.uvPrepare.policy, input.uvPrepare.sourceBuild);
       if (prepare !== null) steps.push(input.uvPrepare.index === null ? prepare : { ...prepare, index: { custom: true, digest: input.uvPrepare.index } });
     }
     if (backend === "docker") {
@@ -448,6 +459,13 @@ export interface LifecyclePlanOptions {
   launcherCheckFs?: LauncherCheckFs;
   /** v0.2.1 uvx Prepare: 사용자 지정 패키지 index fingerprint(uvIndexFingerprint). 생략·null이면 기본 index. */
   uvIndex?: string | null;
+  /** v0.2.1 uvx Prepare: 환경변수와 uv.toml의 패키지 출처 설정(uvSourceSettings). 있으면 uvIndex 대신 fingerprint를 쓴다. */
+  uvSource?: UvSourceSettings;
+  /**
+   * v0.2.1(#46 리뷰): Prepare가 쓰는 패키지 출처 설정 중 MCP 서버 환경에 같은 값으로 넘길 수 없는 변수 이름(mcpPackageSourceMismatch, 값 없음).
+   * Health를 실행하는 계획이면 blocker다(spawn 0). 실행 직전 재생성에서 달라지면 Plan digest가 바뀌어 PLAN_STALE이다.
+   */
+  packageSource?: { readonly npx: PackageSourceCheck; readonly uvx: PackageSourceCheck };
 }
 
 export type LifecyclePlanErrorCode =
@@ -611,6 +629,16 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
     });
   }
 
+  // (v0.2.1 P0-3) 이 대상들의 이전 작업이 중간에 끝났다(Journal이 남음). 지금 설정은 그 작업이 쓰다 만 상태일 수 있으므로
+  // repair(tool config 도구) 말고는 계획하지 않고 recover로 안내한다.
+  const journals = await readJournals(options.homeDir);
+  if (!journals.ok) blockers.push({ code: "JOURNAL_UNREADABLE", message: "작업 기록(Journal) 경로를 안전하게 읽지 못했습니다(" + journals.message + ")" });
+  // 손상된 Journal은 어느 도구의 중단인지 알 수 없다. 모든 작업(health·repair 포함)을 보수적으로 막고 안내한다(자동 삭제 없음).
+  else if (journals.unreadable > 0) blockers.push({ code: "JOURNAL_DAMAGED", message: damagedJournalMessage(journals.unreadable) });
+  else if (options.operation !== "repair" && pendingFor(journals.journals, targets.map((t) => t.entryKey)).length > 0) {
+    blockers.push({ code: "INTERRUPTED_OPERATION", message: "이 도구의 이전 작업이 중간에 끝났습니다(interrupted-update). openhub lifecycle recover " + options.toolId + "로 상태를 확인하고 승인해 복구하세요" });
+  }
+
   // tool config(v0.2.0): scope별 OpenHub 관리 파일을 확인한다. update·rollback·health는 기록과 같아야 진행하고, repair는 다시 만든다.
   const toolConfigCurrent: { scope: ConfigScope; current: ToolConfigStateInput }[] = [];
   const usesToolConfig = manifest.toolConfig !== undefined && selected.some((s) => s.toolConfig !== undefined);
@@ -710,15 +738,28 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
   }
 
   // v0.2.1 uvx Prepare: Manifest의 검토된 빌드 정책(D3)과 사용자 지정 index fingerprint(D8). health는 설정을 쓰지 않아 준비하지 않는다.
-  let uvPrepare: { policy: UvxBuildPolicy; index: string | null } | undefined;
+  let uvPrepare: { policy: UvxBuildPolicy; index: string | null; sourceBuild: readonly UvxSourceBuildEntry[] } | undefined;
   if (backend === "uvx" && options.operation !== "health") {
     const candidate = installCandidates(manifest).find((c) => c.step.adapter === "uvx");
     if (candidate !== undefined) {
       const policy = uvxBuildPolicyOf(candidate.step, "uvx");
       if (!policy.ok) return { ok: false, code: "MANIFEST_COMMAND_REJECTED", message: policy.reason };
-      uvPrepare = { policy: policy.policy, index: options.uvIndex ?? null };
+      uvPrepare = { policy: policy.policy, index: options.uvSource !== undefined ? options.uvSource.fingerprint : (options.uvIndex ?? null), sourceBuild: policy.sourceBuild };
+      if (target !== undefined && uvxPrepareStepFor(target.launchArgs, policy.policy, policy.sourceBuild) !== null) {
+        blockers.push(...uvSourceBlockers([policy.policy === "source-build-reviewed" ? { sourceBuild: policy.sourceBuild } : {}], options.uvSource));
+      }
     }
   }
+  // v0.2.1(#45 리뷰): 고정 버전 wheel-only uvx 대상은 Client 설정과 OpenHub Health 모두 --no-build로 실행한다.
+  // update는 Manifest에서 다시 만든 인자에 이미 있다. rollback·health는 Version State 기록을 쓰므로, --no-build 이전 형식의 기록이면 여기서 붙인다
+  // (버전·패키지는 그대로이고 소스 빌드만 막는다). 고정되지 않은(launch-on-demand) 명령은 바꾸지 않는다.
+  target = { ...target, launchArgs: wheelsOnlyUvxLaunchArgs(manifest, backend, target.launchArgs) };
+  // planLifecycleRequest(제품 경로)는 항상 packageSource를 넘긴다(환경 원본이 없으면 source-unavailable로 막는다).
+  // 이 옵션 없이 planLifecycle을 직접 부르면 계획 단계 검사를 하지 않고 digest도 넣지 않는다. 그때도 Health 실행 직전 검사(packageSourceRunBlock)가
+  // 원본 누락·넘길 수 없는 설정·승인 digest(null)와 다른 출처 설정을 모두 막는다(spawn 0).
+  const sourceCheck: PackageSourceCheck = (backend === "npx" || backend === "uvx") && options.packageSource !== undefined ? options.packageSource[backend] : { ok: true, digest: null };
+  const runsHealth = options.operation === "health" || options.skipHealth !== true;
+  if (runsHealth && !sourceCheck.ok) blockers.push({ code: "PACKAGE_SOURCE_UNVERIFIED", message: packageSourceCheckMessage(sourceCheck) });
 
   return {
     ok: true,
@@ -732,6 +773,7 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
       platform: options.platform,
       ...(usesToolConfig && options.operation !== "health" ? { toolConfig: { content: manifest.toolConfig!.content, current: toolConfigCurrent } } : {}),
       ...(uvPrepare === undefined ? {} : { uvPrepare }),
+      ...(runsHealth && sourceCheck.ok && sourceCheck.digest !== null ? { packageSource: sourceCheck.digest } : {}),
       current,
       target,
       targets,

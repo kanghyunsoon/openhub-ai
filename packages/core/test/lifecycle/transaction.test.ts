@@ -111,6 +111,8 @@ async function setup(
   const health = fakeHealth(log, ...(opts.health ?? ["healthy", null]));
   const fs = opts.fs === undefined ? h.env.configFs! : opts.fs(h.env.configFs!);
   const env: LifecycleEnvironment = {
+    // 명시적인 빈 원본(#46 리뷰): 원본이 없으면 npx·uvx Health·Benchmark가 막힌다.
+    mcpSourceEnv: () => ({}),
     loadEntries: async () => seed,
     probe: () => h.env.probe(),
     tempBase: scratch,
@@ -121,8 +123,7 @@ async function setup(
     runHealth: health.run,
     trace: (p) => log.push("phase:" + p),
   };
-  // v0.2.1: postgres Manifest는 0.3.0으로 고정돼 있어 update는 새 정확한 버전을 지정한다(--to 0.3.1, PyPI 조회 없음).
-  const request: LifecycleRequest = { operation: "update", toolId, projectRoot: h.projectRoot, homeDir: h.homeDir, platform: "linux", includeUser: false, targets, ...(opts.skipHealth === true ? { skipHealth: true } : {}), ...(toolId === "postgres-mcp" ? { to: "0.3.1" } : {}) };
+  const request: LifecycleRequest = { operation: "update", toolId, projectRoot: h.projectRoot, homeDir: h.homeDir, platform: "linux", includeUser: false, targets, ...(opts.skipHealth === true ? { skipHealth: true } : {}) };
   const planned = await planOf(request, env);
   const outcome = await requestLifecycleApproval(planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
   if (outcome.status !== "approved") throw new Error(outcome.status);
@@ -153,7 +154,8 @@ describe("REQ-040 REQ-043 REQ-050 Update transaction", () => {
     const result = await run(c);
     expect(result.status).toBe("updated");
     const phases = c.log.filter((l) => l.startsWith("phase:") || l === "health:run");
-    expect(phases).toEqual(["phase:approval-check", "phase:regenerate", "phase:digest-compare", "phase:probe", "phase:prepare", "phase:config-replace", "phase:health", "health:run", "phase:state-commit"]);
+    // (v0.2.1 P0-3) config-replaced(교체 직후)·journal-cleanup(commit 뒤 작업 기록 정리) 단계가 추가됐다(강제 종료 지점 검증용).
+    expect(phases).toEqual(["phase:approval-check", "phase:regenerate", "phase:digest-compare", "phase:probe", "phase:prepare", "phase:config-replace", "phase:config-replaced", "phase:health", "health:run", "phase:state-commit", "phase:journal-cleanup"]);
     expect(c.exec.calls).toEqual([["docker", "pull", "ghcr.io/github/github-mcp-server@" + DIGEST]]);
   });
 
@@ -263,11 +265,10 @@ describe("REQ-040 REQ-043 REQ-050 Update transaction", () => {
     expect(failed.log.filter((l) => /lifecycle\.json/u.test(l))).toEqual([]);
   });
 
-  it("AC-043-08 npx·uvx update는 config args의 패키지 token 교체와 state 갱신뿐이고 패키지 매니저 명령 spawn이 0건이다(Prepare만)", async () => {
+  it("AC-043-08 npx·uvx update는 config args의 패키지 token 교체와 state 갱신뿐이고 패키지 매니저 명령 spawn이 0건이다", async () => {
     for (const [toolId, before, after] of [
       ["memory-mcp", ["-y", "@modelcontextprotocol/server-memory"], ["-y", "@modelcontextprotocol/server-memory@1.2.3"]],
-      // v0.2.1: postgres Manifest는 postgres-mcp 0.3.0 + mcp 1.30.0으로 고정한다. update는 --from 값(artifact)만 바꾸고 --with는 유지한다.
-      ["postgres-mcp", ["--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"], ["--from", "postgres-mcp==0.3.1", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]],
+      ["postgres-mcp", ["postgres-mcp", "--access-mode=restricted"], ["postgres-mcp==0.3.0", "--access-mode=restricted"]],
     ] as const) {
       const c = await setup(toolId);
       const original = JSON.parse((await c.file(".mcp.json")).toString("utf8"));
@@ -277,17 +278,14 @@ describe("REQ-040 REQ-043 REQ-050 Update transaction", () => {
       const updated = JSON.parse((await c.file(".mcp.json")).toString("utf8"));
       expect(updated.mcpServers[server]).toEqual({ ...original.mcpServers[server], args: after });
       // v0.2.0 npx Prepare: npx는 정확한 target 버전을 npx cache에 받는 명령 두 개(cache 위치 확인, 내려받기)만 실행한다.
-      // v0.2.1 uvx Prepare: uvx는 정확한 target 환경 준비와 offline 확인 두 개만 실행한다(python -c pass, MCP 서버 실행 없음).
+      // MCP 서버(패키지 bin)는 실행하지 않고(-- node --version), uvx는 여전히 0건이다.
       if (toolId === "memory-mcp") {
         expect(c.exec.calls).toEqual([
           ["npm", "config", "get", "cache"],
           ["npx", "--yes", "--package=@modelcontextprotocol/server-memory@1.2.3", "--", "node", "--version"],
         ]);
-        expect(c.exec.calls.every(isNpxPrepareCall)).toBe(true);
-      } else {
-        const target = { from: "postgres-mcp==0.3.1", withPins: ["mcp==1.30.0"] };
-        expect(c.exec.calls).toEqual([["uvx", ...core.uvxPrepareArgs(target, "wheels-only")], ["uvx", ...core.uvxVerifyArgs(target, "wheels-only")]]);
-      }
+      } else expect(c.exec.calls).toEqual([]);
+      expect(c.exec.calls.every(isNpxPrepareCall)).toBe(true);
       const healthArgs = c.health.calls[0]!.plan.steps.find((s) => s.kind === "health");
       expect(JSON.stringify(healthArgs)).not.toMatch(/"install"|"pip"|"add"/u);
     }

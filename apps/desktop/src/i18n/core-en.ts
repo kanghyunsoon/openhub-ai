@@ -1,5 +1,6 @@
 import {
   CAPABILITIES,
+  PACKAGE_SOURCE_UNAVAILABLE_MESSAGE,
   REVIEWED_TOOL_CONFIGS,
   installTargetChange,
   toolConfigVerificationGaps,
@@ -59,7 +60,7 @@ const NOTICE_EN: Readonly<Record<string, string>> = {
   "npx-prepare": "Before writing configuration, the npm package of this version is downloaded into the npx cache. The MCP server is not started, but npm may run install scripts of dependencies during installation (as on the client's first start). If an incomplete cache entry of the same package and version exists, only that entry is removed and downloaded again.",
   "uvx-prepare": "Before writing the client configuration, OpenHub downloads and installs the Python packages for this exact version into uv's cache. The MCP server is not started during this step.",
   "uvx-source-build": "Some packages of this tool are only available as source and are built on your computer. Building runs third-party build code. OpenHub reviewed this tool's dependency list, but not the build code itself.",
-  "uvx-custom-index": "A custom Python package index is configured, so uv downloads packages from that index. If the index settings change after approval, the plan does not run.",
+  "uvx-custom-index": "Custom Python package source settings are configured (index environment variables or uv.toml), so uv downloads packages according to them. If these settings change after approval, the plan does not run.",
   "database-credential-scope": "This tool acts with the permissions of the database credentials in its environment variable. The MCP server's read-only setting does not reduce database permissions, so use a database account with read permission only.",
   "health-execution": "Health Check runs the MCP server (third-party code) in an isolated temporary directory and may download packages or images.",
   "client-wrapper-not-verified": "Health Check verifies the artifact. It does not verify the cmd /d /c npx wrapper in the client configuration itself.",
@@ -68,6 +69,8 @@ const NOTICE_EN: Readonly<Record<string, string>> = {
   "health-gate-skipped": "This tool needs environment variables to run, but OpenHub does not check their values or whether they are set. If Health Check is skipped, whether the MCP server actually works after the update is not verified.",
   "health-not-verified": "Health: Not verified / Reason: Required environment is unchecked",
   "client-env-parse-risk": "You must prepare the required environment variables in the environment where Claude Code runs. OpenHub does not check their values or whether they exist; if they are missing, parsing .mcp.json may be affected.",
+  "journal-cleanup-failed": "The operation finished, but its operation record (journal) could not be removed. If the tool shows interrupted-update, check it with openhub lifecycle recover (use --discard to remove only the record when the operation is complete).",
+  "journal-update-failed": "The operation record (journal) phase could not be updated to compensation-failed. The record is still kept, so the tool still shows as interrupted.",
 };
 
 /** 대문자 code(차단·실행 불가 사유)의 영어 문장. 파일·서버 이름이 Core 문장 안에만 있는 경우는 일반 문장으로 쓴다. */
@@ -86,6 +89,8 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   REPAIR_UNSUPPORTED: "Repair is only for tools that use an OpenHub-managed tool config.",
   CLIENT_LAUNCHER_UNAVAILABLE: "The current Node.js installation (node.exe and npm's npx-cli.js) could not be verified, so the client configuration is not changed. Check the Node.js installation and plan again.",
   CLIENT_LAUNCHER_INVALID: "The Node.js launch path recorded in the client configuration is no longer valid (client-launcher-invalid). Fix it with repair.",
+  PACKAGE_SOURCE_UNVERIFIED:
+    "OpenHub could not confirm that it would use the same package source as Prepare: the source environment was unavailable, or an index or registry setting in your environment variables cannot be passed to the MCP server as-is (for example a URL that contains credentials). Nothing was run. Move such credentials to uv.toml or .npmrc and plan again.",
   STATE_DIVERGED: "The selected targets have different current versions. Handle each client and scope separately.",
   PLATFORM_UNSUPPORTED: "This platform is not supported.",
   BACKEND_NOT_IN_MANIFEST: "The current Manifest no longer has this install method.",
@@ -110,6 +115,22 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   USER_SCOPE_NOT_APPROVED: "The user-scope configuration change (user-scope-config) was not approved.",
   CONFIG_WRITE_FAILED: "The configuration file could not be changed. The original file was kept.",
   CONFIG_RESTORE_FAILED: "The original configuration could not be fully restored. Check the configuration file before trying again.",
+  INTERRUPTED_OPERATION: "A previous operation on this tool stopped midway (interrupted-update). Review and approve the recovery with openhub lifecycle recover first.",
+  JOURNAL_UNREADABLE: "The operation journal folder could not be read safely, so nothing was planned.",
+  JOURNAL_DAMAGED: "Some operation records (journals) cannot be read (damaged, or a format this version cannot read), so nothing was planned. OpenHub does not delete them. Back up and move the files in ~/.openhub/state/journal, check your configuration with openhub lifecycle status, then try again.",
+  JOURNAL_CLEANUP_FAILED: "The operation record (journal) could not be removed. Check write access to ~/.openhub/state, then remove only the record with openhub lifecycle recover --discard.",
+  OPERATION_COMPLETED: "This operation finished completely (configuration and Version State were both applied); only removing its record is left. It is not undone. Use --discard to remove only the record.",
+  JOURNAL_WRITE_FAILED: "The operation journal could not be written, so nothing was changed. Check write access to the OpenHub state folder.",
+  JOURNAL_PATH_ESCAPE: "The operation journal folder is not a regular folder inside your home folder (symlink or junction), so it was not used.",
+  NO_INTERRUPTED_OPERATION: "There is no interrupted operation to recover for this tool in this project.",
+  STATE_UNREADABLE: "Version State could not be read, so nothing was recovered.",
+  STATE_CHANGED: "Version State for this entry changed after the interrupted operation started, so OpenHub does not decide automatically.",
+  EXTERNAL_CHANGE: "The configuration entry matches neither what OpenHub was writing nor the previous entry (changed outside OpenHub or missing). It was not overwritten; check the file yourself.",
+  TOOL_CONFIG_RECOVERY: "This tool uses an OpenHub tool config. Recover it with openhub lifecycle repair instead.",
+  UNDO_UNAVAILABLE: "The previous entry could not be recorded, so it cannot be restored automatically. Check the file yourself.",
+  NOTHING_TO_UNDO: "No entry was changed. Use --discard to remove only the operation record.",
+  NOT_RESTORED: "Some entries still differ from their previous content, so the record cannot simply be removed.",
+  RECOVERY_IN_PROGRESS: "Another recovery is processing this operation record. Check again when it finishes.",
   MANIFEST_UNAVAILABLE: "The Registry Manifest could not be read, so Health was not run. Changed configuration was restored and Version State was not changed. Check the OpenHub installation and approve a new plan.",
   RESOLUTION_INVALID: "The exact artifact version could not be resolved.",
   STATE_INVALID: "Version State has an invalid format.",
@@ -118,7 +139,11 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   STATE_PATH_ESCAPE: "The Version State path points outside the OpenHub state directory.",
   STATE_WRITE_FAILED: "Version State could not be written. The previous state was kept.",
   STATE_CONFLICT: "Version State was changed by another process, so it was not overwritten.",
+  OPERATION_IN_PROGRESS: "Another OpenHub operation is in progress (for example an update waiting for Health). Nothing was changed. Try again when it finishes.",
+  OPERATION_LOCK_FAILED: "OpenHub could not create its operation lock in the state folder, so nothing was run or changed.",
   UP_TO_DATE: "The tool is already at the target version.",
+  UVX_CONFIG_UNSUPPORTED: "A uv configuration file (uv.toml) could not be read or is not valid TOML, so the uvx preparation step was not planned. Fix the file and create a new plan. No configuration file was changed.",
+  UVX_SOURCE_BUILD_DISABLED: "This tool needs a source build (a reviewed sdist), which is blocked in v0.2.1: uvx does not check the file hashes of the build that prepares the environment your client uses, so OpenHub cannot guarantee that the reviewed file is the one that gets built. It is not installed or updated until a policy decision is made. No configuration file was changed.",
 };
 
 /** 대문자 차단·오류 code 또는 notice code 하나의 영어 문장(없으면 undefined). */
@@ -136,6 +161,7 @@ export const EN_WARNING_CODES: readonly string[] = Object.freeze([
   "docker-daemon-unchecked",
   "manual-setup-required",
   "configured-not-detected",
+  "state-record-failed",
 ]);
 
 type AnyPlan = InstallPlanV1 | LifecyclePlanV1;
@@ -196,6 +222,11 @@ function singleSentenceEn(plan: AnyPlan | null, code: string): string | undefine
  */
 function perItemEn(plan: AnyPlan, code: string): string[] | null | undefined {
   if (code === "required-env" || code === "environment-unverified") return requiredNames(plan).map((n) => requiredEnvEn([n]));
+  if (code === "PACKAGE_SOURCE_UNVERIFIED") {
+    // Core 원문에서 변수 이름 목록만 꺼낸다(값은 원문에도 없다). 형식이 다르면 null → 원문 그대로 미번역 표시.
+    const lines = plan.warnings.filter((w) => w.code === code).map((w) => (w.message === PACKAGE_SOURCE_UNAVAILABLE_MESSAGE ? PACKAGE_SOURCE_UNAVAILABLE_EN : packageSourceNamesOf(w.message)));
+    return lines.every((n): n is string => n !== null) ? lines.map((n) => (n === PACKAGE_SOURCE_UNAVAILABLE_EN ? n : packageSourceUnverifiedEn(n))) : null;
+  }
   if (code === "manual-setup-required") return plan.targets.filter((x) => "envReference" in x && x.envReference === "manual").map((t) => clientName(t.client) + " " + t.scope + " configuration (" + t.file + ") is not written by OpenHub. Set it up yourself.");
   if (code === "CONFIG_KEY_EXISTS") return isInstall(plan) ? plan.targets.filter((x) => installTargetChange(plan, x) === "conflict").map((t) => t.file + " already has a " + t.serverName + " entry; OpenHub does not overwrite it.") : null;
   if (code === "TOOL_CONFIG_UNKNOWN") {
@@ -213,6 +244,17 @@ function perItemEn(plan: AnyPlan, code: string): string[] | null | undefined {
   }
   return undefined;
 }
+
+/** "패키지 출처 설정(UV_INDEX_URL, NPM_CONFIG_REGISTRY)…"에서 이름 목록. 환경변수 이름 형식만 받는다. */
+function packageSourceNamesOf(message: string): string | null {
+  const m = /^패키지 출처 설정\(([A-Za-z0-9_:@./, -]+)\)/u.exec(message);
+  return m === null ? null : m[1]!;
+}
+
+export const packageSourceUnverifiedEn = (names: string) =>
+  "A package source setting in your environment (" + names + ") cannot be passed to the MCP server as-is (for example an index or registry URL that contains credentials), so OpenHub cannot confirm that Health and Benchmark use the same package source as Prepare. Nothing was run. Move the credentials to uv.toml or .npmrc, remove them from the environment variable, and create a new plan.";
+export const PACKAGE_SOURCE_UNAVAILABLE_EN =
+  "OpenHub did not receive the environment the MCP server would start with (missing or failed), so it cannot confirm that the package source matches Prepare. Nothing was run. Plan again.";
 
 /**
  * warning 목록 → 영어 줄(경고 하나에 한 줄, 같은 순서). 원칙:
@@ -279,7 +321,7 @@ export function installPreviewEn(planned: PlannedInstall): string[] {
               ? " — OpenHub downloads this version into the npx cache before writing configuration (the MCP server is not started; network, download, dependency install scripts)"
               : plan.artifact.preparation === "uv-cache"
                 ? " — OpenHub installs the Python packages of this exact version into the uv cache before writing configuration and checks them again offline (the MCP server is not started" +
-                  (runSteps.some((s) => s.executable === "uvx" && s.args[0] !== "--no-build") ? "; includes a reviewed source build)" : "; wheels only, no build)")
+                  (runSteps.some((s) => s.executable === "uvx" && s.args[0] !== "--no-build") ? "; source-build step — blocked in v0.2.1)" : "; wheels only, no build)")
                 : " — run by OpenHub (network, download)")),
     );
   }
@@ -317,6 +359,15 @@ export function installPreviewEn(planned: PlannedInstall): string[] {
 }
 
 const OPERATION_EN = { update: "update", rollback: "rollback", health: "Health Check", repair: "repair" } as const;
+/** Health 환경 설명(core healthEnvNotice와 같은 내용, 영어). */
+export function healthEnvNoticeEn(names: readonly string[]): string {
+  if (names.length === 0) return "The MCP server process only receives variables the OS needs to run it (PATH, HOME, TEMP and similar); the Manifest declares none. Other API keys, tokens and credential variables are not passed.";
+  return (
+    "The MCP server process only receives variables the OS needs to run it (PATH, HOME, TEMP and similar) and the variables the Manifest declares (" + names.join(", ") + "). " +
+    "Declared variables are an exception: if they are set, the MCP server receives their values as they are, including secrets such as tokens or connection strings. OpenHub does not read or store them. " +
+    "Other API keys, tokens, credential variables and code-injection variables (NODE_OPTIONS and similar) are not passed."
+  );
+}
 const HEALTH_NOT_VERIFIED_EN = ["Health: Not verified", "Reason: Required environment is unchecked"];
 
 /** LifecyclePlan Preview(영어). Core formatLifecyclePlanPreview와 같은 순서·같은 정보. */
@@ -340,7 +391,7 @@ export function lifecyclePreviewEn(planned: PlannedLifecycle): string[] {
               ? " — OpenHub downloads this version into the npx cache before changing configuration (the MCP server is not started; network, download, dependency install scripts)"
               : run.every((s) => s.executable === "uvx")
                 ? " — OpenHub installs the Python packages of this exact version into the uv cache before changing configuration and checks them again offline (the MCP server is not started" +
-                  (run.some((s) => s.args[0] !== "--no-build") ? "; includes a reviewed source build)" : "; wheels only, no build)")
+                  (run.some((s) => s.args[0] !== "--no-build") ? "; source-build step — blocked in v0.2.1)" : "; wheels only, no build)")
                 : " — run by OpenHub (network, download; downloaded images are not removed)")),
     );
     lines.push("Client command");
@@ -369,6 +420,7 @@ export function lifecyclePreviewEn(planned: PlannedLifecycle): string[] {
     const t = plan.healthPolicy.timeouts;
     lines.push("  Required — runs the MCP server in an isolated temporary directory and checks the initialize and tools/list responses (the client app is not started)");
     lines.push("  Time limits: startup " + t.startupMs / 1000 + " s · handshake " + t.handshakeMs / 1000 + " s · total " + t.totalMs / 1000 + " s");
+    lines.push("  " + healthEnvNoticeEn(plan.requiredEnv.map((e) => e.name)));
     if (plan.operation !== "health") lines.push("  If Health fails, the configuration is restored and Version State is not changed");
   } else lines.push("  Skipped (approved in advance) — after applying: " + HEALTH_NOT_VERIFIED_EN.join(" / "));
   lines.push("", "Environment variables");
@@ -395,6 +447,7 @@ export function healthLinesEn(health: { status: string; environmentUnverified: b
 
 const STATE_EN: Readonly<Record<LifecycleToolStatus["state"], string>> = {
   "state-consistent": "consistent",
+  "interrupted-update": "interrupted-update (a previous operation stopped midway — openhub lifecycle recover)",
   "config-drift": "config-drift (configuration differs from Version State)",
   "missing-config": "missing-config (configuration entry missing)",
   "tool-config-missing": "tool-config-missing (OpenHub-managed tool config missing — repair)",
@@ -478,10 +531,13 @@ const INSTALL_CODE_EN: Readonly<Record<string, string>> = {
   MANUAL_SETUP_REQUIRED: "The Node.js launch path for the client configuration could not be verified, so nothing was changed.",
   TOOL_CONFIG_STALE: "The tool config changed after approval. Review the new plan and approve again.",
   COMPENSATION_INCOMPLETE: "Some files could not be restored (changed elsewhere after this run, or not writable). They were not overwritten; check them with lifecycle status.",
-  UVX_WHEEL_UNAVAILABLE: "Some packages are not available as wheels and would need a source build. OpenHub does not build from source without a reviewed Manifest and a separate approval. No configuration file was changed.",
+  UVX_WHEEL_UNAVAILABLE: "Some packages are not available as wheels and would need a source build. OpenHub does not build from source (no automatic fallback). No configuration file was changed.",
   UVX_PREPARE_VERIFY_FAILED: "The prepared environment could not be found again without network (offline check failed). No configuration file was changed.",
   UVX_PREPARE_REJECTED: "The uvx preparation step only accepts exact Python package versions. No configuration file was changed.",
   UVX_PREPARE_UNAVAILABLE: "The uvx preparation step could not run in this environment. No configuration file was changed.",
+  UVX_CONFIG_UNSUPPORTED: "A uv configuration file (uv.toml) could not be read or is not valid TOML, so the uvx preparation step was not planned. Fix the file and create a new plan. No configuration file was changed.",
+  UVX_SOURCE_BUILD_DISABLED: "This tool needs a source build (a reviewed sdist), which is blocked in v0.2.1: uvx does not check the file hashes of the build that prepares the environment your client uses, so OpenHub cannot guarantee that the reviewed file is the one that gets built. It is not installed or updated until a policy decision is made. No configuration file was changed.",
+  STATE_RECORD_FAILED: "Version State could not be recorded, so the configuration written by this install was restored to its original content. Check the cause and install again.",
 };
 
 /** InstallResult의 다음에 할 일(영어). Core 원문 대신 code·상태·Plan 구조로 만든다. */
@@ -495,6 +551,7 @@ export function installResultNextEn(result: InstallResultV1, plan: InstallPlanV1
 
 export function installWarningEn(plan: InstallPlanV1, w: { code: string; message: string }): string {
   if (w.code === "configured-not-detected") return "[configured-not-detected] The configuration was written, but the " + (plan.targets[0]?.serverName ?? plan.toolId) + " server was not found when analyzing again. The configuration files were not restored.";
+  if (w.code === "state-record-failed") return "[state-record-failed] Version State could not be recorded" + (/\(([A-Z_]+)\)/u.exec(w.message)?.[1] === undefined ? "" : " (" + /\(([A-Z_]+)\)/u.exec(w.message)![1] + ")") + ".";
   const line = warningsEn(plan, [w])[0] ?? untranslatedWarningEn(w);
   return "[" + line.code + "] " + line.text;
 }

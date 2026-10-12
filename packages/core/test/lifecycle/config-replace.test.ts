@@ -83,14 +83,13 @@ describe("REQ-040 Config 교체 writer", () => {
     await installed(h, "postgres-mcp", [{ client: "codex", scope: "project" }]);
     const file = path.join(h.projectRoot, ".codex", "config.toml");
     const before = await readFile(file, "utf8");
-    // v0.2.1: postgres Manifest가 0.3.0으로 고정돼 있어 새 정확한 버전을 지정한다(--to).
-    const [step] = await stepsFor(h, { toolId: "postgres-mcp", to: "0.3.1" });
+    const [step] = await stepsFor(h, { toolId: "postgres-mcp" });
     const state = await stateEntry(h, "codex");
     const r = await replaceConfigEntry(step!, { ...roots(h), expectedBlockDigest: state.config.tomlBlockDigest });
     expect(r.ok).toBe(true);
     const after = await readFile(file, "utf8");
-    const oldBlock = '[mcp_servers.postgres]\ncommand = "uvx"\nargs = ["--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]\nenv_vars = ["DATABASE_URI"]\n';
-    const newBlock = '[mcp_servers.postgres]\ncommand = "uvx"\nargs = ["--from", "postgres-mcp==0.3.1", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]\nenv_vars = ["DATABASE_URI"]\n';
+    const oldBlock = '[mcp_servers.postgres]\ncommand = "uvx"\nargs = ["postgres-mcp", "--access-mode=restricted"]\nenv_vars = ["DATABASE_URI"]\n';
+    const newBlock = '[mcp_servers.postgres]\ncommand = "uvx"\nargs = ["postgres-mcp==0.3.0", "--access-mode=restricted"]\nenv_vars = ["DATABASE_URI"]\n';
     expect(before.endsWith(oldBlock)).toBe(true);
     expect(after).toBe(before.replace(oldBlock, newBlock));
     expect(after.startsWith(head)).toBe(true);
@@ -109,12 +108,12 @@ describe("REQ-040 Config 교체 writer", () => {
 
     const c = await createHarness(scratch, { entries: seed });
     await installed(c, "postgres-mcp", [{ client: "codex", scope: "project" }]);
-    const [codexStep] = await stepsFor(c, { toolId: "postgres-mcp", to: "0.3.1" });
+    const [codexStep] = await stepsFor(c, { toolId: "postgres-mcp" });
     const digest = (await stateEntry(c, "codex")).config.tomlBlockDigest;
     const file = path.join(c.projectRoot, ".codex", "config.toml");
     const block = await readFile(file, "utf8");
     // 0회: 같은 의미지만 OpenHub가 쓴 byte가 아니다(줄 나눔).
-    await writeFile(file, block.replace('args = ["--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]', 'args = [\n  "--from",\n  "postgres-mcp==0.3.0",\n  "--with",\n  "mcp==1.30.0",\n  "postgres-mcp",\n  "--access-mode=restricted",\n]'));
+    await writeFile(file, block.replace('args = ["postgres-mcp", "--access-mode=restricted"]', 'args = [\n  "postgres-mcp",\n  "--access-mode=restricted",\n]'));
     c.reset();
     const zero = await replaceConfigEntry(codexStep!, { ...roots(c), expectedBlockDigest: digest });
     expect(zero).toMatchObject({ ok: false, code: "CONFIG_DRIFT" });
@@ -206,7 +205,7 @@ describe("REQ-040 Config 교체 writer", () => {
       { client: "codex", scope: "project" },
       { client: "cursor", scope: "project" },
     ]);
-    const steps = await stepsFor(h, { toolId: "postgres-mcp", to: "0.3.1" });
+    const steps = await stepsFor(h, { toolId: "postgres-mcp" });
     for (const step of steps) {
       const state = await stateEntry(h, step.client);
       expect((await replaceConfigEntry(step, { ...roots(h), expectedBlockDigest: state.config.tomlBlockDigest })).ok, step.client).toBe(true);
@@ -218,7 +217,7 @@ describe("REQ-040 Config 교체 writer", () => {
     expect(JSON.parse(cursor).mcpServers.postgres.env).toEqual({ DATABASE_URI: "$" + "{env:DATABASE_URI}" });
     expect(codex).toContain('env_vars = ["DATABASE_URI"]');
     for (const text of [claude, cursor, codex]) {
-      expect(text).toContain("postgres-mcp==0.3.1");
+      expect(text).toContain("postgres-mcp==0.3.0");
       expect(text).not.toContain("Rotated-Secret-9");
     }
   });

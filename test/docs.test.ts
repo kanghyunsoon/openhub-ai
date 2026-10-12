@@ -21,7 +21,9 @@ describe("REQ-062 TASK-073 문서·demo·최종 회귀", () => {
     const en = read("README.md");
     expect(en).not.toMatch(/[\uac00-\ud7a3]/u);
     expect(headings(en).map((h) => h.level + " " + h.text)).toEqual([
-      "1 OpenHub AI", "2 Demo", "2 Why OpenHub", "2 Core Features", "2 How It Works", "2 Quick Start", "2 Supported Clients and Backends",
+      // v0.2.1 실사용 준비: 처음 쓰는 개발자가 먼저 볼 내용(다운로드·필요 프로그램·설치·첫 사용·바뀌는 파일·실패 대응·제거·검증 범위·알려진 문제)을 앞에 둔다.
+      "1 OpenHub AI", "2 Download", "2 What You Need", "2 Install", "2 First 5 Minutes", "2 What OpenHub Changes on Your Computer", "2 When Something Goes Wrong",
+      "2 Removing a Tool or OpenHub", "2 Supported Clients and Verification", "2 Known Issues", "2 Demo", "2 Core Features", "2 How It Works",
       "2 Security and Approval Model", "2 CLI", "2 Desktop", "2 Architecture", "2 Contributing", "2 License",
     ]);
     expect(en.indexOf("Discover → Recommend → Install → Verify → Update → Rollback")).toBeGreaterThan(en.indexOf("## How It Works"));

@@ -11,6 +11,7 @@ import {
   analyzeProject,
   buildInstallPlan,
   loadRegistry,
+  packageSourceMismatchMessage,
   projectKeyFromRealpath,
   recommend,
   recordInstallInState,
@@ -131,6 +132,13 @@ describe("v0.2.0 PR B 경고 보존(English): 알 수 없는 경고·복수 경�
   });
 
   it("같은 code의 복수 경고: 항목별 code는 항목마다 한 줄, 원문이 서로 다른 단일 문장 code는 합치지 않고 원문을 남긴다", async () => {
+    const { plan: k8s } = await k8sPlan("linux");
+    // #46 리뷰: 패키지 출처 불일치는 변수 이름을 영어 문장에 넣는다(값은 원문에도 없다). 형식이 다르면 원문 그대로 미번역 표시.
+    const source = { ...k8s, warnings: [{ code: "PACKAGE_SOURCE_UNVERIFIED", message: packageSourceMismatchMessage(["NPM_CONFIG_REGISTRY", "UV_INDEX_URL"]) }] } as typeof k8s;
+    expect(warningsEn(source, source.warnings)).toEqual([{ code: "PACKAGE_SOURCE_UNVERIFIED", text: expect.stringContaining("(NPM_CONFIG_REGISTRY, UV_INDEX_URL)") }]);
+    expect(warningsEn(source, source.warnings)[0]!.text).toContain("uv.toml or .npmrc");
+    const odd = { ...k8s, warnings: [{ code: "PACKAGE_SOURCE_UNVERIFIED", message: "다른 형식의 원문" }] } as typeof k8s;
+    expect(warningsEn(odd, odd.warnings)).toEqual([{ code: "PACKAGE_SOURCE_UNVERIFIED", text: "(not translated) 다른 형식의 원문", untranslated: true }]);
     const { plan } = await k8sPlan("linux");
     const withEnv = { ...plan, requiredEnv: [{ name: "API_TOKEN", required: true }, { name: "API_URL", required: true }], warnings: [{ code: "required-env", message: "A" }, { code: "required-env", message: "B" }] } as typeof plan;
     expect(warningsEn(withEnv, withEnv.warnings).map((l) => l.text)).toEqual([

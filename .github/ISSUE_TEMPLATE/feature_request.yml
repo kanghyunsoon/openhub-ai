@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest an improvement to OpenHub.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the problem first; a solution can come later. Large features may be planned for a later milestone.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Project analysis, Recommendations, Install, Lifecycle (update/rollback/health/repair), Desktop UI, CLI, Registry, Documentation, Other]
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and pull requests.
+          required: true
+        - label: This is not a security vulnerability report (those go to a private advisory).
+          required: true

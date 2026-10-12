@@ -55,7 +55,7 @@ export function formatLifecyclePlanPreview(planned: PlannedLifecycle): string[] 
               ? " — OpenHub가 설정을 바꾸기 전에 이 버전을 npx cache에 받습니다(MCP 서버는 실행하지 않음, 네트워크·다운로드·의존성 설치 스크립트)"
               : run.every((s) => s.executable === "uvx")
                 ? " — OpenHub가 설정을 바꾸기 전에 이 정확한 버전의 Python 패키지를 uv cache에 설치하고 네트워크 없이 다시 확인합니다(MCP 서버는 실행하지 않음" +
-                  (run.some((s) => s.args[0] !== "--no-build") ? ", 검토된 소스 빌드 포함)" : ", wheel만·빌드 없음)")
+                  (run.some((s) => s.args[0] !== "--no-build") ? ", 소스 빌드 단계 — v0.2.1에서 차단)" : ", wheel만·빌드 없음)")
                 : " — OpenHub가 실행합니다(네트워크·다운로드, 받은 image는 지우지 않습니다)")),
     );
     lines.push("Client 실행 명령");
@@ -86,6 +86,7 @@ export function formatLifecyclePlanPreview(planned: PlannedLifecycle): string[] 
     const t = plan.healthPolicy.timeouts;
     lines.push("  필수 — MCP 서버를 격리 임시 디렉터리에서 실행해 initialize·tools/list 응답을 확인합니다(Client 앱은 실행하지 않음)");
     lines.push("  제한 시간 startup " + t.startupMs / 1000 + "초 · handshake " + t.handshakeMs / 1000 + "초 · 전체 " + t.totalMs / 1000 + "초");
+    lines.push("  " + healthEnvNotice(plan.requiredEnv.map((e) => e.name)));
     if (plan.operation !== "health") lines.push("  Health가 실패하면 설정을 원래 내용으로 되돌리고 Version State를 바꾸지 않습니다");
   } else {
     lines.push("  생략(사전 승인) — 적용 후 " + HEALTH_NOT_VERIFIED_LINES.join(" / "));
@@ -105,6 +106,16 @@ export function formatLifecyclePlanPreview(planned: PlannedLifecycle): string[] 
   for (const r of plan.approvalRequirements) lines.push("  - [" + r + "] " + LIFECYCLE_APPROVAL_MESSAGES[r]);
   lines.push("", "Plan digest  " + planDigest);
   return lines;
+}
+
+/** Health가 MCP 서버 process에 넘기는 환경(mcpServerChildEnv)의 승인 화면 설명. 이름만 쓰고 값은 쓰지 않는다. */
+export function healthEnvNotice(names: readonly string[]): string {
+  if (names.length === 0) return "MCP 서버 process에는 OS 실행에 필요한 변수(PATH·HOME·TEMP 등)만 넘깁니다(Manifest가 선언한 환경변수 없음). 그 밖의 API 키·token·자격증명 환경변수는 넘기지 않습니다";
+  return (
+    "MCP 서버 process에는 OS 실행에 필요한 변수(PATH·HOME·TEMP 등)와 Manifest가 선언한 " + names.join(", ") + "만 넘깁니다. " +
+    "선언된 변수는 예외입니다: 값이 설정되어 있으면(토큰·접속 문자열 등 비밀값 포함) MCP 서버가 그 값을 그대로 받습니다. OpenHub는 값을 읽거나 저장하지 않습니다. " +
+    "그 밖의 API 키·token·자격증명 환경변수와 코드 주입 변수(NODE_OPTIONS 등)는 넘기지 않습니다"
+  );
 }
 
 export function formatLifecycleResult(result: LifecycleResultV1): string[] {
@@ -129,6 +140,7 @@ export function formatLifecycleResult(result: LifecycleResultV1): string[] {
 
 const STATE_LABEL: Readonly<Record<LifecycleToolStatus["state"], string>> = {
   "state-consistent": "일치",
+  "interrupted-update": "interrupted-update(이전 작업이 중간에 끝남 — openhub lifecycle recover)",
   "config-drift": "config-drift(설정이 Version State와 다름)",
   "missing-config": "missing-config(설정 항목 없음)",
   "tool-config-missing": "tool-config-missing(OpenHub 관리 tool config 없음 — openhub lifecycle repair)",

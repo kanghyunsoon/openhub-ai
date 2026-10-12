@@ -18,8 +18,9 @@ import {
 } from "../tool-config/index";
 import { executeLifecyclePreparation, type ExecSpawner, type IsolatedDir } from "../process/executor";
 import { createTreeKiller, runHealthCheck, type HealthCheckResult, type HealthRunOptions, type HealthRunReport, type HealthSpawner, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
+import { mcpPackageSourceCheck, type McpSourceEnv } from "../process/mcp-env";
 import type { BackendProbeReport } from "../process/probe";
-import { uvIndexFingerprint } from "../process/uvx-prepare";
+import { uvSourceSettings, type UvConfigReader } from "../process/uvx-prepare";
 import type { RecommendPlatform } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
 import { replaceConfigEntry } from "./config-replace";
@@ -38,7 +39,8 @@ import { lifecycleResultSchema, type LifecycleResultStatus, type LifecycleResult
 import { entryKeyOf, type LastHealth, type ToolState, type ToolStateCore } from "./state";
 import type { LifecycleStateFile } from "./state";
 import { configEntryDigest, tomlBlockDigest } from "./status";
-import { LIFECYCLE_STATE_LOGICAL_PATH, commitLifecycleState, projectKeyFor, readLifecycleState } from "./store";
+import { LIFECYCLE_STATE_LOGICAL_PATH, commitLifecycleState, projectKeyFor, readLifecycleState, withOperationLock } from "./store";
+import { JOURNAL_KIND, journalBeforeValue, newTransactionId, readJournals, removeJournal, setJournalPhase, writeJournal, type JournalTarget, type JournalV1 } from "./journal";
 
 /**
  * Update transaction(TASK-043, D-019·D-020). 순서:
@@ -52,7 +54,7 @@ import { LIFECYCLE_STATE_LOGICAL_PATH, commitLifecycleState, projectKeyFor, read
  *   (Health 20 s 한도 안에 시작하도록. 끊긴 설치의 불완전 항목은 Prepare가 정리한다).
  */
 
-export type LifecyclePhase = "approval-check" | "regenerate" | "digest-compare" | "probe" | "prepare" | "config-replace" | "health" | "state-commit";
+export type LifecyclePhase = "approval-check" | "regenerate" | "digest-compare" | "probe" | "prepare" | "config-replace" | "config-replaced" | "health" | "state-commit" | "journal-cleanup";
 
 export interface LifecycleRequest {
   operation: LifecycleOperation;
@@ -86,8 +88,15 @@ export interface LifecycleEnvironment {
   npmChildEnv?: () => Record<string, string>;
   /** v0.2.1 uvx Prepare의 uv 자식 process 환경(보통 uvChildEnv(process.env)). 패키지 index fingerprint도 여기서 만든다. */
   uvChildEnv?: () => Record<string, string>;
+  /** uv 설정 파일(uv.toml) 읽기. 테스트 주입용, 기본은 실제 파일. */
+  readUvConfig?: UvConfigReader;
   /** Health 실행기(테스트 주입용). 기본 runHealthCheck. */
   runHealth?: (verified: VerifiedLifecyclePlan, options: HealthRunOptions) => Promise<HealthRunReport>;
+  /**
+   * Health가 실행하는 MCP 서버 환경의 원본(보통 process.env, CLI·Desktop이 넘긴다). OS 기본·backend 설정·Manifest가 선언한 이름만
+   * 골라 넘긴다(mcpProcessEnv). 없으면 빈 원본으로 거른다(부모 환경 상속 없음, fail-closed).
+   */
+  mcpSourceEnv?: McpSourceEnv;
   /** operation별 Plan 생성기 교체(테스트 주입용). 기본은 planLifecycle(update·rollback·health). */
   planners?: Partial<Record<LifecycleOperation, (request: LifecycleRequest, env: LifecycleEnvironment) => Promise<LifecyclePlanResult>>>;
   /** OpenHub 관리 tool config 파일 접근(v0.2.0, 테스트 주입용). */
@@ -114,7 +123,10 @@ export async function planLifecycleRequest(request: LifecycleRequest, env: Lifec
     ...(request.skipHealth === undefined ? {} : { skipHealth: request.skipHealth }),
     ...(env.fetch === undefined ? {} : { fetch: env.fetch }),
     ...(env.timeoutMs === undefined ? {} : { timeoutMs: env.timeoutMs }),
-    ...(env.uvChildEnv === undefined ? {} : { uvIndex: uvIndexFingerprint(env.uvChildEnv()) }),
+    ...(env.uvChildEnv === undefined ? {} : { uvSource: await uvSourceSettings(env.uvChildEnv(), request.platform, env.readUvConfig) }),
+    // v0.2.1(#46 리뷰): Health가 Prepare와 같은 패키지 출처를 쓸 수 있는지와 승인할 출처 digest(값 없음). 원본이 없으면 확인 불가로 막는다.
+    // backend는 Version State로 정해지므로 둘 다 넘기고 plan이 고른다.
+    packageSource: { npx: mcpPackageSourceCheck(env.mcpSourceEnv, "npx"), uvx: mcpPackageSourceCheck(env.mcpSourceEnv, "uvx") },
     ...(env.configFs === undefined ? {} : { fs: env.configFs }),
     ...(env.toolConfigFs === undefined ? {} : { toolConfigFs: env.toolConfigFs }),
     ...(env.windowsNpx === undefined ? {} : { clientLauncher: env.windowsNpx }),
@@ -195,8 +207,57 @@ const healthOf = (r: HealthCheckResult, at: Date | null): NonNullable<LifecycleR
   checkedAt: at === null ? null : at.toISOString(),
 });
 
-/** 승인된 LifecyclePlan을 실행한다. 승인이 없거나 Plan이 바뀌었으면 아무것도 실행하지 않는다. */
+interface JournalContext {
+  journal: JournalV1 | null;
+}
+
+/**
+ * 승인된 LifecyclePlan을 실행한다. 승인이 없거나 Plan이 바뀌었으면 아무것도 실행하지 않는다.
+ * (v0.2.1 B) 승인이 있는 실행은 작업 잠금(operation.lock) 안에서 실행 직전 재검증부터 Version State commit·Journal 정리까지 한다.
+ * 다른 OpenHub 작업(다른 Tool의 install·health·recover 포함)이 진행 중이면 아무것도 바꾸지 않고 OPERATION_IN_PROGRESS다.
+ * (v0.2.1 P0-3) Client 설정을 바꾸는 작업은 바꾸기 직전에 Journal을 남긴다. 결과가 나오면(정상 완료·보상 성공) Journal을 지우고,
+ * 보상까지 실패하면(rollback-failed) compensation-failed로 남긴다. 프로세스가 끝나 이 함수가 돌아오지 못하면 Journal이 남는다.
+ */
 export async function runLifecycleTransaction(planned: PlannedLifecycle, approval: LifecycleApproval | undefined, request: LifecycleRequest, env: LifecycleEnvironment): Promise<LifecycleResultV1> {
+  if (approval === undefined || approval.planDigest !== planned.planDigest || planned.plan.status === "up-to-date") return runJournaled(planned, approval, request, env);
+  const locked = await withOperationLock({ homeDir: request.homeDir, purpose: "lifecycle-" + planned.plan.operation, ...(env.configFs === undefined ? {} : { fs: env.configFs }) }, () =>
+    runJournaled(planned, approval, request, env),
+  );
+  if (locked.ok) return locked.value;
+  return finalize({ planned, status: "config-failed", code: locked.code, retryable: locked.code === "OPERATION_IN_PROGRESS", nextActions: [locked.message] });
+}
+
+async function runJournaled(planned: PlannedLifecycle, approval: LifecycleApproval | undefined, request: LifecycleRequest, env: LifecycleEnvironment): Promise<LifecycleResultV1> {
+  const jctx: JournalContext = { journal: null };
+  const result = await runTransaction(planned, approval, request, env, jctx);
+  const problems: { code: string; message: string; next: string }[] = [];
+  const leftover = "openhub lifecycle status에서 이 도구가 interrupted-update로 보이면 openhub lifecycle recover " + planned.plan.toolId + "로 확인하세요(작업이 끝났으면 --discard로 기록만 지웁니다)";
+  if (jctx.journal !== null) {
+    if (result.status === "rollback-failed") {
+      // Journal은 이전 단계로 남아 있어 중단으로 계속 보인다. 단계만 갱신하지 못했다는 사실을 숨기지 않는다.
+      await setJournalPhase(request.homeDir, jctx.journal, "compensation-failed").catch(() => problems.push({ code: "journal-update-failed", message: "작업 기록(Journal) 단계를 compensation-failed로 갱신하지 못했습니다(기록은 남아 있습니다)", next: leftover }));
+    } else {
+      (env.trace ?? (() => undefined))("journal-cleanup");
+      if (!(await removeJournal(request.homeDir, jctx.journal.transactionId))) problems.push({ code: "journal-cleanup-failed", message: "작업 기록(Journal)을 지우지 못했습니다", next: leftover });
+    }
+  }
+  // repair 등으로 대상 기록이 다시 일치하면, 그 대상만 다루던 이전 작업의 Journal도 정리한다.
+  if (result.stateCommitted) {
+    const keys = new Set(planned.plan.targets.map((t) => t.entryKey));
+    const read = await readJournals(request.homeDir);
+    if (read.ok) {
+      for (const j of read.journals) {
+        if (j.targets.every((t) => keys.has(t.entryKey)) && !(await removeJournal(request.homeDir, j.transactionId)) && !problems.some((p) => p.code === "journal-cleanup-failed")) {
+          problems.push({ code: "journal-cleanup-failed", message: "작업 기록(Journal)을 지우지 못했습니다", next: leftover });
+        }
+      }
+    }
+  }
+  if (problems.length === 0) return result;
+  return lifecycleResultSchema.parse({ ...result, warnings: [...result.warnings, ...problems.map(({ code, message }) => ({ code, message }))], nextActions: [...result.nextActions, ...new Set(problems.map((p) => p.next))] });
+}
+
+async function runTransaction(planned: PlannedLifecycle, approval: LifecycleApproval | undefined, request: LifecycleRequest, env: LifecycleEnvironment, jctx: JournalContext): Promise<LifecycleResultV1> {
   const trace = env.trace ?? (() => undefined);
   trace("approval-check");
   if (planned.plan.status === "up-to-date") return finalize({ planned, status: "up-to-date", code: "UP_TO_DATE", retryable: false, nextActions: ["이미 같은 버전입니다. 바꾼 것이 없습니다"] });
@@ -250,7 +311,7 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
     ...(hasNpxPrepare
       ? { npx: { platform: plan.platform, windowsNpx, killTree: env.killTree ?? createTreeKiller({ cwd: env.tempBase }), ...(env.npmChildEnv === undefined ? {} : { childEnv: env.npmChildEnv() }) } }
       : {}),
-    ...(hasUvxPrepare ? { uvx: { platform: plan.platform, killTree: env.killTree ?? createTreeKiller({ cwd: env.tempBase }), ...(env.uvChildEnv === undefined ? {} : { childEnv: env.uvChildEnv() }) } } : {}),
+    ...(hasUvxPrepare ? { uvx: { platform: plan.platform, killTree: env.killTree ?? createTreeKiller({ cwd: env.tempBase }), ...(env.uvChildEnv === undefined ? {} : { childEnv: env.uvChildEnv() }), ...(env.readUvConfig === undefined ? {} : { readUvConfig: env.readUvConfig }) } } : {}),
   });
   if (!prep.ok) return finalize({ planned: verified, status: "approval-required", code: prep.code, retryable: true });
   steps.push(...prep.steps);
@@ -342,6 +403,55 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
       ],
     });
 
+  // (v0.2.1 P0-3) Client 설정·tool config를 바꾸기 직전에 Journal을 남긴다. 남기지 못하면 아무것도 바꾸지 않는다.
+  const replaceSteps = plan.steps.filter((s): s is ConfigReplaceStep => s.kind === "config-replace");
+  if (plan.operation !== "health" && replaceSteps.length > 0) {
+    const projectKeyNow = plan.targets.some((t) => t.scope === "project") ? await projectKeyFor(request.projectRoot, fs) : null;
+    const jTargets: JournalTarget[] = [];
+    for (const step of replaceSteps) {
+      const t = plan.targets.find((x) => "config-" + x.client + "-" + x.scope === step.id)!;
+      const current = await readConfiguredEntry(t.client, t.scope, t.serverName, roots).catch(() => undefined);
+      let after: ServerEntry = step.value;
+      try {
+        if (usesToolConfig) after = materialize(step.scope)(step.value);
+      } catch {
+        // 실제 교체 단계에서 같은 이유로 실패한다(쓰기 0).
+      }
+      jTargets.push({
+        entryKey: t.entryKey,
+        client: t.client,
+        scope: t.scope,
+        file: t.file,
+        serverName: t.serverName,
+        projectKey: t.scope === "project" ? projectKeyNow : null,
+        beforeEntryDigest: current === undefined ? step.expectedEntryDigest : configEntryDigest(current),
+        afterEntryDigest: configEntryDigest(after),
+        afterTomlBlockDigest: t.client === "codex" ? tomlBlockDigest(t.serverName, after) : null,
+        before: usesToolConfig || current === undefined ? null : journalBeforeValue(t.client, current),
+      });
+    }
+    const journal: JournalV1 = {
+      schemaVersion: 1,
+      kind: JOURNAL_KIND,
+      transactionId: newTransactionId(),
+      operation: plan.operation,
+      toolId: plan.toolId,
+      planDigest: verified.planDigest,
+      stateDigest: stateRead.digest,
+      createdAt: env.now().toISOString(),
+      phase: "config-applying",
+      toolConfig: usesToolConfig,
+      targets: jTargets,
+    };
+    try {
+      await writeJournal(request.homeDir, journal);
+      jctx.journal = journal;
+    } catch {
+      skipRest(0);
+      return finalize({ planned: verified, status: "config-failed", code: "JOURNAL_WRITE_FAILED", steps, retryable: true, nextActions: ["작업 기록(Journal)을 남기지 못해 아무것도 바꾸지 않았습니다. ~/.openhub/state 쓰기 권한을 확인하세요"] });
+    }
+  }
+
   for (const step of plan.steps.filter((s): s is ToolConfigStep => s.kind === "tool-config")) {
     const loc = locations.get(step.scope);
     try {
@@ -389,12 +499,39 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
     applied.add(target.entryKey);
     outcome(step.id, { status: "done" });
   }
+  if (configSteps.length > 0) trace("config-replaced");
+
+  // (v0.2.1) Journal 단계를 갱신하지 못하면 중단 복구를 보장할 수 없다. 바꾼 설정을 되돌리고 멈춘다(조용히 넘어가지 않는다).
+  const journalPhaseFailed = async (stepId: string, at: "health" | "state-commit", healthResult: LifecycleResultV1["health"]) => {
+    outcome(stepId, { status: "failed", code: "JOURNAL_WRITE_FAILED", excerpt: "작업 기록(Journal) 단계를 갱신하지 못했습니다" });
+    skipRest(0);
+    if (!(await compensate())) return failedRestore();
+    return finalize({
+      planned: verified,
+      status: at === "health" ? "config-failed" : "state-commit-failed",
+      code: "JOURNAL_WRITE_FAILED",
+      steps,
+      applied,
+      restored,
+      health: healthResult,
+      compensated: true,
+      retryable: true,
+      nextActions: ["작업 기록(Journal)을 갱신하지 못해 바꾼 설정 파일을 원래 내용으로 되돌렸고 Version State는 바꾸지 않았습니다. ~/.openhub/state 쓰기 권한을 확인한 뒤 새 계획을 승인하세요"],
+    });
+  };
 
   // Health(기본 REQUIRED). 실행 후 실패는 우회할 수 없다.
   let health: LifecycleResultV1["health"] = null;
   const healthStep = plan.steps.find((s) => s.kind === "health");
   if (healthStep !== undefined) {
     trace("health");
+    if (jctx.journal !== null) {
+      try {
+        jctx.journal = await setJournalPhase(request.homeDir, jctx.journal, "health");
+      } catch {
+        return journalPhaseFailed(healthStep.id, "health", null);
+      }
+    }
     // (v0.2.1 P0-5) Manifest를 읽지 못하면(예외·Registry에 없음) Health 검사 종류를 알 수 없으므로 Health를 실행하지 않는다.
     // 명시적 실패(MANIFEST_UNAVAILABLE)이고, update·rollback·repair는 바꾼 설정을 보상한다(외부 변경은 덮어쓰지 않는다). Version State는 그대로다.
     let manifest: RegistryEntry["manifest"] | undefined;
@@ -439,6 +576,7 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
         ...(toolConfigFile === undefined ? {} : { toolConfigFile }),
         ...(env.healthSpawner === undefined ? {} : { spawner: env.healthSpawner }),
         ...(env.killTree === undefined ? {} : { killTree: env.killTree }),
+        ...(env.mcpSourceEnv === undefined ? {} : { sourceEnv: env.mcpSourceEnv }),
       });
       result = report.ok ? report.result : { status: "launch-failed", reason: "spawn-failed", toolCount: null, environmentUnverified: false, terminated: true, excerpt: report.message };
     } catch (error) {
@@ -474,6 +612,13 @@ export async function runLifecycleTransaction(planned: PlannedLifecycle, approva
 
   // Version State commit(Health 성공 또는 승인된 skip 뒤에만).
   trace("state-commit");
+  if (jctx.journal !== null) {
+    try {
+      jctx.journal = await setJournalPhase(request.homeDir, jctx.journal, "state-commit");
+    } catch {
+      return journalPhaseFailed(plan.steps.find((s) => s.kind === "state-commit")!.id, "state-commit", health);
+    }
+  }
   const now = env.now();
   if (plan.operation === "health") {
     const committed = await commitHealthOnly(plan, states, stateRead.state, stateRead.digest, health, request, fs, steps);

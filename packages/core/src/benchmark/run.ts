@@ -4,6 +4,7 @@ import { z } from "zod";
 import { containsAbsolutePath } from "../analyzer/index";
 import { INSTALL_BACKENDS } from "../installer/plan";
 import { createTreeKiller, healthArgv, runHandshake, type HandshakeMark, type HealthSpawner, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
+import { packageSourceRunBlock, type McpSourceEnv } from "../process/mcp-env";
 import { RECOMMEND_PLATFORMS, TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, redactSensitive } from "../recommendation/index";
 import { verifyApprovedBenchmarkPlan, type BenchmarkApproval, type BenchmarkGateFailure, type BenchmarkPlanResult, type VerifiedBenchmarkPlan } from "./plan";
 
@@ -85,11 +86,16 @@ export interface BenchmarkRunOptions {
   killTree?: TreeKiller;
   /** 단조 증가 시계(ms). 테스트는 주입한다. */
   clock?: () => number;
+  /** MCP 서버 환경의 원본(보통 process.env). 항상 mcpProcessEnv로 거른다(OS 기본·backend 설정·Manifest 필수 변수 이름). 없으면 빈 원본(부모 환경 상속 없음). */
+  sourceEnv?: McpSourceEnv;
   /** 실행 환경(호출 측이 process.arch·process.versions.node로 채운다). */
   host: { arch: string; nodeVersion: string };
 }
 
-export type BenchmarkRunResult = { ok: true; report: BenchmarkReportV1 } | (BenchmarkGateFailure & { ok: false }) | { ok: false; code: "VERIFIED_PLAN_CONSUMED" | "BENCHMARK_LAUNCHER_NOT_FOUND"; message: string };
+export type BenchmarkRunResult =
+  | { ok: true; report: BenchmarkReportV1 }
+  | (BenchmarkGateFailure & { ok: false })
+  | { ok: false; code: "VERIFIED_PLAN_CONSUMED" | "BENCHMARK_LAUNCHER_NOT_FOUND" | "BENCHMARK_PACKAGE_SOURCE_UNVERIFIED"; message: string };
 
 const consumed = new WeakSet<object>();
 const median = (xs: number[]) => {
@@ -127,9 +133,14 @@ async function executeVerifiedBenchmark(verified: VerifiedBenchmarkPlan, options
   const launch = plan.launch!;
   const argv = healthArgv({ id: "benchmark", kind: "health", executable: launch.executable, args: launch.args, envNames: launch.envNames, cwd: "isolated", timeouts: { startupMs: plan.timeouts.startupMs, handshakeMs: plan.timeouts.handshakeMs, totalMs: plan.timeouts.runTotalMs } }, plan.platform, options.windowsNpx ?? null);
   if (argv === null) return { ok: false, code: "BENCHMARK_LAUNCHER_NOT_FOUND", message: "Windows npx 실행 경로(node.exe·npx-cli.js)를 찾지 못했습니다" };
+  // v0.2.1(#46 리뷰): 원본 누락·오류, 넘길 수 없는 출처 설정, 승인한 출처 digest와 다름이면 한 번도 실행하지 않는다(spawn 0, fallback 없음).
+  const sourceBlock = packageSourceRunBlock(options.sourceEnv, launch.executable, launch.packageSource ?? null);
+  if (sourceBlock !== null) return { ok: false, code: "BENCHMARK_PACKAGE_SOURCE_UNVERIFIED", message: sourceBlock };
   const clock = options.clock ?? (() => performance.now());
   const realBase = await realpath(options.tempBase);
   const killTree = options.killTree ?? createTreeKiller({ cwd: realBase });
+  // 매 회 runHandshake가 spawn 직전에 승인 digest를 다시 확인한다(#46 리뷰). 위 확인은 한 번도 실행하지 않을 때 분명한 오류 code를 주기 위한 것이다.
+  const envInput = { backend: launch.executable, declaredNames: launch.envNames, approvedPackageSource: launch.packageSource ?? null };
   const started = clock();
   const runs: BenchmarkRun[] = [];
   let serverInfo: { name: string | null; version: string | null } | null = null;
@@ -150,12 +161,12 @@ async function executeVerifiedBenchmark(verified: VerifiedBenchmarkPlan, options
       if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) outcome = { status: "launch-failed", reason: "spawn-failed", terminated: true };
       else {
         marks.set("begin", clock());
-        outcome = await runHandshake(argv, realCwd, { startupMs: plan.timeouts.startupMs, handshakeMs: plan.timeouts.handshakeMs, totalMs: plan.timeouts.runTotalMs }, plan.platform, { ...(options.spawner === undefined ? {} : { spawner: options.spawner }), killTree }, {
+        outcome = await runHandshake(argv, realCwd, { startupMs: plan.timeouts.startupMs, handshakeMs: plan.timeouts.handshakeMs, totalMs: plan.timeouts.runTotalMs }, plan.platform, { ...(options.spawner === undefined ? {} : { spawner: options.spawner }), ...(options.sourceEnv === undefined ? {} : { sourceEnv: options.sourceEnv }), killTree }, {
           mark: (e) => void (marks.has(e) ? undefined : marks.set(e, clock())),
           serverInfo: (info) => {
             if (serverInfo === null) serverInfo = { name: clean(info.name), version: clean(info.version) };
           },
-        });
+        }, envInput);
       }
     } finally {
       await rm(cwd, { recursive: true, force: true }).catch(() => undefined);

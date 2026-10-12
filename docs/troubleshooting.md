@@ -22,6 +22,28 @@ It shows the Node.js version, which backends were found (node, npx, uvx, docker)
 | Windows SmartScreen warning | The installer is unsigned. Verify the file with `SHA256SUMS` from the release before running it. |
 | npx or API keys not found by the macOS app | GUI apps do not inherit shell environment variables. See [Supported platforms](supported-platforms.md). |
 | Electron binary missing in a source checkout | Run `node apps/desktop/node_modules/electron/install.js` once. |
+| `OPERATION_IN_PROGRESS` | Another OpenHub operation (CLI or Desktop) is changing tools, for example an update waiting for Health. Nothing was changed. Try again when it finishes. |
+
+## Interrupted update, rollback or repair (v0.2.1)
+
+If OpenHub was closed or killed while an update, rollback or repair was changing a client configuration, it keeps an operation record (journal) under `~/.openhub/state/journal`. Until it is recovered, the tool shows `interrupted-update` and update, rollback, Health and repair for it are blocked (`INTERRUPTED_OPERATION`).
+
+Recovery is **CLI only in v0.2.1**. The Desktop app has no recovery screen yet, but INSTALLED shows, for each interrupted tool, the exact command that applies right now (recover, `--discard`, or "cannot be recovered automatically" with the reason), how to install the CLI from the release (`npm install -g ./openhub-ai-<version>.tgz`, Node.js 24.15 or later) and how to confirm afterwards. Desktop users run the same commands in a terminal opened in the project folder:
+
+1. `openhub lifecycle status` shows, for each interrupted tool, one of:
+   - `복구 가능 … openhub lifecycle recover <tool>`: OpenHub's half-written entry can be put back to the previous entry.
+   - `복구 가능 … openhub lifecycle recover <tool> --discard`: the configuration is already consistent (the change never happened, was already undone, or the operation completed); only the record is removed.
+   - `자동 복구 불가 (<codes>)`: OpenHub will not change anything, for example because the entry was edited outside OpenHub (`EXTERNAL_CHANGE`). Check the file yourself; `openhub lifecycle recover <tool> --json` prints the details.
+2. Run the suggested `openhub lifecycle recover` command, read the plan, answer the extra items (user-scope files need their own approval) and type the tool ID. Nothing is written before that, and each approval works once.
+3. Check `openhub lifecycle status` again; the tool is `state-consistent`.
+
+Other results:
+
+| Message | Meaning |
+| --- | --- |
+| `JOURNAL_DAMAGED` | An operation record cannot be read. OpenHub plans nothing and never deletes it. Back up and move the file out of `~/.openhub/state/journal`, check the configuration with `openhub lifecycle status`, then try again. |
+| `cleanup-failed` | The configuration was recovered (or left unchanged), but the record could not be removed. Check write access to `~/.openhub/state`, then run `openhub lifecycle recover <tool> --discard`. |
+| warning `journal-cleanup-failed` after an update | The operation finished, but its record remains. `openhub lifecycle status` shows whether `--discard` is enough. |
 
 ## Reporting
 

@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  OPENHUB_CORE_VERSION,
   defaultHostEnvironment,
   entryKeyOf,
   lifecycleStatus,
@@ -16,6 +17,7 @@ import {
   probeBackends,
   projectKeyFor,
   readLifecycleState,
+  recoveryAvailability,
   requestLifecycleApproval,
   runLifecycleTransaction,
   toRecommendPlatform,
@@ -193,6 +195,7 @@ const opTitle = (op: LifecycleOperation) => tr(OPERATION_KEY[op]);
 /** Repair 대상 상태. config-drift는 Core가 "OpenHub 관리 경로만 다름"으로 받아 줄 때만 버튼이 생긴다. */
 const REPAIR_STATES = new Set<LifecycleToolStatus["state"]>(["tool-config-missing", "tool-config-drift", "tool-config-relocated", "client-launcher-invalid", "config-drift"]);
 const WARNING_KEY: Partial<Record<LifecycleToolStatus["state"], MessageKey>> = {
+  "interrupted-update": "life.warn.interrupted",
   "config-drift": "life.warn.configDrift",
   "missing-config": "life.warn.missingConfig",
   "tool-config-missing": "life.warn.toolConfigMissing",
@@ -345,6 +348,8 @@ function environment(deps: LifecycleDeps, entries: Awaited<ReturnType<typeof loa
     now: deps.now ?? (() => new Date()),
     // npx Prepare의 npm 자식 process에는 허용 목록 환경만 넘긴다(API key·token·클라우드 자격증명 제외).
     npmChildEnv: () => npmChildEnv(process.env),
+    // Health가 실행하는 MCP 서버에는 OS 기본·backend 설정·Manifest가 선언한 환경변수만 넘긴다(그 밖의 API key·token 제외).
+    mcpSourceEnv: () => process.env,
     uvChildEnv: () => uvChildEnv(process.env),
     windowsNpx:
       deps.windowsNpx ??
@@ -366,6 +371,21 @@ interface Snapshot {
   entries: Awaited<ReturnType<typeof loadRegistry>>["entries"];
   items: LifecycleEntryView[];
   raw: Map<string, LifecycleToolStatus>;
+}
+
+/**
+ * 중단된 작업(interrupted-update)의 안내(v0.2.1, 복구는 CLI 전용). Core recoveryAvailability(읽기만, 쓰기·실행·network 0)로
+ * 지금 가능한 방법(undo·discard·manual)을 고르고, 정확한 명령·CLI를 얻는 방법·복구 뒤 확인 방법을 붙인다.
+ */
+async function interruptedGuidance(toolId: string, projectRoot: string, deps: LifecycleDeps): Promise<string> {
+  const r = await recoveryAvailability({ toolId, projectRoot, homeDir: deps.homeDir, ...(deps.configFs === undefined ? {} : { fs: deps.configFs }) }).catch(() => null);
+  const how =
+    r === null || r.available === "manual"
+      ? tr("life.recover.manual", { toolId, reasons: r === null ? "-" : r.blockers.join(", ") || "-" })
+      : r.available === "discard"
+        ? tr("life.recover.discard", { toolId })
+        : tr("life.recover.undo", { toolId });
+  return tr("life.recover.lead") + " " + how + " " + tr("life.recover.cli", { version: OPENHUB_CORE_VERSION });
 }
 
 async function snapshot(session: LifecycleSession, deps: LifecycleDeps): Promise<Snapshot | LifecycleStatusResponse> {
@@ -395,6 +415,8 @@ async function snapshot(session: LifecycleSession, deps: LifecycleDeps): Promise
     // Repair 버튼: 오류 상태만 보고 켜지 않는다. Core가 지금 ready Repair Plan을 만들 수 있을 때만(파일 읽기·PATH 탐색만, 실행·쓰기·network 0).
     let canRepair = false;
     let warning = warningFor(item.state);
+    // v0.2.1: 중단된 작업은 Desktop에서 복구하지 않는다(CLI 전용). 지금 가능한 복구 방법과 정확한 명령·CLI 설치·확인 방법을 알린다(읽기만).
+    if (item.state === "interrupted-update" && item.toolId !== null) warning = await interruptedGuidance(item.toolId, dir, deps);
     if (REPAIR_STATES.has(item.state) && item.toolId !== null && (item.scope === "project" || includeUser)) {
       const request = repairRequest(item.toolId, item, dir, deps, platform, includeUser);
       const built = await planLifecycleRequest(request, env).catch(() => null);
@@ -510,7 +532,7 @@ export async function planForRenderer(operation: LifecycleOperation, session: Li
 }
 
 /** 실패 코드별 다음 행동(고정 문장, 카탈로그 guide.<CODE>). 코드는 Core LifecycleResult 계약 그대로다. */
-const GUIDED_CODES = ["PLAN_STALE", "CLIENT_LAUNCHER_UNAVAILABLE", "TOOL_CONFIG_DRIFT", "TOOL_CONFIG_STALE", "CONFIG_DRIFT", "CONFIG_RESTORE_FAILED", "COMPENSATION_INCOMPLETE", "MANUAL_SETUP_REQUIRED"] as const;
+const GUIDED_CODES = ["PLAN_STALE", "CLIENT_LAUNCHER_UNAVAILABLE", "TOOL_CONFIG_DRIFT", "TOOL_CONFIG_STALE", "CONFIG_DRIFT", "CONFIG_RESTORE_FAILED", "COMPENSATION_INCOMPLETE", "MANUAL_SETUP_REQUIRED", "package-source-unverified"] as const;
 const guidance = (code: string | undefined): string | undefined => ((GUIDED_CODES as readonly string[]).includes(code ?? "") ? tr(("guide." + code) as MessageKey) : undefined);
 const SUCCEEDED = new Set<LifecycleResultV1["status"]>(["updated", "rolled-back", "health-checked", "repaired", "up-to-date"]);
 

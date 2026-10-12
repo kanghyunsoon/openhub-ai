@@ -1,5 +1,6 @@
 import type { RecommendPlatform, RecommendationReport } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
+import { UVX_SOURCE_BUILD_DISABLED_TEXT, type UvSourceSettings } from "../process/uvx-prepare";
 import { BACKEND_ADAPTERS, type BackendLaunch } from "./backends";
 import { INSTALL_BACKENDS, assembleInstallPlan, registryDigestExcluding, type InstallBackend, type PlanAssemblyInput, type PlanBlocker, type PlanTargetInput, type PlannedInstall, type ProbeSnapshot } from "./plan";
 import { installCandidates } from "./router";
@@ -29,6 +30,8 @@ export interface PlanBuildInput {
   toolConfigs?: PlanAssemblyInput["toolConfigs"];
   /** v0.2.1 uvx Prepare: 사용자 지정 패키지 index fingerprint(uvIndexFingerprint). null·생략이면 기본 index. */
   uvIndex?: string | null;
+  /** v0.2.1 uvx Prepare: 환경변수와 uv.toml의 패키지 출처 설정(uvSourceSettings). 있으면 uvIndex 대신 fingerprint를 쓴다. */
+  uvSource?: UvSourceSettings;
 }
 
 export type PlanBuildResult =
@@ -84,6 +87,10 @@ export function buildInstallPlan(input: PlanBuildInput): PlanBuildResult {
     );
   }
 
+  const uvIndex = input.uvSource !== undefined ? input.uvSource.fingerprint : (input.uvIndex ?? null);
+  const uvxSteps = (chosen?.launchable.preparation ?? []).filter((s) => s.executable === "uvx");
+  blockers.push(...uvSourceBlockers(uvxSteps, input.uvSource));
+
   const planned = assembleInstallPlan({
     toolId: input.toolId,
     manifest,
@@ -95,10 +102,23 @@ export function buildInstallPlan(input: PlanBuildInput): PlanBuildResult {
         : { adapter: chosen.launchable.backend, selection: chosen.selection, skipped, probe: { ...(input.probes[chosen.launchable.backend] as ProbeSnapshot) } },
     artifact: chosen?.launchable.artifact ?? null,
     launch: chosen?.launchable.launch ?? null,
-    preparation: (chosen?.launchable.preparation ?? []).map((s) => (s.executable === "uvx" && input.uvIndex != null ? { ...s, index: { custom: true as const, digest: input.uvIndex } } : s)),
+    preparation: (chosen?.launchable.preparation ?? []).map((s) => (s.executable === "uvx" && uvIndex !== null ? { ...s, index: { custom: true as const, digest: uvIndex } } : s)),
     targets: [...input.targets],
     blockers,
     ...(input.toolConfigs === undefined ? {} : { toolConfigs: input.toolConfigs }),
   });
   return { ok: true, planned };
+}
+
+/**
+ * uvx 준비 단계의 패키지 출처 차단(v0.2.1, InstallPlan·LifecyclePlan 공통).
+ * - uv 설정 파일을 확인하지 못하면 준비하지 않는다(UVX_CONFIG_UNSUPPORTED).
+ * - 검토된 소스 빌드(sourceBuild 단계)는 일시 차단한다(UVX_SOURCE_BUILD_DISABLED, #45 리뷰). docs/specs/uvx-prepare.md 참고.
+ */
+export function uvSourceBlockers(uvxSteps: readonly { sourceBuild?: readonly unknown[] | undefined }[], source: UvSourceSettings | undefined): PlanBlocker[] {
+  if (uvxSteps.length === 0) return [];
+  const out: PlanBlocker[] = [];
+  if (uvxSteps.some((s) => s.sourceBuild !== undefined)) out.push({ code: "UVX_SOURCE_BUILD_DISABLED", message: UVX_SOURCE_BUILD_DISABLED_TEXT });
+  if (source !== undefined && source.unsupported !== null) out.push({ code: "UVX_CONFIG_UNSUPPORTED", message: source.unsupported + ". uv 설정 파일을 고친 뒤 새 계획을 만드세요" });
+  return out;
 }

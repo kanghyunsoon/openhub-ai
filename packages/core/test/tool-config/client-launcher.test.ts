@@ -72,6 +72,8 @@ function lifecycleEnv(c: Ctx, over: Partial<LifecycleEnvironment> = {}): Lifecyc
     probe: c.h.env.probe,
     tempBase: os.tmpdir(),
     now: () => new Date("2026-10-10T00:00:00.000Z"),
+    // 명시적인 빈 원본(#46 리뷰): 원본이 없으면 npx·uvx Health·Benchmark가 막힌다.
+    mcpSourceEnv: () => ({}),
     spawner: fakeNpmSpawner({ cacheRoot: path.join(c.h.base, "npm-cache") }).spawner,
     windowsNpx: async () => c.current.launcher,
     launcherCheckFs: c.win.fs,
@@ -401,7 +403,7 @@ describe("v0.2.0 launcher 승인 경계: 검증된 실행 경로 없이는 Clien
     const request = { ...h.request("memory-mcp", CLIENTS), platform: "windows" as const };
     const planned = await plannedOf(h, request);
     await recordInstallInState(planned, await runInstallTransaction(planned, await approveAll(planned), request, h.env), { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() });
-    const memEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), runHealth: async () => healthy };
+    const memEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), runHealth: async () => healthy, mcpSourceEnv: () => ({}) };
     const mem = await planLifecycleRequest({ operation: "health", toolId: "memory-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, platform: "windows", includeUser: false }, memEnv);
     expect(mem.ok && mem.planned.plan.status).toBe("ready");
     expect(mem.ok && mem.planned.plan.targets.every((t) => t.launcher === undefined)).toBe(true);

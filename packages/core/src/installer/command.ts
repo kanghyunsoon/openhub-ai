@@ -105,16 +105,20 @@ export function npxArtifact(args: readonly string[]): ArtifactRef | null {
   return null;
 }
 
-/** uvx args에서 패키지 token: --from <pkg>가 있으면 그것, 없으면 첫 비플래그 token. 다른 플래그가 앞에 있으면 모호하다. */
+/**
+ * uvx args에서 패키지 token: --from <pkg>가 있으면 그것, 없으면 첫 비플래그 token. 다른 플래그가 앞에 있으면 모호하다.
+ * 예외: OpenHub가 고정 버전 wheel-only 도구의 Client 실행 인자 앞에 붙이는 --no-build(v0.2.1)는 패키지 해석을 바꾸지 않는다.
+ */
 export function uvxArtifact(args: readonly string[]): ArtifactRef | null {
+  const plain = (a: string) => !a.startsWith("-") || a === "--no-build";
   const from = args.indexOf("--from");
   if (from !== -1) {
     const spec = args[from + 1];
-    return spec === undefined || spec.startsWith("-") ? null : { spec, unambiguous: args.slice(0, from).every((a) => !a.startsWith("-")) };
+    return spec === undefined || spec.startsWith("-") ? null : { spec, unambiguous: args.slice(0, from).every(plain) };
   }
   for (const [i, arg] of args.entries()) {
     if (arg.startsWith("-")) continue;
-    return { spec: arg, unambiguous: args.slice(0, i).length === 0 };
+    return { spec: arg, unambiguous: args.slice(0, i).every((a) => a === "--no-build") };
   }
   return null;
 }

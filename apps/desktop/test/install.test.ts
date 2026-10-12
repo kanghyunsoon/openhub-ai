@@ -4,7 +4,6 @@ import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { floatingPostgresRegistry } from "./fixture-registry";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   FLOATING_ARTIFACT_NOTICE,
@@ -27,8 +26,7 @@ import { PROJECT_RECOMMEND_CHANNEL, RecommendSession, registerProjectRecommend }
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const SEED_SNAPSHOT = path.join(ROOT, "packages/core/test/fixtures/recommendation/metadata.seed-synthetic.json");
-// v0.2.1 #39: postgres-mcp만 버전 없는 형식으로 둔 Registry 사본(Desktop update 흐름 확인용, fixture-registry.ts 참고).
-const REGISTRY = await floatingPostgresRegistry(ROOT);
+const REGISTRY = path.join(ROOT, "registry");
 const read = (rel: string) => readFile(path.resolve(import.meta.dirname, "..", rel), "utf8");
 const scratch = await mkdtemp(path.join(tmpdir(), "openhub-desktop-install-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));
