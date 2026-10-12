@@ -80,6 +80,8 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 실제 npx Lifecycle
         windowsNpx: async () => windowsNpx,
         killTree: createTreeKiller({ cwd: os.tmpdir() }),
         npmChildEnv: () => npmChildEnv(process.env),
+        // CLI·Desktop과 같이 Health의 MCP 서버 환경을 허용 목록으로 줄인다(v0.2.1).
+        mcpSourceEnv: () => process.env,
       };
       const op = async (operation: LifecycleRequest["operation"], extra: Partial<LifecycleRequest> = {}) => {
         const req: LifecycleRequest = { operation, toolId: "memory-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, platform, includeUser: false, targets, ...extra };

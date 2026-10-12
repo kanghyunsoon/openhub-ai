@@ -8,7 +8,7 @@ import type {
   PlannedAdopt,
   PlannedBenchmark,
 } from "@openhub/core";
-import { blockerSentenceEn } from "./core-en";
+import { blockerSentenceEn, healthEnvNoticeEn } from "./core-en";
 
 /**
  * Adopt·Benchmark 영어 표시(Desktop English 모드 전용, v0.2.0 P0-3 PR B 보완). 실행 승인 화면이므로 Core 한국어 Preview를 쓰지 않는다.
@@ -129,6 +129,7 @@ export function benchmarkPreviewEn(planned: PlannedBenchmark): string[] {
   );
   lines.push("Each run starts the MCP server (third-party code) and measures only " + p.protocol.methods.filter((m) => m !== "notifications/initialized").join(" and ") + " response times. No MCP tool is called (tools/call 0).");
   if (p.launch !== null && p.launch.envNames.length > 0) lines.push("Environment variables passed by name only (values are not read or shown): " + p.launch.envNames.join(", "));
+  if (p.launch !== null) lines.push(healthEnvNoticeEn(p.launch.envNames));
   lines.push("This is not a Health Check: Version State and the recorded Health status do not change. A failed run is reported, not hidden.");
   lines.push("Result: median, min, max and failure count (no p95, peak RSS not measured). Meaningful only on this machine and not saved.");
   for (const b of p.blockers) lines.push(blockerLine(BENCHMARK_BLOCKER_EN, b));

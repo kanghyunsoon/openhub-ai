@@ -15,7 +15,9 @@ import { TOOL_CONFIG_PLACEHOLDER, substituteToolConfig } from "../tool-config/in
  * - handshake: initialize → notifications/initialized → tools/list → stdin 닫기 → 종료. Client 앱은 실행하지 않는다.
  * - 한도: startup 20초(initialize 응답), handshake 10초(tools/list 응답), 전체 45초. stdout·stderr 각 64KB 보관, 1MB 초과 시 kill.
  * - 종료: POSIX는 process group kill, Windows는 taskkill.exe /T /F /PID(shell:false). 종료 실패도 Health 실패다.
- * - cwd는 OpenHub가 만든 격리 임시 디렉터리. spawn 옵션에 env key가 없어 OS 기본으로 상속된다. process.env를 읽지 않는다.
+ * - cwd는 OpenHub가 만든 격리 임시 디렉터리. process.env를 읽지 않는다.
+ * - 환경(v0.2.1): 호출 측이 childEnv(mcpServerChildEnv: OS 기본·backend 설정·Manifest 선언 이름만)를 넘기면 그것만 준다.
+ *   CLI·Desktop은 항상 넘긴다. 넘기지 않으면(테스트·내장 호출) Node 기본대로 부모 환경을 상속한다.
  *   Windows npx 실행 경로(node.exe·npx-cli.js)는 호출 측이 probe 단계에서 찾아 넘긴다(Health 안에서 PATH를 읽지 않는다).
  * - 결과에는 상태·사유·tool 개수·redact한 1KB 이하 출력만 남는다. 실행 경로·cwd·env 값은 남기지 않는다.
  */
@@ -68,11 +70,13 @@ export interface HealthSpawnOptions {
   readonly stdio: readonly ["pipe", "pipe", "pipe"];
   /** POSIX에서 process group kill을 위해 새 group으로 시작한다. */
   readonly detached: boolean;
+  /** 자식 환경(허용 목록). 없으면 부모 환경 상속. */
+  readonly env?: Record<string, string>;
 }
 export type HealthSpawner = (executable: string, args: readonly string[], options: HealthSpawnOptions) => HealthChild;
 
 export const nodeHealthSpawner: HealthSpawner = (executable, args, options) =>
-  spawn(executable, [...args], { shell: false, cwd: options.cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], detached: options.detached });
+  spawn(executable, [...args], { shell: false, cwd: options.cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], detached: options.detached, ...(options.env === undefined ? {} : { env: options.env }) });
 
 /** process tree 종료. 성공(이미 없음 포함)이면 true. */
 export type TreeKiller = (pid: number, platform: RecommendPlatform) => Promise<boolean>;
@@ -158,6 +162,8 @@ export interface HealthRunOptions {
   toolConfigFile?: string;
   spawner?: HealthSpawner;
   killTree?: TreeKiller;
+  /** MCP 서버 process 환경(mcpServerChildEnv 결과). 없으면 부모 환경 상속(CLI·Desktop은 항상 넘긴다). */
+  childEnv?: Record<string, string>;
   /**
    * 격리 임시 디렉터리 기준. 호출 측이 Health 전에 정한다(os.tmpdir()는 Windows에서 TEMP 환경변수를 읽으므로
    * Health 안에서 부르지 않는다).
@@ -347,7 +353,7 @@ function handshake(argv: string[], cwd: string, timeouts: HealthStep["timeouts"]
     };
 
     try {
-      child = spawner(argv[0]!, argv.slice(1), { shell: false, cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], detached: platform !== "windows" });
+      child = spawner(argv[0]!, argv.slice(1), { shell: false, cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], detached: platform !== "windows", ...(options.childEnv === undefined ? {} : { env: options.childEnv }) });
     } catch {
       resolve({ status: "launch-failed", reason: "spawn-failed", toolCount: null, terminated: true, excerpt: null });
       return;

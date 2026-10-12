@@ -20,6 +20,7 @@ import type { RegistryEntry } from "../registry/index";
 import { PROJECT_KEY_PATTERN, artifactIdentitySchema, entryKeyOf, type ToolState } from "../lifecycle/state";
 import { TOOL_CONFIG_PLACEHOLDER } from "../tool-config/index";
 import { configEntryDigest } from "../lifecycle/status";
+import { healthEnvNotice } from "../lifecycle/preview";
 import { projectKeyFor, readLifecycleState, type StateErrorCode } from "../lifecycle/store";
 
 /**
@@ -266,6 +267,7 @@ export function formatBenchmarkPlanPreview(planned: PlannedBenchmark): string[] 
   if (p.launch !== null) lines.push("실행: " + [p.launch.executable, ...p.launch.args].join(" ") + " (격리 임시 디렉터리, shell 없음)");
   lines.push("횟수: 준비 " + String(p.runs.warmup) + " + 측정 " + String(p.runs.measured) + " · 제한: 시작 20초 · handshake 10초 · 회당 45초 · 전체 300초");
   lines.push(BENCHMARK_NO_TOOL_CALL_NOTICE);
+  if (p.launch !== null) lines.push(healthEnvNotice(p.launch.envNames));
   lines.push("결과: median·min·max·실패 수(p95 없음, peak RSS 미측정). 이 PC에서만 의미가 있고 저장하지 않습니다.");
   for (const b of p.blockers) lines.push("차단: " + b.code + " — " + b.message);
   if (p.status === "ready") {

@@ -83,6 +83,7 @@ export function formatLifecyclePlanPreview(planned: PlannedLifecycle): string[] 
     const t = plan.healthPolicy.timeouts;
     lines.push("  필수 — MCP 서버를 격리 임시 디렉터리에서 실행해 initialize·tools/list 응답을 확인합니다(Client 앱은 실행하지 않음)");
     lines.push("  제한 시간 startup " + t.startupMs / 1000 + "초 · handshake " + t.handshakeMs / 1000 + "초 · 전체 " + t.totalMs / 1000 + "초");
+    lines.push("  " + healthEnvNotice(plan.requiredEnv.map((e) => e.name)));
     if (plan.operation !== "health") lines.push("  Health가 실패하면 설정을 원래 내용으로 되돌리고 Version State를 바꾸지 않습니다");
   } else {
     lines.push("  생략(사전 승인) — 적용 후 " + HEALTH_NOT_VERIFIED_LINES.join(" / "));
@@ -102,6 +103,12 @@ export function formatLifecyclePlanPreview(planned: PlannedLifecycle): string[] 
   for (const r of plan.approvalRequirements) lines.push("  - [" + r + "] " + LIFECYCLE_APPROVAL_MESSAGES[r]);
   lines.push("", "Plan digest  " + planDigest);
   return lines;
+}
+
+/** Health가 MCP 서버 process에 넘기는 환경(mcpServerChildEnv)의 승인 화면 설명. 이름만 쓰고 값은 쓰지 않는다. */
+export function healthEnvNotice(names: readonly string[]): string {
+  const passed = names.length === 0 ? "OS 실행에 필요한 변수(PATH·HOME·TEMP 등)만 넘깁니다(Manifest가 선언한 환경변수 없음)" : "OS 실행에 필요한 변수(PATH·HOME·TEMP 등)와 Manifest가 선언한 " + names.join(", ") + "(값이 설정되어 있을 때)만 넘깁니다";
+  return "MCP 서버 process에는 " + passed + ". 그 밖의 API 키·token·자격증명 환경변수는 넘기지 않습니다";
 }
 
 export function formatLifecycleResult(result: LifecycleResultV1): string[] {

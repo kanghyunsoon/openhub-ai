@@ -330,6 +330,11 @@ export function installPreviewEn(planned: PlannedInstall): string[] {
 }
 
 const OPERATION_EN = { update: "update", rollback: "rollback", health: "Health Check", repair: "repair" } as const;
+/** Health 환경 설명(core healthEnvNotice와 같은 내용, 영어). */
+export function healthEnvNoticeEn(names: readonly string[]): string {
+  const passed = names.length === 0 ? "variables the OS needs to run it (PATH, HOME, TEMP and similar); the Manifest declares none" : "variables the OS needs to run it (PATH, HOME, TEMP and similar) and the variables the Manifest declares (" + names.join(", ") + ", when set)";
+  return "The MCP server process only receives " + passed + ". Other API keys, tokens and credential variables are not passed.";
+}
 const HEALTH_NOT_VERIFIED_EN = ["Health: Not verified", "Reason: Required environment is unchecked"];
 
 /** LifecyclePlan Preview(영어). Core formatLifecyclePlanPreview와 같은 순서·같은 정보. */
@@ -379,6 +384,7 @@ export function lifecyclePreviewEn(planned: PlannedLifecycle): string[] {
     const t = plan.healthPolicy.timeouts;
     lines.push("  Required — runs the MCP server in an isolated temporary directory and checks the initialize and tools/list responses (the client app is not started)");
     lines.push("  Time limits: startup " + t.startupMs / 1000 + " s · handshake " + t.handshakeMs / 1000 + " s · total " + t.totalMs / 1000 + " s");
+    lines.push("  " + healthEnvNoticeEn(plan.requiredEnv.map((e) => e.name)));
     if (plan.operation !== "health") lines.push("  If Health fails, the configuration is restored and Version State is not changed");
   } else lines.push("  Skipped (approved in advance) — after applying: " + HEALTH_NOT_VERIFIED_EN.join(" / "));
   lines.push("", "Environment variables");

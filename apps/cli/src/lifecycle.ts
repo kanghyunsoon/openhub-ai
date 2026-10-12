@@ -120,6 +120,8 @@ function environment(io: LifecycleCommandIO, entries: Awaited<ReturnType<typeof 
     now: io.now ?? (() => new Date()),
     // npx Prepare의 npm 자식 process에는 허용 목록 환경만 넘긴다(API key·token·클라우드 자격증명 제외).
     npmChildEnv: () => npmChildEnv(process.env),
+    // Health가 실행하는 MCP 서버에는 OS 기본·backend 설정·Manifest가 선언한 환경변수만 넘긴다(그 밖의 API key·token 제외).
+    mcpSourceEnv: () => process.env,
     windowsNpx: async () => {
       const host = { ...defaultHostEnvironment(), ...(io.hostEnvironment ?? {}) };
       return locateWindowsNpxLauncher({ pathEnv: host.pathEnv, fs: host.fs });

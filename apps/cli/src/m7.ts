@@ -349,6 +349,7 @@ export async function runBenchmarkCommand(argv: readonly string[], io: M7Command
     tempBase: io.tempBase ?? os.tmpdir(),
     windowsNpx,
     host: { arch: process.arch, nodeVersion: process.versions.node },
+    sourceEnv: () => process.env,
     ...(io.healthSpawner === undefined ? {} : { spawner: io.healthSpawner }),
     ...(io.killTree === undefined ? {} : { killTree: io.killTree }),
   });

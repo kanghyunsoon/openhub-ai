@@ -46,6 +46,8 @@ interface RunOptions {
   health?: HealthCheckStatus;
   memoryVersion?: string;
   platform?: string;
+  /** Health 실행기가 받은 옵션(환경 허용 목록 확인용). */
+  onHealth?: (options: Parameters<NonNullable<LifecycleEnvironment["runHealth"]>>[1]) => void;
 }
 
 async function session(): Promise<Session> {
@@ -79,8 +81,9 @@ async function session(): Promise<Session> {
         writeFile: async (f, d) => (s.writes.push(path.relative(base, f).replace(/\\/gu, "/")), nodeConfigFs.writeFile(f, d)),
         rename: async (a, b) => (s.writes.push("rename:" + path.relative(base, b).replace(/\\/gu, "/")), nodeConfigFs.rename(a, b)),
       };
-      const runHealth: NonNullable<LifecycleEnvironment["runHealth"]> = async (verified) => {
+      const runHealth: NonNullable<LifecycleEnvironment["runHealth"]> = async (verified, options) => {
         s.healthRuns += 1;
+        opts.onHealth?.(options);
         const status = opts.health ?? "healthy";
         return { ok: true, result: { status, reason: status === "healthy" ? null : "tools-list-error", toolCount: status === "healthy" ? 4 : null, environmentUnverified: verified.plan.requiredEnv.some((e) => e.required), terminated: true, excerpt: null } };
       };
@@ -254,6 +257,21 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 CLI lifecycle", () => {
     expect(after.lastHealth).toEqual({ status: "healthy", environmentUnverified: false, checkedAt: "2026-10-07T09:00:00.000Z" });
     expect({ ...after, lastHealth: null }).toEqual({ ...before, lastHealth: null });
     expect((await readFile(path.join(s.dirs.project, ".mcp.json"))).equals(config)).toBe(true);
+  });
+
+  it("v0.2.1 lifecycle health: MCP 서버에 넘기는 환경은 허용 목록이다(부모의 합성 API key·token 0개, PATH는 있음)", async () => {
+    const s = await installed();
+    const synthetic = { OPENAI_API_KEY: "sk-synthetic-cli-0001", ANTHROPIC_API_KEY: "sk-ant-synthetic-cli", GITHUB_TOKEN: "ghp_synthetic_cli_0002", AWS_SECRET_ACCESS_KEY: "synthetic-cli-aws", NPM_TOKEN: "npm_synthetic_cli" };
+    for (const [k, v] of Object.entries(synthetic)) vi.stubEnv(k, v);
+    let seen: Record<string, string> | undefined;
+    expect(await s.run(["lifecycle", "health", "memory-mcp"], { onHealth: (o) => (seen = o.childEnv) })).toBe(0);
+    expect(seen).toBeDefined();
+    for (const [k, v] of Object.entries(synthetic)) {
+      expect(seen, k).not.toHaveProperty(k);
+      expect(JSON.stringify(seen)).not.toContain(v);
+    }
+    expect(Object.keys(seen!).some((k) => k.toUpperCase() === "PATH")).toBe(true);
+    expect(lastStdout.join("\n")).toContain("그 밖의 API 키·token·자격증명 환경변수는 넘기지 않습니다");
   });
 
   it("AC-045-09 모든 출력에 env 값·절대 경로가 0건이다", async () => {

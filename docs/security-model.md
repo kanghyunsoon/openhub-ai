@@ -22,6 +22,25 @@ OpenHub runs third-party tools on your machine, so it is built around a few fixe
 - Config edits change only the target entry, keep unknown fields, write atomically and are reverted if a later step fails. `~/.claude.json` is never written.
 - Environment variables are handled by name only. OpenHub does not read or check their values and never stores tokens, credentials or credential-bearing URLs in plans, results, logs, caches or Version State.
 - Outputs do not contain absolute paths of your machine.
++
+## What environment an MCP server gets
+
+OpenHub starts third-party code in three places. Each one receives only an allowlisted environment, so API keys and tokens that happen to be in your shell do not reach it.
+
+| Who starts the process | When | Environment it gets |
+| --- | --- | --- |
+| OpenHub (npx/uvx Prepare) | install, update, rollback, after approval | OS and path variables, proxy and CA settings, and the npm or uv settings the download needs (registry/index location and their credentials, if you configured them). No API keys, GitHub tokens, cloud credentials or database URLs. |
+| OpenHub (Health Check, Benchmark) | after approval | OS and path variables (`PATH`, `HOME`, `TEMP`, locale, XDG), proxy and CA settings, the backend's own settings (npm cache and registry, uv cache, Python and index, Docker host and context — never their credentials), and **only the variables the tool's Manifest declares** (for example `DATABASE_URI` for postgres-mcp, `GITHUB_PERSONAL_ACCESS_TOKEN` for github-mcp-server, `KUBECONFIG` for kubernetes-mcp-server). The approval screen lists those names. Everything else is dropped: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `GH_TOKEN`, `AWS_*`, `AZURE_*`, `GOOGLE_APPLICATION_CREDENTIALS`, `NPM_TOKEN`, npm and uv index credentials, undeclared database URLs, `NODE_OPTIONS`, `PYTHONPATH`. |
+| Your client (Claude Code, Codex, Cursor) | every time the client starts the server | Decided by the client, not by OpenHub. OpenHub writes the command, arguments and environment variable *names* to the client configuration; it cannot limit what else the client passes. Check your client's documentation. |
+
+Notes:
+
+- The values of declared variables are passed as they are in your environment. OpenHub does not read, check or store them.
+- Benchmark passes only the Manifest's **required** variables (optional ones such as `KUBECONFIG` are not part of the benchmark plan).
+- A proxy URL that contains a user name and password is passed, because the server may need the network; avoid putting credentials in proxy URLs if that matters to you.
+- `docker pull` and the backend version probes (`docker --version`, `npx --version`, `uvx --version`) run your own installed tools, not third-party code, and keep the normal environment.
+- Pinokio scripts run inside Pinokio's own process, not as a child of OpenHub.
+- Health does not pass npm or uv registry credentials. A tool that still downloads packages during Health (a floating version without Prepare) from a private registry can therefore fail Health; exact-version tools are prepared before Health and do not download then.
 
 ## Untrusted data
 

@@ -187,6 +187,7 @@ export async function benchmarkRunForRenderer(deps: AdoptDeps, id: unknown): Pro
     tempBase: deps.tempBase ?? os.tmpdir(),
     windowsNpx,
     host: { arch: process.arch, nodeVersion: process.versions.node },
+    sourceEnv: () => process.env,
     ...(deps.healthSpawner === undefined ? {} : { spawner: deps.healthSpawner }),
     ...(deps.killTree === undefined ? {} : { killTree: deps.killTree }),
   });
