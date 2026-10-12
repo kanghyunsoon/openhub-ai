@@ -9,6 +9,7 @@ import {
   isCodeInjectionEnvName,
   mcpServerChildEnv,
   nodeHealthSpawner,
+  packageSourceDigest,
   planLifecycleRequest,
   recordInstallInState,
   requestLifecycleApproval,
@@ -176,7 +177,7 @@ describe("실제 자식 process가 받는 환경", () => {
     // uvx backend: uv index 인증 쌍을 빼야 실행된다(있으면 아래 테스트처럼 spawn 0). 나머지 합성 key 20종은 그대로 둔다.
     const source = () => ({ ...parentEnvWithoutUvIndexAuth(), LD_PRELOAD: "/synthetic/evil.so", DYLD_INSERT_LIBRARIES: "/synthetic/evil.dylib", NODE_PATH: "/synthetic/node" });
     const declaredNames = ["DATABASE_URI", "NODE_OPTIONS", "PYTHONPATH", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "NODE_PATH"];
-    const outcome = await runHandshake([process.execPath, script], scratch, LIMITS, HOST, { killTree: createTreeKiller({ cwd: scratch }), sourceEnv: source }, { mark: () => undefined }, { backend: "uvx", declaredNames });
+    const outcome = await runHandshake([process.execPath, script], scratch, LIMITS, HOST, { killTree: createTreeKiller({ cwd: scratch }), sourceEnv: source }, { mark: () => undefined }, { backend: "uvx", declaredNames, approvedPackageSource: packageSourceDigest(source(), "uvx") });
     expect(outcome.status).toBe("healthy");
     const seen = JSON.parse(await readFile(out, "utf8")) as Record<string, string>;
     noSynthetic(seen);
@@ -190,7 +191,7 @@ describe("실제 자식 process가 받는 환경", () => {
     const script = await envRecordingServer(out);
     const spawned: unknown[] = [];
     const spawner = (exe: string, args: readonly string[], options: HealthSpawnOptions) => (spawned.push(exe), nodeHealthSpawner(exe, args, options));
-    const outcome = await runHandshake([process.execPath, script], scratch, LIMITS, HOST, { killTree: createTreeKiller({ cwd: scratch }), sourceEnv: parentEnv, spawner }, { mark: () => undefined }, { backend: "uvx", declaredNames: ["DATABASE_URI"] });
+    const outcome = await runHandshake([process.execPath, script], scratch, LIMITS, HOST, { killTree: createTreeKiller({ cwd: scratch }), sourceEnv: parentEnv, spawner }, { mark: () => undefined }, { backend: "uvx", declaredNames: ["DATABASE_URI"], approvedPackageSource: null });
     expect(outcome).toMatchObject({ status: "launch-failed", reason: "package-source-unverified" });
     expect(spawned).toEqual([]);
     expect(outcome.excerpt).toContain("UV_INDEX_CORP_PASSWORD");
@@ -213,7 +214,7 @@ describe("실제 자식 process가 받는 환경", () => {
         const spawned: string[] = [];
         const spawner = (exe: string, args: readonly string[], options: HealthSpawnOptions) => (spawned.push(exe), nodeHealthSpawner(exe, args, options));
         const outcome = await withParentSecrets(() =>
-          runHandshake([process.execPath, script], scratch, LIMITS, HOST, { killTree: createTreeKiller({ cwd: scratch }), spawner, ...(sourceEnv === undefined ? {} : { sourceEnv }) }, { mark: () => undefined }, { backend, declaredNames: ["OPENAI_API_KEY"] }),
+          runHandshake([process.execPath, script], scratch, LIMITS, HOST, { killTree: createTreeKiller({ cwd: scratch }), spawner, ...(sourceEnv === undefined ? {} : { sourceEnv }) }, { mark: () => undefined }, { backend, declaredNames: ["OPENAI_API_KEY"], approvedPackageSource: null }),
         );
         if (backend === "npx" && label !== "빈 원본") {
           expect(outcome).toMatchObject({ status: "launch-failed", reason: "package-source-unverified" });

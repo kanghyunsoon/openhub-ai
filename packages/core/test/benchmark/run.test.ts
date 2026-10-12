@@ -100,9 +100,9 @@ async function drive<T>(p: Promise<T>): Promise<T> {
   }
   return p;
 }
-async function setup(behaviours: (i: number) => Behaviour = () => ({}), over: Partial<BenchmarkRunOptions> = {}) {
+async function setup(behaviours: (i: number) => Behaviour = () => ({}), over: Partial<BenchmarkRunOptions> = {}, planSource: () => Record<string, string> = () => ({})) {
   const c = await managed();
-  const regenerate = () => planBenchmark({ toolId: "memory-mcp", projectRoot: c.projectRoot, homeDir: c.homeDir, entries: seed, platform: "linux", includeUser: false, mcpSourceEnv: () => ({}) });
+  const regenerate = () => planBenchmark({ toolId: "memory-mcp", projectRoot: c.projectRoot, homeDir: c.homeDir, entries: seed, platform: "linux", includeUser: false, mcpSourceEnv: planSource });
   const first = await regenerate();
   if (!first.ok) throw new Error(first.code);
   const o = await requestBenchmarkApproval(first.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
@@ -283,6 +283,40 @@ describe("REQ-061 Benchmark 실행과 Report v1", () => {
         else process.env[k] = v;
       }
     }
+  });
+});
+
+describe("v0.2.1 #46 리뷰: Benchmark는 6회 각각 spawn 직전에 승인한 패키지 출처를 확인한다", () => {
+  const A = { NPM_CONFIG_REGISTRY: "https://mirror-a.example/" };
+  const B = { NPM_CONFIG_REGISTRY: "https://mirror-b.example/" };
+  // 수정 전(d11b486): 첫 회 전에만 승인 digest를 비교했고 각 회차 runHandshake는 비교하지 않아, 도중에 바뀐 출처(B)나 원본 오류(빈 환경)로도 6회를 모두 실행했다.
+  for (const [label, later] of [
+    ["다른 registry 주소로 변경", () => B],
+    ["원본 조회 오류", () => { throw new Error("boom"); }],
+  ] as const) {
+    it("3회차부터 " + label + " → 3~6회차는 spawn 0, reason package-source-unverified. 실행한 회차는 승인한 출처로만 실행", async () => {
+      let calls = 0;
+      // 1번째 호출: 실행 전 확인, 2·3번째: 1·2회차. 그 뒤부터 바뀐다.
+      const sourceEnv = () => (++calls <= 3 ? A : (later() as Record<string, string>));
+      const s = await setup(() => ({}), { sourceEnv }, () => A);
+      const r = await runBenchmark(s.approval, s.options);
+      if (!r.ok) throw new Error(r.code);
+      expect(s.spawns).toHaveLength(2);
+      for (const sp of s.spawns) expect(sp.env["NPM_CONFIG_REGISTRY"]).toBe(A.NPM_CONFIG_REGISTRY);
+      expect(r.report.runs.slice(0, 2).map((x) => x.status)).toEqual(["succeeded", "succeeded"]);
+      expect(r.report.runs.slice(2).map((x) => x.reason)).toEqual(["package-source-unverified", "package-source-unverified", "package-source-unverified", "package-source-unverified"]);
+    });
+  }
+
+  it("승인한 출처 그대로면 6회 모두 그 출처로 실행한다(회차마다 원본을 한 번씩 읽는다)", async () => {
+    let calls = 0;
+    const s = await setup(() => ({}), { sourceEnv: () => (calls++, A) }, () => A);
+    const r = await runBenchmark(s.approval, s.options);
+    if (!r.ok) throw new Error(r.code);
+    expect(s.spawns).toHaveLength(6);
+    for (const sp of s.spawns) expect(sp.env["NPM_CONFIG_REGISTRY"]).toBe(A.NPM_CONFIG_REGISTRY);
+    // 실행 전 확인 1번 + 회차마다 1번.
+    expect(calls).toBe(7);
   });
 });
 

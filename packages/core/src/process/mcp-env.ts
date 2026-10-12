@@ -163,16 +163,23 @@ export function packageSourceDigest(source: Readonly<Record<string, string | und
  */
 export type PackageSourceCheck = { ok: true; digest: string | null } | { ok: false; reason: "source-unavailable" | "not-passable"; names: string[] };
 export function mcpPackageSourceCheck(sourceEnv: McpSourceEnv | undefined, backend: InstallBackend): PackageSourceCheck {
-  if (backend !== "uvx" && backend !== "npx") return { ok: true, digest: null };
-  if (sourceEnv === undefined) return { ok: false, reason: "source-unavailable", names: [] };
-  let source: Readonly<Record<string, string | undefined>>;
+  return checkSnapshot(snapshotOf(sourceEnv), backend);
+}
+
+type SourceSnapshot = Readonly<Record<string, string | undefined>> | undefined;
+/** 원본 함수를 한 번만 부른다. 없거나·예외·객체가 아니면 undefined(확인 불가). */
+function snapshotOf(sourceEnv: McpSourceEnv | undefined): SourceSnapshot {
+  if (sourceEnv === undefined) return undefined;
   try {
     const got = sourceEnv();
-    if (got === null || typeof got !== "object") return { ok: false, reason: "source-unavailable", names: [] };
-    source = got;
+    return got !== null && typeof got === "object" ? got : undefined;
   } catch {
-    return { ok: false, reason: "source-unavailable", names: [] };
+    return undefined;
   }
+}
+function checkSnapshot(source: SourceSnapshot, backend: InstallBackend): PackageSourceCheck {
+  if (backend !== "uvx" && backend !== "npx") return { ok: true, digest: null };
+  if (source === undefined) return { ok: false, reason: "source-unavailable", names: [] };
   const names = mcpPackageSourceMismatch(source, backend);
   if (names.length > 0) return { ok: false, reason: "not-passable", names };
   return { ok: true, digest: packageSourceDigest(source, backend) };
@@ -200,6 +207,22 @@ export function packageSourceRunBlock(sourceEnv: McpSourceEnv | undefined, backe
   const check = mcpPackageSourceCheck(sourceEnv, backend);
   if (!check.ok) return packageSourceCheckMessage(check);
   return check.digest === approved ? null : PACKAGE_SOURCE_CHANGED_MESSAGE;
+}
+
+/**
+ * 실제 spawn에 넘길 MCP 서버 환경(v0.2.1 #46 리뷰). 원본을 한 번만 읽은 스냅샷 하나로 출처 확인(npx·uvx), 승인 digest 비교, 허용 목록 필터링을 한다.
+ * 확인과 spawn 환경이 다른 시점의 원본에서 나오지 않는다. ok가 아니면 그 MCP 서버를 실행하지 않는다(값 없는 이유).
+ * npx·uvx가 아니면(docker) 출처 확인 없이 필터링만 한다: 원본이 없으면 빈 환경(fail-closed, 부모 상속 없음).
+ */
+export type McpSpawnEnvironment = { ok: true; env: Record<string, string> } | { ok: false; message: string };
+export function mcpSpawnEnvironment(sourceEnv: McpSourceEnv | undefined, input: McpChildEnvInput, approvedPackageSource: string | null): McpSpawnEnvironment {
+  const source = snapshotOf(sourceEnv);
+  if (input.backend === "npx" || input.backend === "uvx") {
+    const check = checkSnapshot(source, input.backend);
+    if (!check.ok) return { ok: false, message: packageSourceCheckMessage(check) };
+    if (check.digest !== approvedPackageSource) return { ok: false, message: PACKAGE_SOURCE_CHANGED_MESSAGE };
+  }
+  return { ok: true, env: mcpServerChildEnv(source ?? {}, input) };
 }
 
 export type McpSourceEnv = () => Readonly<Record<string, string | undefined>>;

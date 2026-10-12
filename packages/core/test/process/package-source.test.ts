@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { readdirSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -14,8 +15,10 @@ import {
   requestLifecycleApproval,
   runInstallTransaction,
   runLifecycleTransaction,
+  runHealthCheck,
   type ExecChild,
   type ExecSpawner,
+  type HealthSpawner,
   type HealthSpawnOptions,
   type LifecycleEnvironment,
   type LifecycleRequest,
@@ -228,6 +231,58 @@ describe("Lifecycle Health·Benchmark: 출처를 확인할 수 없으면 실행�
       expect(result.status, label).toBe(status);
       expect(c.spawned, label).toEqual([]);
       expect(JSON.stringify(result), label).not.toContain(SECRET);
+    }
+  });
+
+// 수정 전(d11b486): Health는 출처 확인(packageSourceRunBlock)과 spawn 환경(mcpChildEnvForPlan)에서 원본을 따로 읽었다.
+  // 첫 호출은 승인한 출처(mirror-a)라 확인을 통과하고, 두 번째 호출의 다른 출처(mirror-b)로 MCP 서버를 띄웠다.
+  it("Health는 원본을 한 번만 읽은 스냅샷으로 확인과 spawn 환경을 만든다(뒤 호출이 바뀌어도 승인한 출처로만 실행)", async () => {
+    const c = await installed();
+    const A = () => ({ ...CLEAN(), UV_INDEX_URL: "https://mirror-a.example/simple" });
+    c.setSource(A);
+    const { run } = await c.approveRun("health");
+    let calls = 0;
+    const flipping = () => (++calls === 1 ? A() : { ...CLEAN(), UV_INDEX_URL: "https://mirror-b.example/simple" });
+    const spawnedEnv: Record<string, string>[] = [];
+    const recording: HealthSpawner = (_exe, _args, options) => {
+      spawnedEnv.push({ ...options.env });
+      throw new Error("기록만 하고 실제로 띄우지 않는다");
+    };
+    c.env.runHealth = (v, o) => runHealthCheck(v, { ...o, sourceEnv: flipping, spawner: recording });
+    await run();
+    expect(calls).toBe(1);
+    expect(spawnedEnv).toHaveLength(1);
+    expect(spawnedEnv[0]!["UV_INDEX_URL"]).toBe("https://mirror-a.example/simple");
+  });
+
+  // 수정 전(d11b486): 출처 확인이 임시 폴더 생성(비동기 준비) 전에 있었다. 지금은 준비가 끝난 뒤 spawn 직전에 확인한다.
+  it("Health 출처 확인은 비동기 파일 준비(임시 폴더) 뒤 spawn 직전에 한다", async () => {
+    const c = await installed();
+    c.setSource(CLEAN);
+    const { run } = await c.approveRun("health");
+    const prepared: boolean[] = [];
+    c.env.runHealth = (v, o) =>
+      runHealthCheck(v, {
+        ...o,
+        sourceEnv: () => (prepared.push(readdirSync(o.tempBase).some((n) => n.startsWith("openhub-health-"))), CLEAN()),
+        spawner: () => {
+          throw new Error("기록만 하고 실제로 띄우지 않는다");
+        },
+      });
+    await run();
+    expect(prepared).toEqual([true]);
+  });
+
+  it("Health 스냅샷의 원본 조회 오류·승인과 다른 출처 → 그 MCP 서버를 실행하지 않는다(spawn 0)", async () => {
+    for (const bad of [() => { throw new Error("boom"); }, () => ({ ...CLEAN(), UV_INDEX_URL: "https://mirror-b.example/simple" })]) {
+      const c = await installed();
+      c.setSource(() => ({ ...CLEAN(), UV_INDEX_URL: "https://mirror-a.example/simple" }));
+      const { run } = await c.approveRun("health");
+      let spawned = 0;
+      c.env.runHealth = (v, o) => runHealthCheck(v, { ...o, sourceEnv: bad as () => Record<string, string>, spawner: () => { spawned += 1; throw new Error("no"); } });
+      const result = await run();
+      expect(result.steps.find((s) => s.id === "health")).toMatchObject({ status: "failed", code: "package-source-unverified" });
+      expect(spawned).toBe(0);
     }
   });
 

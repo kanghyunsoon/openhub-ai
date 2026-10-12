@@ -6,7 +6,7 @@ import { isVerifiedLifecyclePlan, type HealthStep, type VerifiedLifecyclePlan } 
 import type { RecommendPlatform } from "../recommendation/index";
 import { EXEC_EXCERPT_BYTES, OutputTail, redactExcerpt, type ExecSpawner } from "./executor";
 import { TOOL_CONFIG_PLACEHOLDER, substituteToolConfig } from "../tool-config/index";
-import { mcpPackageSourceCheck, mcpProcessEnv, packageSourceCheckMessage, packageSourceRunBlock, type McpChildEnvInput, type McpSourceEnv } from "./mcp-env";
+import { mcpProcessEnv, mcpSpawnEnvironment, type McpChildEnvInput, type McpSourceEnv } from "./mcp-env";
 
 /**
  * MCP Health Check(TASK-041, D-019). 승인된 LifecyclePlan의 health 단계로만 MCP 서버를 실행해 handshake를 확인한다.
@@ -210,9 +210,6 @@ export async function runHealthCheck(verified: VerifiedLifecyclePlan, options: H
     argv = sub.args;
   }
   if (argv === null) return { ok: true, result: result("launch-failed", "launcher-not-found", environmentUnverified) };
-  // 실행 직전에 다시 확인한다: 원본 누락·오류, 넘길 수 없는 출처 설정, 승인한 출처 digest와 다름(같은 실행의 Prepare 뒤 변경 포함)이면 spawn 0. fallback 없음.
-  const sourceBlock = packageSourceRunBlock(options.sourceEnv, verified.plan.backend, step.packageSource ?? null);
-  if (sourceBlock !== null) return { ok: true, result: result("launch-failed", "package-source-unverified", environmentUnverified, { excerpt: sourceBlock }) };
 
   const base = options.tempBase;
   const cwd = await mkdtemp(path.join(base, "openhub-health-"));
@@ -221,8 +218,11 @@ export async function runHealthCheck(verified: VerifiedLifecyclePlan, options: H
     const realCwd = await realpath(cwd);
     const rel = path.relative(realBase, realCwd);
     if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) return { ok: true, result: result("launch-failed", "spawn-failed", environmentUnverified) };
-    const env = mcpChildEnvForPlan(verified.plan, options.sourceEnv);
-    const outcome = await handshake(argv, realCwd, step.timeouts, verified.plan.platform, { ...options, killTree: options.killTree ?? createTreeKiller({ cwd: realBase }) }, env);
+    // 비동기 준비(임시 폴더) 뒤 spawn 직전에 원본을 한 번만 읽어, 그 스냅샷으로 출처 확인·승인 digest 비교·환경 필터링을 한다(#46 리뷰).
+    // 원본 누락·오류, 넘길 수 없는 출처 설정, 승인한 출처와 다름(같은 실행의 Prepare 뒤 변경 포함)이면 spawn 0이고 fallback하지 않는다.
+    const spawnEnv = mcpSpawnEnvironment(options.sourceEnv, { backend: verified.plan.backend, declaredNames: verified.plan.requiredEnv.map((e) => e.name) }, step.packageSource ?? null);
+    if (!spawnEnv.ok) return { ok: true, result: result("launch-failed", "package-source-unverified", environmentUnverified, { excerpt: spawnEnv.message }) };
+    const outcome = await handshake(argv, realCwd, step.timeouts, verified.plan.platform, { ...options, killTree: options.killTree ?? createTreeKiller({ cwd: realBase }) }, spawnEnv.env);
     return { ok: true, result: { ...outcome, environmentUnverified } };
   } finally {
     await rm(cwd, { recursive: true, force: true }).catch(() => undefined);
@@ -243,6 +243,8 @@ export type HandshakeOutcome = Outcome;
 /**
  * 승인 검증을 마친 호출 측(Benchmark)이 같은 handshake를 한 번 실행한다. initialize → notifications/initialized → tools/list → 종료만 하고
  * tools/call은 보내지 않는다. cwd는 호출 측이 만든 격리 디렉터리, argv는 healthArgv 규칙으로 만든 값이다.
+ * envInput.approvedPackageSource는 승인한 패키지 출처 digest(없으면 null)다. 매 호출 spawn 직전에 원본을 한 번만 읽어 그 스냅샷으로
+ * 출처 확인·digest 비교·환경 필터링을 하고, 다르면 실행하지 않는다(#46 리뷰: Benchmark 6회 각각).
  */
 export function runHandshake(
   argv: string[],
@@ -251,12 +253,12 @@ export function runHandshake(
   platform: RecommendPlatform,
   options: Omit<HealthRunOptions, "healthCheckType" | "tempBase"> & { killTree: TreeKiller },
   observer: HandshakeObserver,
-  envInput: McpChildEnvInput,
+  envInput: McpChildEnvInput & { approvedPackageSource: string | null },
 ): Promise<HandshakeOutcome> {
-  // 이중 방어: 출처를 확인할 수 없으면 실행하지 않는다(승인 digest 비교는 호출 측 Benchmark가 반복 전에 한다).
-  const sourceCheck = mcpPackageSourceCheck(options.sourceEnv, envInput.backend);
-  if (!sourceCheck.ok) return Promise.resolve({ status: "launch-failed", reason: "package-source-unverified", toolCount: null, terminated: true, excerpt: packageSourceCheckMessage(sourceCheck) });
-  return handshake(argv, cwd, timeouts, platform, { ...options, healthCheckType: "mcp-handshake", tempBase: cwd }, mcpProcessEnv(options.sourceEnv, envInput), observer);
+  const { approvedPackageSource, ...childInput } = envInput;
+  const spawnEnv = mcpSpawnEnvironment(options.sourceEnv, childInput, approvedPackageSource);
+  if (!spawnEnv.ok) return Promise.resolve({ status: "launch-failed", reason: "package-source-unverified", toolCount: null, terminated: true, excerpt: spawnEnv.message });
+  return handshake(argv, cwd, timeouts, platform, { ...options, healthCheckType: "mcp-handshake", tempBase: cwd }, spawnEnv.env, observer);
 }
 
 /** 승인된 LifecyclePlan의 MCP 서버 환경(backend·Manifest 선언 이름 기준, fail-closed). */

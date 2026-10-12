@@ -139,7 +139,8 @@ async function executeVerifiedBenchmark(verified: VerifiedBenchmarkPlan, options
   const clock = options.clock ?? (() => performance.now());
   const realBase = await realpath(options.tempBase);
   const killTree = options.killTree ?? createTreeKiller({ cwd: realBase });
-  const envInput = { backend: launch.executable, declaredNames: launch.envNames };
+  // 매 회 runHandshake가 spawn 직전에 승인 digest를 다시 확인한다(#46 리뷰). 위 확인은 한 번도 실행하지 않을 때 분명한 오류 code를 주기 위한 것이다.
+  const envInput = { backend: launch.executable, declaredNames: launch.envNames, approvedPackageSource: launch.packageSource ?? null };
   const started = clock();
   const runs: BenchmarkRun[] = [];
   let serverInfo: { name: string | null; version: string | null } | null = null;
