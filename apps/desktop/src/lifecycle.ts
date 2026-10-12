@@ -192,6 +192,7 @@ const opTitle = (op: LifecycleOperation) => tr(OPERATION_KEY[op]);
 /** Repair 대상 상태. config-drift는 Core가 "OpenHub 관리 경로만 다름"으로 받아 줄 때만 버튼이 생긴다. */
 const REPAIR_STATES = new Set<LifecycleToolStatus["state"]>(["tool-config-missing", "tool-config-drift", "tool-config-relocated", "client-launcher-invalid", "config-drift"]);
 const WARNING_KEY: Partial<Record<LifecycleToolStatus["state"], MessageKey>> = {
+  "interrupted-update": "life.warn.interrupted",
   "config-drift": "life.warn.configDrift",
   "missing-config": "life.warn.missingConfig",
   "tool-config-missing": "life.warn.toolConfigMissing",

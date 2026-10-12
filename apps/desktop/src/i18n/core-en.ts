@@ -63,6 +63,8 @@ const NOTICE_EN: Readonly<Record<string, string>> = {
   "health-gate-skipped": "This tool needs environment variables to run, but OpenHub does not check their values or whether they are set. If Health Check is skipped, whether the MCP server actually works after the update is not verified.",
   "health-not-verified": "Health: Not verified / Reason: Required environment is unchecked",
   "client-env-parse-risk": "You must prepare the required environment variables in the environment where Claude Code runs. OpenHub does not check their values or whether they exist; if they are missing, parsing .mcp.json may be affected.",
+  "journal-cleanup-failed": "The operation finished, but its operation record (journal) could not be removed. If the tool shows interrupted-update, check it with openhub lifecycle recover (use --discard to remove only the record when the operation is complete).",
+  "journal-update-failed": "The operation record (journal) phase could not be updated to compensation-failed. The record is still kept, so the tool still shows as interrupted.",
 };
 
 /** 대문자 code(차단·실행 불가 사유)의 영어 문장. 파일·서버 이름이 Core 문장 안에만 있는 경우는 일반 문장으로 쓴다. */
@@ -105,6 +107,22 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   USER_SCOPE_NOT_APPROVED: "The user-scope configuration change (user-scope-config) was not approved.",
   CONFIG_WRITE_FAILED: "The configuration file could not be changed. The original file was kept.",
   CONFIG_RESTORE_FAILED: "The original configuration could not be fully restored. Check the configuration file before trying again.",
+  INTERRUPTED_OPERATION: "A previous operation on this tool stopped midway (interrupted-update). Review and approve the recovery with openhub lifecycle recover first.",
+  JOURNAL_UNREADABLE: "The operation journal folder could not be read safely, so nothing was planned.",
+  JOURNAL_DAMAGED: "Some operation records (journals) cannot be read (damaged, or a format this version cannot read), so nothing was planned. OpenHub does not delete them. Back up and move the files in ~/.openhub/state/journal, check your configuration with openhub lifecycle status, then try again.",
+  JOURNAL_CLEANUP_FAILED: "The operation record (journal) could not be removed. Check write access to ~/.openhub/state, then remove only the record with openhub lifecycle recover --discard.",
+  OPERATION_COMPLETED: "This operation finished completely (configuration and Version State were both applied); only removing its record is left. It is not undone. Use --discard to remove only the record.",
+  JOURNAL_WRITE_FAILED: "The operation journal could not be written, so nothing was changed. Check write access to the OpenHub state folder.",
+  JOURNAL_PATH_ESCAPE: "The operation journal folder is not a regular folder inside your home folder (symlink or junction), so it was not used.",
+  NO_INTERRUPTED_OPERATION: "There is no interrupted operation to recover for this tool in this project.",
+  STATE_UNREADABLE: "Version State could not be read, so nothing was recovered.",
+  STATE_CHANGED: "Version State for this entry changed after the interrupted operation started, so OpenHub does not decide automatically.",
+  EXTERNAL_CHANGE: "The configuration entry matches neither what OpenHub was writing nor the previous entry (changed outside OpenHub or missing). It was not overwritten; check the file yourself.",
+  TOOL_CONFIG_RECOVERY: "This tool uses an OpenHub tool config. Recover it with openhub lifecycle repair instead.",
+  UNDO_UNAVAILABLE: "The previous entry could not be recorded, so it cannot be restored automatically. Check the file yourself.",
+  NOTHING_TO_UNDO: "No entry was changed. Use --discard to remove only the operation record.",
+  NOT_RESTORED: "Some entries still differ from their previous content, so the record cannot simply be removed.",
+  RECOVERY_IN_PROGRESS: "Another recovery is processing this operation record. Check again when it finishes.",
   MANIFEST_UNAVAILABLE: "The Registry Manifest could not be read, so Health was not run. Changed configuration was restored and Version State was not changed. Check the OpenHub installation and approve a new plan.",
   RESOLUTION_INVALID: "The exact artifact version could not be resolved.",
   STATE_INVALID: "Version State has an invalid format.",
@@ -113,6 +131,8 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   STATE_PATH_ESCAPE: "The Version State path points outside the OpenHub state directory.",
   STATE_WRITE_FAILED: "Version State could not be written. The previous state was kept.",
   STATE_CONFLICT: "Version State was changed by another process, so it was not overwritten.",
+  OPERATION_IN_PROGRESS: "Another OpenHub operation is in progress (for example an update waiting for Health). Nothing was changed. Try again when it finishes.",
+  OPERATION_LOCK_FAILED: "OpenHub could not create its operation lock in the state folder, so nothing was run or changed.",
   UP_TO_DATE: "The tool is already at the target version.",
 };
 
@@ -131,6 +151,7 @@ export const EN_WARNING_CODES: readonly string[] = Object.freeze([
   "docker-daemon-unchecked",
   "manual-setup-required",
   "configured-not-detected",
+  "state-record-failed",
 ]);
 
 type AnyPlan = InstallPlanV1 | LifecyclePlanV1;
@@ -384,6 +405,7 @@ export function healthLinesEn(health: { status: string; environmentUnverified: b
 
 const STATE_EN: Readonly<Record<LifecycleToolStatus["state"], string>> = {
   "state-consistent": "consistent",
+  "interrupted-update": "interrupted-update (a previous operation stopped midway — openhub lifecycle recover)",
   "config-drift": "config-drift (configuration differs from Version State)",
   "missing-config": "missing-config (configuration entry missing)",
   "tool-config-missing": "tool-config-missing (OpenHub-managed tool config missing — repair)",
@@ -467,6 +489,7 @@ const INSTALL_CODE_EN: Readonly<Record<string, string>> = {
   MANUAL_SETUP_REQUIRED: "The Node.js launch path for the client configuration could not be verified, so nothing was changed.",
   TOOL_CONFIG_STALE: "The tool config changed after approval. Review the new plan and approve again.",
   COMPENSATION_INCOMPLETE: "Some files could not be restored (changed elsewhere after this run, or not writable). They were not overwritten; check them with lifecycle status.",
+  STATE_RECORD_FAILED: "Version State could not be recorded, so the configuration written by this install was restored to its original content. Check the cause and install again.",
 };
 
 /** InstallResult의 다음에 할 일(영어). Core 원문 대신 code·상태·Plan 구조로 만든다. */
@@ -480,6 +503,7 @@ export function installResultNextEn(result: InstallResultV1, plan: InstallPlanV1
 
 export function installWarningEn(plan: InstallPlanV1, w: { code: string; message: string }): string {
   if (w.code === "configured-not-detected") return "[configured-not-detected] The configuration was written, but the " + (plan.targets[0]?.serverName ?? plan.toolId) + " server was not found when analyzing again. The configuration files were not restored.";
+  if (w.code === "state-record-failed") return "[state-record-failed] Version State could not be recorded" + (/\(([A-Z_]+)\)/u.exec(w.message)?.[1] === undefined ? "" : " (" + /\(([A-Z_]+)\)/u.exec(w.message)![1] + ")") + ".";
   const line = warningsEn(plan, [w])[0] ?? untranslatedWarningEn(w);
   return "[" + line.code + "] " + line.text;
 }

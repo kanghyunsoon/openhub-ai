@@ -126,6 +126,7 @@ export function formatLifecycleResult(result: LifecycleResultV1): string[] {
 
 const STATE_LABEL: Readonly<Record<LifecycleToolStatus["state"], string>> = {
   "state-consistent": "일치",
+  "interrupted-update": "interrupted-update(이전 작업이 중간에 끝남 — openhub lifecycle recover)",
   "config-drift": "config-drift(설정이 Version State와 다름)",
   "missing-config": "missing-config(설정 항목 없음)",
   "tool-config-missing": "tool-config-missing(OpenHub 관리 tool config 없음 — openhub lifecycle repair)",

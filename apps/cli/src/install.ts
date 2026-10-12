@@ -17,8 +17,8 @@ import {
   planInstall,
   probeBackends,
   readLifecycleState,
-  recordInstallInState,
   requestApproval,
+  runInstallAndRecord,
   runInstallTransaction,
   serializeInstallPlan,
   stateUnreadableMessage,
@@ -143,25 +143,23 @@ const EXIT_BY_STATUS: Readonly<Record<InstallResultV1["status"], number>> = {
   "approval-required": 3,
 };
 
+/**
+ * (v0.2.1 B) 설치와 Version State(~/.openhub/state/lifecycle.json) 기록을 하나의 작업 잠금 안에서 한다(TASK-038).
+ * 기록이 실패하면 Core가 설정을 되돌리고 STATE_RECORD_FAILED를 돌려준다(성공 + 경고로 끝내지 않는다).
+ */
+async function installAndRecord(planned: PlannedInstall, approval: Parameters<typeof runInstallAndRecord>[1], request: InstallRequest, env: Parameters<typeof runInstallAndRecord>[3], io: InstallCommandIO): Promise<InstallResultV1> {
+  const { result, recorded } = await runInstallAndRecord(planned, approval, request, env, { now: io.now ?? (() => new Date()) });
+  for (const line of formatInstallResult(result)) io.out(line);
+  if (recorded > 0) io.out("Version State  " + LIFECYCLE_STATE_LOGICAL_PATH + "에 " + recorded + "개 기록");
+  return result;
+}
+
 /** Version State를 읽을 수 없으면(손상·미지원 버전·경로 이탈) 고정 문구를 stderr에 쓰고 true. 쓰기 0(v0.2.1). */
 async function stateUnreadable(request: InstallRequest, io: InstallCommandIO): Promise<boolean> {
   const read = await readLifecycleState({ homeDir: request.homeDir, ...(io.configFs === undefined ? {} : { fs: io.configFs }) });
   if (read.ok) return false;
   io.err(stateUnreadableMessage(read.code));
   return true;
-}
-
-/** 설치가 succeeded이면 Version State(~/.openhub/state/lifecycle.json)에 기록한다(TASK-038). 실행 직전에 읽기를 확인하므로 여기서 실패하는 경우는 그 사이 경쟁뿐이다. 설치 결과는 바꾸지 않는다. */
-async function recordInState(planned: PlannedInstall, result: InstallResultV1, request: InstallRequest, io: InstallCommandIO): Promise<void> {
-  if (result.status !== "succeeded") return;
-  const recorded = await recordInstallInState(planned, result, {
-    projectRoot: request.projectRoot,
-    homeDir: request.homeDir,
-    ...(io.configFs === undefined ? {} : { fs: io.configFs }),
-    now: io.now ?? (() => new Date()),
-  });
-  if (recorded.ok && recorded.recorded > 0) io.out("Version State  " + LIFECYCLE_STATE_LOGICAL_PATH + "에 " + recorded.recorded + "개 기록");
-  else if (!recorded.ok) io.err("경고: Version State를 기록하지 못했습니다 (" + recorded.code + "). 설치 결과는 그대로입니다.");
 }
 
 export async function runInstall(argv: readonly string[], io: InstallCommandIO, usage: string): Promise<number> {
@@ -306,8 +304,6 @@ export async function runInstall(argv: readonly string[], io: InstallCommandIO, 
   }
   // 승인을 묻는 동안 손상됐어도 Client 설정을 쓰지 않는다.
   if (await stateUnreadable(request, io)) return 1;
-  const result = await runInstallTransaction(planned, outcome.approval, request, env);
-  for (const line of formatInstallResult(result)) io.out(line);
-  await recordInState(planned, result, request, io);
+  const result = await installAndRecord(planned, outcome.approval, request, env, io);
   return EXIT_BY_STATUS[result.status];
 }
