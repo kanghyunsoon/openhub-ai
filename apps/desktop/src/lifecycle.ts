@@ -10,6 +10,7 @@ import {
   loadRegistry,
   locateWindowsNpxLauncher,
   npmChildEnv,
+  uvChildEnv,
   npxCacheKey,
   parseNpmSpec,
   planLifecycleRequest,
@@ -349,6 +350,7 @@ function environment(deps: LifecycleDeps, entries: Awaited<ReturnType<typeof loa
     npmChildEnv: () => npmChildEnv(process.env),
     // Health가 실행하는 MCP 서버에는 OS 기본·backend 설정·Manifest가 선언한 환경변수만 넘긴다(그 밖의 API key·token 제외).
     mcpSourceEnv: () => process.env,
+    uvChildEnv: () => uvChildEnv(process.env),
     windowsNpx:
       deps.windowsNpx ??
       (async () => {

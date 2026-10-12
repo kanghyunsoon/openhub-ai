@@ -316,6 +316,7 @@ export const ko: Readonly<Record<keyof typeof en, string>> = {
   "outcome.failedDefault": "결과의 다음에 할 일을 확인하세요.",
   "install.prepared.launchOnDemand": "launch-on-demand(Client 첫 실행 때 받음)",
   "install.prepared.cached": "cached(npx cache에 미리 받음)",
+  "install.prepared.cachedUv": "cached(uv cache에 미리 설치하고 네트워크 없이 확인함)",
   "common.yes": "예",
   "common.no": "아니오",
   "install.detected.skipped": "확인 안 함",

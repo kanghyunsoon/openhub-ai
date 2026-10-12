@@ -21,6 +21,7 @@ import { PROJECT_KEY_PATTERN, artifactIdentitySchema, entryKeyOf, type ToolState
 import { TOOL_CONFIG_PLACEHOLDER } from "../tool-config/index";
 import { configEntryDigest } from "../lifecycle/status";
 import { healthEnvNotice } from "../lifecycle/preview";
+import { wheelsOnlyUvxLaunchArgs } from "../installer/backends";
 import { projectKeyFor, readLifecycleState, type StateErrorCode } from "../lifecycle/store";
 
 /**
@@ -170,7 +171,8 @@ export async function planBenchmark(options: BenchmarkPlanOptions): Promise<Benc
     if (state.artifact.resolved !== null && !args.includes(state.artifact.resolved.spec)) {
       blockers.push({ code: "BENCHMARK_ARTIFACT_MISMATCH", message: "실행 인자에 Version State의 고정 artifact가 없습니다" });
     }
-    if (args.length > 0) launch = { executable: state.backend, args, envNames: manifest.env.filter((e) => e.required).map((e) => e.name).sort(), cwd: "isolated" };
+    // v0.2.1(#45 리뷰): 고정 버전 wheel-only uvx는 Benchmark도 --no-build로 실행한다(기록이 이전 형식이어도 소스 빌드 없음).
+    if (args.length > 0) launch = { executable: state.backend, args: wheelsOnlyUvxLaunchArgs(manifest, state.backend, args), envNames: manifest.env.filter((e) => e.required).map((e) => e.name).sort(), cwd: "isolated" };
   }
   const requirements: BenchmarkApprovalRequirement[] = ["base"];
   if (manifest.env.some((e) => e.required)) requirements.push("environment-unverified");

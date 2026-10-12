@@ -1,4 +1,4 @@
-import { BACKEND_ADAPTERS } from "../installer/backends";
+import { BACKEND_ADAPTERS, uvxBuildPolicyOf } from "../installer/backends";
 import { isCodeInjectionEnvName } from "../process/mcp-env";
 import { checkCatalog, loadCatalog } from "../catalog/catalog";
 import { isValidDockerImage, parseNpmSpec } from "../installer/command";
@@ -38,6 +38,12 @@ export function fastManifestIssues(manifest: Manifest): { path: string; message:
   // v0.2.1: 실행 코드·라이브러리 경로를 바꾸는 변수는 선언할 수 없다(Health·Benchmark도 넘기지 않는다). 필요하면 별도 정책 결정이 먼저다.
   manifest.env.forEach((e, i) => {
     if (isCodeInjectionEnvName(e.name)) out.push({ path: "env[" + String(i) + "].name", message: e.name + "는 실행 코드·라이브러리 경로를 바꾸는 변수라 Manifest에 선언할 수 없습니다" });
+  });
+  // v0.2.1(#45 리뷰): 검토된 소스 빌드는 일시 차단이다. 설치할 수 없는 Manifest를 Registry에 넣지 않는다.
+  [stepOf(manifest), ...manifest.install.fallback].forEach((step, i) => {
+    if (step.adapter !== "uvx") return;
+    const policy = uvxBuildPolicyOf(step, "uvx");
+    if (policy.ok && policy.policy === "source-build-reviewed") out.push({ path: i === 0 ? "install.options.prepare" : "install.fallback[" + String(i - 1) + "].options.prepare", message: "source-build-reviewed는 v0.2.1에서 일시 차단되었습니다(uvx가 Client용 빌드 입력의 hash를 확인하지 않음). 정책 결정 전까지 쓸 수 없습니다" });
   });
   const preferred = manifest.install.preferredAdapter;
   const source = manifest.update.source;
