@@ -33,7 +33,7 @@ The app itself needs nothing else. Each MCP server, however, is started by a pro
 | To install | You need | Check with |
 | --- | --- | --- |
 | Memory MCP, Context7, Playwright MCP, Chrome DevTools MCP, MongoDB MCP Server, Kubernetes MCP Server | [Node.js](https://nodejs.org/) (includes npm and npx) | `npx --version` |
-| Postgres MCP Pro, Serena | [uv](https://docs.astral.sh/uv/) (provides uvx) | `uvx --version` |
+| Postgres MCP Pro (and Serena in v0.2.0 only, see below) | [uv](https://docs.astral.sh/uv/) (provides uvx) | `uvx --version` |
 | GitHub MCP Server (and Postgres MCP Pro if uv is missing) | [Docker](https://docs.docker.com/get-docker/), running | `docker info` |
 
 You also need at least one AI client: Claude Code, Codex or Cursor. If a required program is missing, the install plan says which backend was not found and nothing is changed.
@@ -122,8 +122,9 @@ The download is v0.2.0. This README also describes the code on `main`, which is 
 | Interrupted update, rollback or repair | Manual fix of the entry (see known issues) | `openhub lifecycle recover <toolId>` (CLI), with approval |
 | Desktop guidance for an interrupted operation | Not detected as interrupted (shows config-drift) | Exact command, how to get the CLI, how to confirm |
 | Two OpenHub windows or terminals changing tools at once | Can lose a record | One change at a time (`OPERATION_IN_PROGRESS`) |
-| Environment passed to MCP servers during Health and Benchmark | Your whole environment | Planned: only OS variables and the variables the tool declares (in review) |
-| First start of uvx tools (Postgres MCP Pro, Serena) on Windows | Can hit the Health time limit | Planned: packages prepared before Health (in review) |
+| Environment passed to MCP servers during Health and Benchmark | Your whole environment | Only OS and path variables, proxy/CA and the backend's own settings, and the variables the tool declares. If a package index or registry setting in your environment cannot be passed as-is (for example a URL with credentials), Health and Benchmark do not run; put it in `uv.toml` or `.npmrc` instead ([security model](docs/security-model.md)) |
+| First start of Postgres MCP Pro on Windows | Can hit the Health time limit | The exact version (`postgres-mcp==0.3.0`, `mcp==1.30.0`, wheels only) is prepared before the configuration is written; the client also runs it with `--no-build` |
+| Serena | Installable; the client builds a dependency (`proxy-tools`) from source on first start | **No new installs, updates, rollback, Health, repair, adopt or Benchmark**: that build cannot be verified. An existing Serena entry and its Version State are kept and shown as withdrawn; an interrupted operation can still be recovered; remove it with [the manual steps](#removing-a-tool-or-openhub) if you want. Re-support: [#59](https://github.com/kanghyunsoon/openhub-ai/issues/59) |
 
 ## Demo
 

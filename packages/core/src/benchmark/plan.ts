@@ -17,6 +17,7 @@ import { nodeConfigFs, readConfiguredEntry, type ConfigFs } from "../installer/c
 import { CONFIG_SCOPES, INSTALL_BACKENDS, INSTALL_CLIENTS, canonicalize, manifestDigest, registryDigestExcluding, sha256Digest, type ConfigScope, type InstallClient } from "../installer/plan";
 import { RECOMMEND_PLATFORMS, TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, type RecommendPlatform } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
+import { unknownToolError } from "../registry/withdrawn";
 import { PROJECT_KEY_PATTERN, artifactIdentitySchema, entryKeyOf, type ToolState } from "../lifecycle/state";
 import { TOOL_CONFIG_PLACEHOLDER } from "../tool-config/index";
 import { configEntryDigest } from "../lifecycle/status";
@@ -130,7 +131,7 @@ export interface BenchmarkPlanOptions {
   /** v0.2.1(#46 리뷰): MCP 서버 환경의 원본(보통 process.env). 패키지 출처를 Prepare와 같게 유지할 수 없으면 blocker다(값은 Plan에 넣지 않는다). */
   mcpSourceEnv?: McpSourceEnv;
 }
-export type BenchmarkPlanErrorCode = "TOOL_NOT_FOUND" | "BENCHMARK_TARGET_AMBIGUOUS" | StateErrorCode;
+export type BenchmarkPlanErrorCode = "TOOL_NOT_FOUND" | "TOOL_WITHDRAWN" | "BENCHMARK_TARGET_AMBIGUOUS" | StateErrorCode;
 export type BenchmarkPlanResult = { ok: true; planned: PlannedBenchmark } | { ok: false; code: BenchmarkPlanErrorCode; message: string };
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -142,7 +143,7 @@ export async function planBenchmark(options: BenchmarkPlanOptions): Promise<Benc
   const fs = options.fs ?? nodeConfigFs;
   const registry = options.entries.filter((e): e is RegistryEntry => isRecord(e) && isRecord(e.manifest) && typeof e.manifest.name === "string" && isRecord(e.manifest.repository));
   const entry = registry.find((e) => e.manifest.name === options.toolId);
-  if (entry === undefined) return { ok: false, code: "TOOL_NOT_FOUND", message: "Registry에 없는 Tool입니다" };
+  if (entry === undefined) return unknownToolError(options.toolId);
   const manifest = entry.manifest;
   const read = await readLifecycleState({ homeDir: options.homeDir, fs });
   if (!read.ok) return read;

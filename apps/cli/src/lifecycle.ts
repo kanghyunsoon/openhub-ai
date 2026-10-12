@@ -321,8 +321,9 @@ export async function runLifecycleOperation(operation: LifecycleOperation, argv:
     else if (built.code === "NOT_MANAGED") io.err("Version State에 이 프로젝트의 " + toolId + " 기록이 없습니다. openhub install로 설치한 도구만 다룹니다.");
     else if (built.code === "NO_ROLLBACK_TARGET") io.err("되돌릴 직전 버전이 없습니다(update를 한 번 이상 성공한 뒤에만 롤백할 수 있습니다).");
     else if (RESOLVER_CODES.has(built.code)) io.err("registry에서 버전을 확인하지 못했습니다 (" + built.code + "). " + built.message);
+    else if (built.code === "TOOL_WITHDRAWN") io.err(built.message);
     else io.err("계획을 만들지 못했습니다 (" + built.code + "). " + built.message);
-    return built.code === "HEALTH_SKIP_NOT_ALLOWED" || built.code === "INVALID_TARGET_VERSION" || built.code === "TOOL_NOT_FOUND" ? 2 : 1;
+    return built.code === "HEALTH_SKIP_NOT_ALLOWED" || built.code === "INVALID_TARGET_VERSION" || built.code === "TOOL_NOT_FOUND" || built.code === "TOOL_WITHDRAWN" ? 2 : 1;
   }
   const planned = built.planned;
   if (values.json) {

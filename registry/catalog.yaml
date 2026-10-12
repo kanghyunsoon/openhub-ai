@@ -12,4 +12,3 @@ tools:
   mongodb-mcp-server: { addedAt: "2026-10-10" }
   playwright-mcp: { addedAt: null }
   postgres-mcp: { addedAt: null }
-  serena: { addedAt: null }

@@ -176,7 +176,7 @@ describe("REQ-044 MCP Health Check", () => {
 
     const uvx = fake();
     await uvx.run(await verifiedFor("postgres-mcp"));
-    expect(uvx.spawns[0]).toEqual(["uvx", "postgres-mcp", "--access-mode=restricted"]);
+    expect(uvx.spawns[0]).toEqual(["uvx", "--no-build", "--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]);
     const docker = fake();
     await docker.run(await verifiedFor("github-mcp-server", "update"));
     expect(docker.spawns[0]).toEqual(["docker", "run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server@" + DIGEST]);
@@ -362,7 +362,8 @@ describe("REQ-044 MCP Health Check", () => {
     const verified = await verifiedFor("memory-mcp");
     const forged = { plan: verified.plan, planDigest: verified.planDigest, acknowledgements: verified.acknowledgements, channel: "cli-tty" } as VerifiedLifecyclePlan;
     expect(await f.run(forged)).toMatchObject({ ok: false, code: "APPROVAL_REQUIRED" });
-    const skipped = await verifiedFor("postgres-mcp", "update", "linux", { skipHealth: true });
+    // v0.2.1: postgres Manifest가 0.3.0으로 고정돼 있어 새 정확한 버전을 지정한다(--to).
+    const skipped = await verifiedFor("postgres-mcp", "update", "linux", { skipHealth: true, to: "0.3.1" });
     expect(skipped.plan.steps.some((s) => s.kind === "health")).toBe(false);
     expect(await f.run(skipped)).toMatchObject({ ok: false, code: "APPROVAL_REQUIRED" });
     const h = await createHarness(scratch, { entries: seed });

@@ -109,7 +109,7 @@ Two guards from the earlier design are not security gates and must not be descri
 
 **Still true for every uvx tool:** the client runs its own `uvx` with its own environment and uv settings. OpenHub cannot stop a user or another tool from editing the client entry and removing `--no-build`; status then reports config drift.
 
-**Existing exposure, unchanged by this PR:** the Registry serena Manifest on `main` is still floating (`uvx --from serena-agent …`, launch-on-demand). Installing it writes that command, and on its first start the **client** builds `proxy-tools` from source with whatever setuptools the index serves. OpenHub has not reviewed or verified that build. Pinning serena is #39, which depends on this decision.
+**Existing exposure when this PR was written:** the Registry serena Manifest on `main` was floating (`uvx --from serena-agent …`, launch-on-demand). Installing it writes that command, and on its first start the **client** builds `proxy-tools` from source with whatever setuptools the index serves. OpenHub has not reviewed or verified that build. **Decided in #39 (option 1, D1):** v0.2.1 stops new Serena installs and removes its Manifest; existing entries and Version State are kept and can still be recovered. See `docs/specs/v0.2.1-registry-verification.md`. Re-support is tracked in #59.
 
 **Options for the policy decision:**
 
@@ -159,7 +159,7 @@ The Manifest format (`sourceBuild` entries with `package`, `version`, `pypi-sdis
 ## Resolved questions
 
 1. Floating uvx Manifests → (a) pin to reviewed exact versions (D2).
-2. serena's `proxy-tools` source build → first allowed under D3, then **blocked in v0.2.1** after measurement (second review); policy decision pending.
+2. serena's `proxy-tools` source build → first allowed under D3, then **blocked in v0.2.1** after measurement (second review). Decision: Serena new installs stopped in v0.2.1 (#39), re-support in #59.
 3. Prepare limit → at most 10 min (D5).
 
 ## Not covered

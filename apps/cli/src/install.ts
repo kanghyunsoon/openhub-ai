@@ -279,8 +279,14 @@ export async function runInstall(argv: readonly string[], io: InstallCommandIO, 
     return 1;
   }
   if (!built.ok) {
-    io.err(built.code === "TOOL_NOT_FOUND" ? "Registry에 없는 Tool입니다." : "설치할 수 없습니다: Manifest가 설치 정책을 통과하지 못했습니다 (" + built.code + ")");
-    return built.code === "TOOL_NOT_FOUND" ? 2 : 1;
+    io.err(
+      built.code === "TOOL_NOT_FOUND"
+        ? "Registry에 없는 Tool입니다."
+        : built.code === "TOOL_WITHDRAWN"
+          ? built.message
+          : "설치할 수 없습니다: Manifest가 설치 정책을 통과하지 못했습니다 (" + built.code + ")",
+    );
+    return built.code === "TOOL_NOT_FOUND" || built.code === "TOOL_WITHDRAWN" ? 2 : 1;
   }
   const planned = built.planned;
   if (json) {

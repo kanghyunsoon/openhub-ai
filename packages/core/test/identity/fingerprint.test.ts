@@ -21,10 +21,11 @@ import {
   type IdentityHint,
   type RegistryEntry,
 } from "../../src/index";
-import { expectGolden, item, profile, seedEntries, tool } from "../recommendation/helpers";
+import { expectGolden, item, legacySerenaEntry, profile, seedEntries, tool } from "../recommendation/helpers";
 
 /** TASK-051 Identity Fingerprint. 임시 project·home과 seed Registry만 쓴다. network·spawn 없음. */
 const seed = await seedEntries();
+const legacySerena = await legacySerenaEntry();
 const scratch = await mkdtemp(path.join(tmpdir(), "openhub-identity-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 let n = 0;
@@ -85,7 +86,11 @@ describe("REQ-046 Identity Fingerprint", () => {
   });
 
   it("AC-051-03 uvx --from <pkg>와 첫 token을 근거로 매칭된다", () => {
-    expect(grade(server("my-serena", "uvx", ["--from", "serena-agent", "serena", "start-mcp-server"]))).toEqual(["strong", "serena", "artifact-only"]);
+    // --from 매칭 예시는 테스트 전용 v0.2.0 Serena Manifest로 본다(v0.2.1 #39: 실제 Registry에는 없는 지원 중단 도구).
+    const withLegacySerena = buildFingerprintIndex([...seed, legacySerena]);
+    expect(grade(server("my-serena", "uvx", ["--from", "serena-agent", "serena", "start-mcp-server"]), withLegacySerena)).toEqual(["strong", "serena", "artifact-only"]);
+    // 실제 Registry로는 기존 Serena 설정이 Registry 도구로 식별되지 않는다(설치 가능한 도구처럼 다루지 않는다).
+    expect(grade(server("my-serena", "uvx", ["--from", "serena-agent", "serena", "start-mcp-server"]))).toEqual(["unresolved", null, "no-evidence"]);
     expect(grade(server("pg", "uvx", ["postgres-mcp==0.3.0", "--access-mode=restricted"]))).toEqual(["strong", "postgres-mcp", "artifact-only"]);
     expect(grade(server("pg", "uvx", ["--from", "Postgres_MCP>=0.3", "postgres-mcp"]))).toEqual(["strong", "postgres-mcp", "artifact-only"]);
     expect(pypiKey("serena-agent[extra]==1.0")).toBe("pypi:serena-agent");

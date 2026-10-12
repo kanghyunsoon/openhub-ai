@@ -155,7 +155,7 @@ export async function runAdopt(argv: readonly string[], io: M7CommandIO, usage: 
   const first = await planAdopt(options);
   if (!first.ok) {
     io.err("adopt 계획을 만들 수 없습니다: " + first.code + " — " + first.message);
-    return first.code === "TOOL_NOT_FOUND" ? 2 : 1;
+    return first.code === "TOOL_NOT_FOUND" || first.code === "TOOL_WITHDRAWN" ? 2 : 1;
   }
   if (values["json"] === true) {
     io.out(JSON.stringify({ plan: JSON.parse(serializeAdoptPlan(first.planned.plan)), planDigest: first.planned.planDigest }, null, 2));
@@ -327,7 +327,7 @@ export async function runBenchmarkCommand(argv: readonly string[], io: M7Command
   const first = await planBenchmark(options);
   if (!first.ok) {
     io.err("Benchmark 계획을 만들 수 없습니다: " + first.code + " — " + first.message);
-    return first.code === "TOOL_NOT_FOUND" ? 2 : 1;
+    return first.code === "TOOL_NOT_FOUND" || first.code === "TOOL_WITHDRAWN" ? 2 : 1;
   }
   if (values["json"] === true) {
     io.out(JSON.stringify({ plan: JSON.parse(serializeBenchmarkPlan(first.planned.plan)), planDigest: first.planned.planDigest }, null, 2));

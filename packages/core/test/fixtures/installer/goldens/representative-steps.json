@@ -60,6 +60,25 @@
   ],
   "uvx": [
     {
+      "args": [
+        "--no-build",
+        "--compile-bytecode",
+        "--from",
+        "postgres-mcp==0.3.0",
+        "--with",
+        "mcp==1.30.0",
+        "python",
+        "-c",
+        "pass"
+      ],
+      "cwd": "isolated",
+      "executable": "uvx",
+      "id": "uvx-prepare",
+      "kind": "run",
+      "network": true,
+      "timeoutMs": 600000
+    },
+    {
       "client": "claude-code",
       "file": ".mcp.json",
       "id": "config-claude-code-project",
@@ -71,6 +90,11 @@
       "scope": "project",
       "value": {
         "args": [
+          "--no-build",
+          "--from",
+          "postgres-mcp==0.3.0",
+          "--with",
+          "mcp==1.30.0",
           "postgres-mcp",
           "--access-mode=restricted"
         ],
@@ -92,6 +116,11 @@
       "scope": "project",
       "value": {
         "args": [
+          "--no-build",
+          "--from",
+          "postgres-mcp==0.3.0",
+          "--with",
+          "mcp==1.30.0",
           "postgres-mcp",
           "--access-mode=restricted"
         ],

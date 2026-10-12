@@ -56,14 +56,16 @@ describe("REQ-043 Install 연계·Status·Drift", () => {
     const { recorded } = await installed(h, "postgres-mcp", [{ client: "claude-code", scope: "project" }, { client: "codex", scope: "project" }]);
     expect(recorded).toEqual({ ok: true, recorded: 2 });
     const entries = Object.values((await stateOf(h)).entries);
+    // v0.2.1: postgres Manifest는 정확한 버전(0.3.0)이라 설치 기록의 resolved가 그 버전이다(고정 npx와 같은 규칙).
+    const resolved = { kind: "python-package", spec: "postgres-mcp==0.3.0", version: "0.3.0", digest: null, integrity: null, source: "pypi" };
     expect(entries.map((e) => [e.target.client, e.revision, e.artifact.requested, e.artifact.resolved, e.committedAt])).toEqual([
-      ["claude-code", 1, "postgres-mcp", null, "2026-10-07T01:02:03.000Z"],
-      ["codex", 1, "postgres-mcp", null, "2026-10-07T01:02:03.000Z"],
+      ["claude-code", 1, "postgres-mcp==0.3.0", resolved, "2026-10-07T01:02:03.000Z"],
+      ["codex", 1, "postgres-mcp==0.3.0", resolved, "2026-10-07T01:02:03.000Z"],
     ]);
     const roots = { projectRoot: h.projectRoot, homeDir: h.homeDir };
     for (const e of entries) {
       expect(e.config.entryDigest).toBe(configEntryDigest(await readConfiguredEntry(e.target.client, e.target.scope, e.target.serverName, roots)));
-      expect(e.launch.clientSpec).toEqual({ command: "uvx", args: ["postgres-mcp", "--access-mode=restricted"] });
+      expect(e.launch.clientSpec).toEqual({ command: "uvx", args: ["--no-build", "--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"] });
     }
     const codex = entries.find((e) => e.target.client === "codex")!;
     expect(codex.config.tomlBlockDigest).toBe(tomlBlockDigest("postgres", (await readConfiguredEntry("codex", "project", "postgres", roots)) as never));

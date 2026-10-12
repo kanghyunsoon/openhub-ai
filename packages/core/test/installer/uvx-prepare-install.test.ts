@@ -71,9 +71,9 @@ describe("uvx Prepare: 설치 계획", () => {
     expect(HEALTH_TIMEOUTS.startupMs).toBe(20_000);
   });
 
-  it("고정되지 않은 uvx(현재 Registry), --with가 떠 있는 경우, 다른 uv 플래그가 앞에 있는 경우는 준비하지 않는다", async () => {
+  it("고정되지 않은 uvx(v0.2.0 Manifest), --with가 떠 있는 경우, 다른 uv 플래그가 앞에 있는 경우는 준비하지 않는다", async () => {
     for (const [entries, pinnedExpected] of [
-      [seed, false],
+      [withPostgres({ command: "uvx postgres-mcp --access-mode=restricted" }), false],
       [withPostgres({ command: "uvx --from postgres-mcp==0.3.0 --with mcp postgres-mcp" }), false],
       [withPostgres({ command: "uvx --python 3.12 --from postgres-mcp==0.3.0 postgres-mcp" }), false],
     ] as const) {
@@ -159,7 +159,8 @@ describe("uvx Prepare: 설치 실행", () => {
     expect(pinnedPlan.launch?.args.slice(0, 2)).toEqual(["--no-build", "--from"]);
     expect(pinnedPlan.artifact).toMatchObject({ pinned: true, preparation: "uv-cache" });
     // Health도 같은 인자로 실행한다(launch.args).
-    const floating = await createHarness(scratch, { entries: seed });
+    // 떠 있는 명령은 v0.2.0 형식 postgres Manifest로 본다(v0.2.1 #39부터 실제 Registry는 고정 버전이다).
+    const floating = await createHarness(scratch, { entries: withPostgres({ command: "uvx postgres-mcp --access-mode=restricted" }) });
     const floatingPlan = (await plannedOf(floating, floating.request("postgres-mcp", CURSOR))).plan;
     expect(floatingPlan.launch?.args).not.toContain("--no-build");
     const explicit = await createHarness(scratch, { entries: withPostgres({ command: "uvx --no-build --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted" }) });

@@ -41,7 +41,11 @@ describe("project recommend 결과 진단(v0.2.0 P0-1)", () => {
   });
 
   it("Go·Express·NestJS·Unity·Unreal을 분석해 추천 또는 이유를 보여준다", async () => {
-    expect(await human("go-service")).toMatch(/Serena \(serena\)/u);
+    // v0.2.1 #39: 코드 탐색 도구(serena)는 지원 중단으로 Registry에서 빠졌다. 추천 대신 이유와 후보 없는 Gap을 보여 준다.
+    const go = await human("go-service");
+    expect(go).toContain("필요한 Capability는 있지만 Verified Registry에 해당 도구가 없습니다");
+    expect(go).toContain("의미 기반 코드 탐색 [likely-gap]");
+    expect(go).not.toMatch(/serena/iu);
     expect(await human("express-postgres-ts")).toMatch(/postgres-mcp/u);
     expect(await human("nestjs-app")).toMatch(/context7/u);
     for (const name of ["unity-game", "unreal-game"]) expect(await human(name)).toContain("후보 없는 Gap");

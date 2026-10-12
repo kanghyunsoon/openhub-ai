@@ -165,11 +165,21 @@
       "backend": "uvx",
       "launch": {
         "args": [
+          "--no-build",
+          "--from",
+          "postgres-mcp==0.3.0",
+          "--with",
+          "mcp==1.30.0",
           "postgres-mcp",
           "--access-mode=restricted"
         ],
         "clientSpec": {
           "args": [
+            "--no-build",
+            "--from",
+            "postgres-mcp==0.3.0",
+            "--with",
+            "mcp==1.30.0",
             "postgres-mcp",
             "--access-mode=restricted"
           ],
@@ -178,29 +188,6 @@
         "envNames": [
           "DATABASE_URI"
         ],
-        "executable": "uvx",
-        "platform": "linux"
-      }
-    },
-    "serena": {
-      "backend": "uvx",
-      "launch": {
-        "args": [
-          "--from",
-          "serena-agent",
-          "serena",
-          "start-mcp-server"
-        ],
-        "clientSpec": {
-          "args": [
-            "--from",
-            "serena-agent",
-            "serena",
-            "start-mcp-server"
-          ],
-          "command": "uvx"
-        },
-        "envNames": [],
         "executable": "uvx",
         "platform": "linux"
       }
@@ -388,11 +375,21 @@
       "backend": "uvx",
       "launch": {
         "args": [
+          "--no-build",
+          "--from",
+          "postgres-mcp==0.3.0",
+          "--with",
+          "mcp==1.30.0",
           "postgres-mcp",
           "--access-mode=restricted"
         ],
         "clientSpec": {
           "args": [
+            "--no-build",
+            "--from",
+            "postgres-mcp==0.3.0",
+            "--with",
+            "mcp==1.30.0",
             "postgres-mcp",
             "--access-mode=restricted"
           ],
@@ -401,29 +398,6 @@
         "envNames": [
           "DATABASE_URI"
         ],
-        "executable": "uvx",
-        "platform": "windows"
-      }
-    },
-    "serena": {
-      "backend": "uvx",
-      "launch": {
-        "args": [
-          "--from",
-          "serena-agent",
-          "serena",
-          "start-mcp-server"
-        ],
-        "clientSpec": {
-          "args": [
-            "--from",
-            "serena-agent",
-            "serena",
-            "start-mcp-server"
-          ],
-          "command": "uvx"
-        },
-        "envNames": [],
         "executable": "uvx",
         "platform": "windows"
       }

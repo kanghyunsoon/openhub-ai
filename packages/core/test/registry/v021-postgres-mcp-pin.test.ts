@@ -1,6 +1,6 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { isPinnedArtifact, loadRegistry, uvxArtifact, uvxPrepareTarget } from "../../src/index";
+import { WITHDRAWN_TOOLS, isPinnedArtifact, loadRegistry, uvxArtifact, uvxPrepareTarget, withdrawnToolOf } from "../../src/index";
 
 /**
  * v0.2.1 P0-7: postgres-mcp는 mcp[cli]>=1.5.0(상한 없음)이라 빈 uv 캐시에서 mcp 2.x가 설치되어 import 오류로 시작하지 못했다
@@ -27,10 +27,10 @@ describe("v0.2.1 postgres-mcp Manifest", () => {
     expect(tokens.slice(-2)).toEqual(["postgres-mcp", "--access-mode=restricted"]);
   });
 
-  it("serena는 serena-agent==1.7.0이고 소스 빌드는 proxy-tools 0.1.0 하나만 검토 목록에 있다", () => {
-    const serena = entries.find((e) => e.manifest.name === "serena")!.manifest;
-    const args = String(serena.install.options?.["command"]).split(" ").slice(1);
-    expect(uvxPrepareTarget(args)).toEqual({ from: "serena-agent==1.7.0", withPins: [] });
-    expect(serena.install.options?.["prepare"]).toEqual({ build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1.0", source: "pypi-sdist" }] });
+  // v0.2.1 #39(D1): Serena는 검토되지 않은 소스 빌드(proxy-tools) 없이는 실행할 수 없어 신규 설치를 중단했다. Registry에는 없고 지원 중단 목록에만 있다.
+  it("serena는 Registry에 없고 지원 중단 목록에 있으며(재지원은 Issue #59), 목록에는 실행 명령이 없다", () => {
+    expect(entries.map((e) => e.manifest.name)).not.toContain("serena");
+    expect(withdrawnToolOf("serena")).toMatchObject({ toolId: "serena", since: "0.2.1", issue: "https://github.com/kanghyunsoon/openhub-ai/issues/59" });
+    for (const t of WITHDRAWN_TOOLS) expect(Object.keys(t).sort()).toEqual(["displayName", "issue", "reason", "reasonEn", "since", "toolId"]);
   });
 });

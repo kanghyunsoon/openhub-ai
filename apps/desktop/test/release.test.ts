@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { floatingPostgresRegistry } from "./fixture-registry";
 import { afterAll, describe, expect, it } from "vitest";
 import { PINOKIO_APPROVAL_MESSAGES, type BackendProbeReport, type ExecChild, type ExecSpawner, type LifecycleEnvironment } from "@openhub/core";
 import { setDesktopLocale } from "../src/i18n/index";
@@ -17,7 +18,8 @@ import { COMMIT, newHome, pinokioManifest, ptermLayout, realFs } from "../../../
 /** TASK-057 Desktop Release·Impact·Pinokio Preview. Desktop 설치·업데이트로 만든 실제 설정·Version State 위에서 IPC를 호출한다. */
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const SEED_SNAPSHOT = path.join(ROOT, "packages/core/test/fixtures/recommendation/metadata.seed-synthetic.json");
-const REGISTRY = path.join(ROOT, "registry");
+// v0.2.1 #39: postgres-mcp만 버전 없는 형식으로 둔 Registry 사본(Desktop update 흐름 확인용, fixture-registry.ts 참고).
+const REGISTRY = await floatingPostgresRegistry(ROOT);
 const read = (rel: string) => readFile(path.resolve(import.meta.dirname, "..", rel), "utf8");
 const scratch = await mkdtemp(path.join(tmpdir(), "openhub-desktop-release-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));

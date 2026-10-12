@@ -5,6 +5,7 @@ import type { LifecycleResultV1 } from "./result";
 import type { LastHealth } from "./state";
 import type { LifecycleToolStatus } from "./status";
 import { LIFECYCLE_STATE_LOGICAL_PATH } from "./store";
+import { withdrawnToolOf } from "../registry/withdrawn";
 
 /**
  * Lifecycle Preview·결과·상태 공통 문장(TASK-045·046). CLI와 Desktop이 같은 문장을 쓴다(Desktop은 textContent로만 렌더링).
@@ -156,6 +157,9 @@ const STATE_LABEL: Readonly<Record<LifecycleToolStatus["state"], string>> = {
 export function formatLifecycleStatusItem(item: LifecycleToolStatus): string[] {
   const head = item.serverName + " · " + CLIENT_LABEL[item.client as keyof typeof CLIENT_LABEL] + " · " + SCOPE_LABEL[item.scope] + " (" + item.file + ")";
   const lines = [head, "  Tool       " + (item.toolId ?? "(식별 안 됨)"), "  상태       " + STATE_LABEL[item.state]];
+  // 지원 중단 도구(v0.2.1 #39): 상태는 그대로 보여 주고, 새 작업을 할 수 없다는 것과 남은 경로를 알린다.
+  const withdrawn = item.toolId === null ? undefined : withdrawnToolOf(item.toolId);
+  if (withdrawn !== undefined) lines.push("  지원 중단   v" + withdrawn.since + "부터 새 설치·업데이트·Health 미지원. 설정·State는 그대로이고 중단된 작업은 recover로 복구할 수 있습니다 (" + withdrawn.issue + ")");
   if (item.diagnostics !== undefined) lines.push("  함께 감지   " + item.diagnostics.slice(1).join(", "));
   if (item.launcher !== undefined) lines.push("  실행 경로   유효하지 않음: " + item.launcher.reason + " (자동으로 고치지 않습니다)");
   if (item.artifact !== null) {
