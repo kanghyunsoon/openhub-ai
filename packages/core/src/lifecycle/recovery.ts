@@ -161,6 +161,28 @@ export async function planRecovery(options: RecoveryPlanOptions): Promise<Recove
 }
 
 const same = (a: unknown, b: unknown) => JSON.stringify(canonicalize(a)) === JSON.stringify(canonicalize(b));
+
+/**
+ * (v0.2.1) 남은 Journal을 지금 복구할 수 있는지(읽기 전용, 쓰기·network·spawn 0). status 화면이 "어떻게 복구하는지"를 정확히 알리는 데 쓴다.
+ * - undo: 승인하면 변경 전 항목으로 되돌릴 수 있다.
+ * - discard: 설정이 이미 변경 전이거나 작업이 끝까지 완료돼 작업 기록만 지우면 된다.
+ * - manual: 자동으로 복구하지 않는다(외부 변경·손상된 기록 등). blockers에 이유 code가 있다.
+ * 이 도구의 남은 Journal이 없으면 null.
+ */
+export interface RecoveryAvailability {
+  toolId: string;
+  available: "undo" | "discard" | "manual";
+  blockers: string[];
+}
+export async function recoveryAvailability(options: Omit<RecoveryPlanOptions, "mode">): Promise<RecoveryAvailability | null> {
+  const undo = await planRecovery({ ...options, mode: "undo" });
+  if (!undo.ok) return undo.code === "NO_INTERRUPTED_OPERATION" ? null : { toolId: options.toolId, available: "manual", blockers: [undo.code] };
+  if (undo.planned.plan.status === "ready") return { toolId: options.toolId, available: "undo", blockers: [] };
+  const discard = await planRecovery({ ...options, mode: "discard" });
+  if (discard.ok && discard.planned.plan.status === "ready") return { toolId: options.toolId, available: "discard", blockers: [] };
+  const codes = [...new Set(undo.planned.plan.blockers.map((b) => b.code))].filter((c) => c !== "NOTHING_TO_UNDO" && c !== "OPERATION_COMPLETED");
+  return { toolId: options.toolId, available: "manual", blockers: codes };
+}
 export function diffRecoveryPlans(approved: RecoveryPlanV1, current: RecoveryPlanV1): RecoveryChange[] {
   const out = new Set<RecoveryChange>();
   if (approved.journalDigest !== current.journalDigest || approved.transactionId !== current.transactionId) out.add("journal");

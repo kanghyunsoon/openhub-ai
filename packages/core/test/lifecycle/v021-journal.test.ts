@@ -11,6 +11,7 @@ import {
   readJournals,
   readLifecycleState,
   recordInstallInState,
+  recoveryAvailability,
   removeJournal,
   requestLifecycleApproval,
   requestRecoveryApproval,
@@ -255,7 +256,9 @@ const OBSTACLE = (id: string) => id + ".claim-1-deadbeef.json";
 describe("v0.2.1 P0-3 보완: 잠금·손상 Journal·정리 확인·단계 갱신 실패", () => {
   it("[A] 다른 OpenHub 작업이 진행 중이면 승인된 복구도 OPERATION_IN_PROGRESS이고 설정·Journal을 바꾸지 않는다. 끝난 뒤에는 복구된다", async () => {
     const c = await installed();
+    expect(await recoveryAvailability(c.recoveryOptions())).toBeNull(); // 남은 기록 없음
     await c.interrupt();
+    expect(await recoveryAvailability(c.recoveryOptions())).toEqual({ toolId: "github-mcp-server", available: "undo", blockers: [] });
     const killed = await c.files();
     const { run } = await c.approveRecovery();
     // 작업 잠금이 회수된 뒤(강제 종료 상태) 다른 작업이 진행 중인 동안 복구를 실행한다.
@@ -352,6 +355,7 @@ describe("v0.2.1 P0-3 보완: 잠금·손상 Journal·정리 확인·단계 갱�
     expect((await c.journals()).map((j) => j.phase)).toEqual(["state-commit"]);
     expect(await c.status()).toEqual(["interrupted-update"]);
     const committed = await c.files();
+    expect(await recoveryAvailability(c.recoveryOptions())).toEqual({ toolId: "github-mcp-server", available: "discard", blockers: [] });
     const undo = await planRecovery(c.recoveryOptions());
     expect(undo.ok && undo.planned.plan.status).toBe("blocked");
     expect(undo.ok && undo.planned.plan.blockers.map((b) => b.code)).toEqual(["OPERATION_COMPLETED"]);

@@ -1,4 +1,4 @@
-import { readFile, rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { planLifecycleRequest, readJournals, recordInstallInState, requestLifecycleApproval, runInstallTransaction, runLifecycleTransaction, type LifecycleEnvironment, type LifecycleRequest } from "@openhub/core";
@@ -80,5 +80,25 @@ describe("v0.2.1 CLI openhub lifecycle recover", () => {
     expect(JSON.parse(await readFile(c.file, "utf8"))).toEqual(JSON.parse(c.original));
     const left = await readJournals(c.h.homeDir);
     expect(left.ok && left.journals).toEqual([]);
+  });
+
+  it("lifecycle status는 남은 작업 기록마다 지금 복구할 수 있는지와 정확한 명령을 알린다(되돌리기 가능 / 자동 복구 불가)", async () => {
+    const status = async (c: { homeDir: string; projectRoot: string }, json = false) => {
+      const io = memoryIO(REPO);
+      const full = Object.assign(io, { homeDir: c.homeDir });
+      const code = await runCli(["lifecycle", "status", "--project", c.projectRoot, ...(json ? ["--json"] : [])], full);
+      return { code, out: io.stdout.join("\n") };
+    };
+    const c = await interrupted();
+    const s = await status(c.h);
+    expect(s.code).toBe(0);
+    expect(s.out).toContain("interrupted-update");
+    expect(s.out).toContain("복구 가능  github-mcp-server: openhub lifecycle recover github-mcp-server — 승인하면");
+    expect(JSON.parse((await status(c.h, true)).out).recovery).toEqual([{ toolId: "github-mcp-server", available: "undo", blockers: [] }]);
+    // 사용자가 같은 항목을 바꿨으면 자동 복구 대상이 아니다.
+    await writeFile(c.file, '{ "mcpServers": { "github": { "command": "docker", "args": ["run", "-i", "--rm", "my-own-image"] } } }\n');
+    const manual = await status(c.h);
+    expect(manual.out).toContain("자동 복구 불가  github-mcp-server (EXTERNAL_CHANGE)");
+    expect(manual.out).not.toContain("복구 가능  github-mcp-server");
   });
 });
