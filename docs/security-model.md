@@ -23,6 +23,40 @@ OpenHub runs third-party tools on your machine, so it is built around a few fixe
 - Environment variables are handled by name only. OpenHub does not read or check their values and never stores tokens, credentials or credential-bearing URLs in plans, results, logs, caches or Version State.
 - Outputs do not contain absolute paths of your machine.
 
+## What environment an MCP server gets
+
+OpenHub starts third-party code in three places. Each one receives only an allowlisted environment, so API keys and tokens that happen to be in your shell do not reach it.
+
+| Who starts the process | When | Environment it gets |
+| --- | --- | --- |
+| OpenHub (npx/uvx Prepare) | install, update, rollback, after approval | OS and path variables, proxy and CA settings, and the npm or uv settings the download needs (registry/index location and their credentials, if you configured them). No API keys, GitHub tokens, cloud credentials or database URLs. |
+| OpenHub (Health Check, Benchmark) | after approval | OS and path variables (`PATH`, `HOME`, `TEMP`, locale, XDG), proxy and CA settings, the backend's own settings (npm cache and registry, uv cache, Python and index, Docker host and context — never their credentials), and **only the variables the tool's Manifest declares** (for example `DATABASE_URI` for postgres-mcp, `GITHUB_PERSONAL_ACCESS_TOKEN` for github-mcp-server, `KUBECONFIG` for kubernetes-mcp-server). The approval screen lists those names. Everything else is dropped: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `GH_TOKEN`, `AWS_*`, `AZURE_*`, `GOOGLE_APPLICATION_CREDENTIALS`, `NPM_TOKEN`, npm and uv index credentials, undeclared database URLs, `NODE_OPTIONS`, `PYTHONPATH`. |
+| Your client (Claude Code, Codex, Cursor) | every time the client starts the server | Decided by the client, not by OpenHub. OpenHub writes the command, arguments and environment variable *names* to the client configuration; it cannot limit what else the client passes. Check your client's documentation. |
+
+Notes:
+
+- The values of declared variables are passed as they are in your environment. OpenHub does not read, check or store them.
+- The filtering happens inside OpenHub's MCP launcher itself and is the default: if a caller passes no source environment (or an empty one), the server starts with an empty environment, never with the parent's. On Windows, the process launcher (libuv) still fills in a few OS variables when they are missing (`PATH`, `SYSTEMROOT`, `WINDIR`, `SYSTEMDRIVE`, `TEMP`, `USERPROFILE`, `USERNAME`, `USERDOMAIN`, `HOMEDRIVE`, `HOMEPATH`, `LOGONSERVER`); these are not secrets.
+- Variables that change which code or libraries run (`NODE_OPTIONS`, `NODE_PATH`, `PYTHONPATH`, `PYTHONSTARTUP`, `PYTHONHOME`, `LD_*` such as `LD_PRELOAD`, `DYLD_*` such as `DYLD_INSERT_LIBRARIES`, `JAVA_TOOL_OPTIONS`, `PERL5OPT`, `RUBYOPT`, `BASH_ENV`, `ELECTRON_RUN_AS_NODE` and similar) are never passed, even if a Manifest declares them, and Registry validation rejects a Manifest that declares one.
+- This is **not a sandbox**. An MCP server started by OpenHub still runs with your user account: it can read files in your home folder (including configuration files that contain secrets), use the network and start other programs. Limiting environment variables only keeps unrelated secrets in your shell environment away from it.
+- Benchmark passes only the Manifest's **required** variables (optional ones such as `KUBECONFIG` are not part of the benchmark plan).
+- A proxy URL that contains a user name and password is passed, because the server may need the network; avoid putting credentials in proxy URLs if that matters to you.
+- `docker pull` and the backend version probes (`docker --version`, `npx --version`, `uvx --version`) run your own installed tools, not third-party code, and keep the normal environment.
+- Pinokio scripts run inside Pinokio's own process, not as a child of OpenHub.
+- Health does not pass npm or uv registry credentials. A tool that still downloads packages during Health (a floating version without Prepare) from a private registry can therefore fail Health; exact-version tools are prepared before Health and do not download then.
+
+### Package source must stay the same (Health and Benchmark)
+
+Prepare downloads packages with your npm or uv settings, including a private index or registry. Health and Benchmark must start the server from **the same source**. If a package-source setting in an environment variable cannot be passed to the MCP server unchanged, OpenHub does not start it at all (no process is started, and there is no fallback to the public PyPI or npm registry):
+
+- an index or registry URL that contains credentials or a query or fragment: `UV_INDEX_URL`, `UV_INDEX`, `UV_DEFAULT_INDEX`, `UV_EXTRA_INDEX_URL`, `NPM_CONFIG_REGISTRY` (any letter case);
+- uv named-index credentials (`UV_INDEX_<NAME>_USERNAME`, `UV_INDEX_<NAME>_PASSWORD`);
+- npm scope registries set only in environment variables (`npm_config_@scope:registry`).
+
+The plan is blocked (`PACKAGE_SOURCE_UNVERIFIED`; Benchmark: `BENCHMARK_PACKAGE_SOURCE_UNVERIFIED`) and the message names the variables, never their values. OpenHub checks again right before starting the server; if the environment changed after approval, the run stops with `PLAN_STALE` and you need a new plan and approval. Why: measured with uv 0.12.3 and npm, running the same pinned command without that setting re-resolves from the default public index. Offline mode is not used as a workaround: the cache is keyed by index URL, so it cannot prove which source a cached package came from.
+
+What to do: put the index or registry and its credentials in `uv.toml` or `.npmrc` and remove them from the environment variable. uv and npm read those files themselves, so Prepare, Health and the client use the same source, and OpenHub does not hand the credentials to the MCP server. (The server still runs as your user and could read those files; see "not a sandbox" above.) Credentials embedded in a URL path cannot be told apart from an ordinary path and are not detected.
+
 ## Untrusted data
 
 Release notes, repository descriptions, discovery candidates and AI summaries are untrusted text. They are shown as plain text, never executed and never used as approval. See [Discovery trust](discovery-trust.md) and [LLM privacy](llm-privacy.md).

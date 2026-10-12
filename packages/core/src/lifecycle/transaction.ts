@@ -18,6 +18,7 @@ import {
 } from "../tool-config/index";
 import { executeLifecyclePreparation, type ExecSpawner, type IsolatedDir } from "../process/executor";
 import { createTreeKiller, runHealthCheck, type HealthCheckResult, type HealthRunOptions, type HealthRunReport, type HealthSpawner, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
+import { mcpPackageSourceCheck, type McpSourceEnv } from "../process/mcp-env";
 import type { BackendProbeReport } from "../process/probe";
 import { uvSourceSettings, type UvConfigReader } from "../process/uvx-prepare";
 import type { RecommendPlatform } from "../recommendation/index";
@@ -91,6 +92,11 @@ export interface LifecycleEnvironment {
   readUvConfig?: UvConfigReader;
   /** Health 실행기(테스트 주입용). 기본 runHealthCheck. */
   runHealth?: (verified: VerifiedLifecyclePlan, options: HealthRunOptions) => Promise<HealthRunReport>;
+  /**
+   * Health가 실행하는 MCP 서버 환경의 원본(보통 process.env, CLI·Desktop이 넘긴다). OS 기본·backend 설정·Manifest가 선언한 이름만
+   * 골라 넘긴다(mcpProcessEnv). 없으면 빈 원본으로 거른다(부모 환경 상속 없음, fail-closed).
+   */
+  mcpSourceEnv?: McpSourceEnv;
   /** operation별 Plan 생성기 교체(테스트 주입용). 기본은 planLifecycle(update·rollback·health). */
   planners?: Partial<Record<LifecycleOperation, (request: LifecycleRequest, env: LifecycleEnvironment) => Promise<LifecyclePlanResult>>>;
   /** OpenHub 관리 tool config 파일 접근(v0.2.0, 테스트 주입용). */
@@ -118,6 +124,9 @@ export async function planLifecycleRequest(request: LifecycleRequest, env: Lifec
     ...(env.fetch === undefined ? {} : { fetch: env.fetch }),
     ...(env.timeoutMs === undefined ? {} : { timeoutMs: env.timeoutMs }),
     ...(env.uvChildEnv === undefined ? {} : { uvSource: await uvSourceSettings(env.uvChildEnv(), request.platform, env.readUvConfig) }),
+    // v0.2.1(#46 리뷰): Health가 Prepare와 같은 패키지 출처를 쓸 수 있는지와 승인할 출처 digest(값 없음). 원본이 없으면 확인 불가로 막는다.
+    // backend는 Version State로 정해지므로 둘 다 넘기고 plan이 고른다.
+    packageSource: { npx: mcpPackageSourceCheck(env.mcpSourceEnv, "npx"), uvx: mcpPackageSourceCheck(env.mcpSourceEnv, "uvx") },
     ...(env.configFs === undefined ? {} : { fs: env.configFs }),
     ...(env.toolConfigFs === undefined ? {} : { toolConfigFs: env.toolConfigFs }),
     ...(env.windowsNpx === undefined ? {} : { clientLauncher: env.windowsNpx }),
@@ -567,6 +576,7 @@ async function runTransaction(planned: PlannedLifecycle, approval: LifecycleAppr
         ...(toolConfigFile === undefined ? {} : { toolConfigFile }),
         ...(env.healthSpawner === undefined ? {} : { spawner: env.healthSpawner }),
         ...(env.killTree === undefined ? {} : { killTree: env.killTree }),
+        ...(env.mcpSourceEnv === undefined ? {} : { sourceEnv: env.mcpSourceEnv }),
       });
       result = report.ok ? report.result : { status: "launch-failed", reason: "spawn-failed", toolCount: null, environmentUnverified: false, terminated: true, excerpt: report.message };
     } catch (error) {

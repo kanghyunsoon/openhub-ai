@@ -20,6 +20,8 @@ import type { RegistryEntry } from "../registry/index";
 import { PROJECT_KEY_PATTERN, artifactIdentitySchema, entryKeyOf, type ToolState } from "../lifecycle/state";
 import { TOOL_CONFIG_PLACEHOLDER } from "../tool-config/index";
 import { configEntryDigest } from "../lifecycle/status";
+import { healthEnvNotice } from "../lifecycle/preview";
+import { mcpPackageSourceCheck, packageSourceCheckMessage, type McpSourceEnv } from "../process/mcp-env";
 import { wheelsOnlyUvxLaunchArgs } from "../installer/backends";
 import { projectKeyFor, readLifecycleState, type StateErrorCode } from "../lifecycle/store";
 
@@ -40,7 +42,7 @@ export const BENCHMARK_TIMEOUTS = Object.freeze({ startupMs: 20_000, handshakeMs
 export const BENCHMARK_METHODS = ["initialize", "notifications/initialized", "tools/list"] as const;
 export const BENCHMARK_APPROVAL_REQUIREMENTS = ["base", "environment-unverified", "artifact-fetch"] as const;
 export type BenchmarkApprovalRequirement = (typeof BENCHMARK_APPROVAL_REQUIREMENTS)[number];
-export const BENCHMARK_BLOCKER_CODES = ["BENCHMARK_NOT_MANAGED", "BENCHMARK_ARTIFACT_UNLOCKED", "BENCHMARK_CONFIG_DRIFT", "BENCHMARK_UNSUPPORTED", "BENCHMARK_ARTIFACT_MISMATCH"] as const;
+export const BENCHMARK_BLOCKER_CODES = ["BENCHMARK_NOT_MANAGED", "BENCHMARK_ARTIFACT_UNLOCKED", "BENCHMARK_CONFIG_DRIFT", "BENCHMARK_UNSUPPORTED", "BENCHMARK_ARTIFACT_MISMATCH", "BENCHMARK_PACKAGE_SOURCE_UNVERIFIED"] as const;
 export type BenchmarkBlockerCode = (typeof BENCHMARK_BLOCKER_CODES)[number];
 export const BENCHMARK_PLAN_CHANGE_KINDS = ["state", "artifact", "launch", "config", "registry", "manifest", "target"] as const;
 export type BenchmarkPlanChange = (typeof BENCHMARK_PLAN_CHANGE_KINDS)[number];
@@ -71,7 +73,16 @@ export const benchmarkPlanSchema = z
       .nullable(),
     state: z.strictObject({ revision: z.number().int().min(1), entryDigest: sha256, appliedPlanDigest: sha256 }).nullable(),
     artifact: z.strictObject({ resolved: artifactIdentitySchema.nullable() }),
-    launch: z.strictObject({ executable: z.enum(INSTALL_BACKENDS), args: z.array(text).min(1), envNames: z.array(z.string().regex(/^[A-Z][A-Z0-9_]*$/u)), cwd: z.literal("isolated") }).nullable(),
+    launch: z
+      .strictObject({
+        executable: z.enum(INSTALL_BACKENDS),
+        args: z.array(text).min(1),
+        envNames: z.array(z.string().regex(/^[A-Z][A-Z0-9_]*$/u)),
+        cwd: z.literal("isolated"),
+        /** v0.2.1(#46 리뷰): 승인한 패키지 출처 digest(npx·uvx에서 출처 설정이 있을 때만). 바뀌면 launch 변경(PLAN_STALE), 실행 직전 다시 확인. */
+        packageSource: sha256.optional(),
+      })
+      .nullable(),
     runs: z.strictObject({ warmup: z.literal(BENCHMARK_RUNS.warmup), measured: z.literal(BENCHMARK_RUNS.measured) }),
     timeouts: z.strictObject({
       startupMs: z.literal(BENCHMARK_TIMEOUTS.startupMs),
@@ -116,6 +127,8 @@ export interface BenchmarkPlanOptions {
   client?: InstallClient;
   scope?: ConfigScope;
   fs?: ConfigFs;
+  /** v0.2.1(#46 리뷰): MCP 서버 환경의 원본(보통 process.env). 패키지 출처를 Prepare와 같게 유지할 수 없으면 blocker다(값은 Plan에 넣지 않는다). */
+  mcpSourceEnv?: McpSourceEnv;
 }
 export type BenchmarkPlanErrorCode = "TOOL_NOT_FOUND" | "BENCHMARK_TARGET_AMBIGUOUS" | StateErrorCode;
 export type BenchmarkPlanResult = { ok: true; planned: PlannedBenchmark } | { ok: false; code: BenchmarkPlanErrorCode; message: string };
@@ -171,7 +184,18 @@ export async function planBenchmark(options: BenchmarkPlanOptions): Promise<Benc
       blockers.push({ code: "BENCHMARK_ARTIFACT_MISMATCH", message: "실행 인자에 Version State의 고정 artifact가 없습니다" });
     }
     // v0.2.1(#45 리뷰): 고정 버전 wheel-only uvx는 Benchmark도 --no-build로 실행한다(기록이 이전 형식이어도 소스 빌드 없음).
-    if (args.length > 0) launch = { executable: state.backend, args: wheelsOnlyUvxLaunchArgs(manifest, state.backend, args), envNames: manifest.env.filter((e) => e.required).map((e) => e.name).sort(), cwd: "isolated" };
+    // v0.2.1(#46 리뷰): 원본이 없거나 Prepare와 같은 패키지 출처를 MCP 서버 환경에 유지할 수 없으면 실행하지 않는다(이름만 안내, 값 없음).
+    const sourceCheck = mcpPackageSourceCheck(options.mcpSourceEnv, state.backend);
+    if (!sourceCheck.ok) blockers.push({ code: "BENCHMARK_PACKAGE_SOURCE_UNVERIFIED", message: packageSourceCheckMessage(sourceCheck).slice(0, 400) });
+    if (args.length > 0) {
+      launch = {
+        executable: state.backend,
+        args: wheelsOnlyUvxLaunchArgs(manifest, state.backend, args),
+        envNames: manifest.env.filter((e) => e.required).map((e) => e.name).sort(),
+        cwd: "isolated",
+        ...(sourceCheck.ok && sourceCheck.digest !== null ? { packageSource: sourceCheck.digest } : {}),
+      };
+    }
   }
   const requirements: BenchmarkApprovalRequirement[] = ["base"];
   if (manifest.env.some((e) => e.required)) requirements.push("environment-unverified");
@@ -268,6 +292,7 @@ export function formatBenchmarkPlanPreview(planned: PlannedBenchmark): string[] 
   if (p.launch !== null) lines.push("실행: " + [p.launch.executable, ...p.launch.args].join(" ") + " (격리 임시 디렉터리, shell 없음)");
   lines.push("횟수: 준비 " + String(p.runs.warmup) + " + 측정 " + String(p.runs.measured) + " · 제한: 시작 20초 · handshake 10초 · 회당 45초 · 전체 300초");
   lines.push(BENCHMARK_NO_TOOL_CALL_NOTICE);
+  if (p.launch !== null) lines.push(healthEnvNotice(p.launch.envNames));
   lines.push("결과: median·min·max·실패 수(p95 없음, peak RSS 미측정). 이 PC에서만 의미가 있고 저장하지 않습니다.");
   for (const b of p.blockers) lines.push("차단: " + b.code + " — " + b.message);
   if (p.status === "ready") {

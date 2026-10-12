@@ -321,6 +321,8 @@ export async function runBenchmarkCommand(argv: readonly string[], io: M7Command
     ...(client === undefined ? {} : { client }),
     ...(scope === undefined ? {} : { scope }),
     ...(io.configFs === undefined ? {} : { fs: io.configFs }),
+    // 패키지 출처 확인용 원본(core가 이름만 비교한다. 값은 Plan에 넣지 않는다).
+    mcpSourceEnv: () => process.env,
   };
   const first = await planBenchmark(options);
   if (!first.ok) {
@@ -349,6 +351,7 @@ export async function runBenchmarkCommand(argv: readonly string[], io: M7Command
     tempBase: io.tempBase ?? os.tmpdir(),
     windowsNpx,
     host: { arch: process.arch, nodeVersion: process.versions.node },
+    sourceEnv: () => process.env,
     ...(io.healthSpawner === undefined ? {} : { spawner: io.healthSpawner }),
     ...(io.killTree === undefined ? {} : { killTree: io.killTree }),
   });

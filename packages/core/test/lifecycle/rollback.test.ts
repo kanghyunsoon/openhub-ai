@@ -53,6 +53,8 @@ function envFor(h: Harness, o: EnvOptions = {}) {
   const { spawner, calls: pulls } = fakeNpmSpawner({ cacheRoot: path.join(scratch, "npm-cache-" + Math.random().toString(36).slice(2, 8)), exitCode: o.exitCode ?? 0 });
   const [status, reason] = o.health ?? ["healthy", null];
   const env: LifecycleEnvironment = {
+    // 명시적인 빈 원본(#46 리뷰): 원본이 없으면 npx·uvx Health·Benchmark가 막힌다.
+    mcpSourceEnv: () => ({}),
     loadEntries: async () => o.entries ?? seed,
     probe: () => h.env.probe(),
     tempBase: scratch,

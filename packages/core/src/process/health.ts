@@ -6,6 +6,7 @@ import { isVerifiedLifecyclePlan, type HealthStep, type VerifiedLifecyclePlan } 
 import type { RecommendPlatform } from "../recommendation/index";
 import { EXEC_EXCERPT_BYTES, OutputTail, redactExcerpt, type ExecSpawner } from "./executor";
 import { TOOL_CONFIG_PLACEHOLDER, substituteToolConfig } from "../tool-config/index";
+import { mcpProcessEnv, mcpSpawnEnvironment, type McpChildEnvInput, type McpSourceEnv } from "./mcp-env";
 
 /**
  * MCP Health Check(TASK-041, D-019). 승인된 LifecyclePlan의 health 단계로만 MCP 서버를 실행해 handshake를 확인한다.
@@ -15,7 +16,9 @@ import { TOOL_CONFIG_PLACEHOLDER, substituteToolConfig } from "../tool-config/in
  * - handshake: initialize → notifications/initialized → tools/list → stdin 닫기 → 종료. Client 앱은 실행하지 않는다.
  * - 한도: startup 20초(initialize 응답), handshake 10초(tools/list 응답), 전체 45초. stdout·stderr 각 64KB 보관, 1MB 초과 시 kill.
  * - 종료: POSIX는 process group kill, Windows는 taskkill.exe /T /F /PID(shell:false). 종료 실패도 Health 실패다.
- * - cwd는 OpenHub가 만든 격리 임시 디렉터리. spawn 옵션에 env key가 없어 OS 기본으로 상속된다. process.env를 읽지 않는다.
+ * - cwd는 OpenHub가 만든 격리 임시 디렉터리. process.env를 읽지 않는다.
+ * - 환경(v0.2.1, fail-closed): MCP 서버는 항상 mcpProcessEnv 결과(OS 기본·backend 설정·Manifest 선언 이름, 코드 주입 변수 제외)로만 시작한다.
+ *   호출 측이 원본(sourceEnv, 보통 process.env)을 주지 않으면 빈 원본으로 거른다. 부모 환경을 그대로 상속하는 경로는 없다.
  *   Windows npx 실행 경로(node.exe·npx-cli.js)는 호출 측이 probe 단계에서 찾아 넘긴다(Health 안에서 PATH를 읽지 않는다).
  * - 결과에는 상태·사유·tool 개수·redact한 1KB 이하 출력만 남는다. 실행 경로·cwd·env 값은 남기지 않는다.
  */
@@ -34,7 +37,9 @@ export type HealthFailureReason =
   | "tools-list-error"
   | "output-limit"
   | "termination-failed"
-  | "unsupported-health-check";
+  | "unsupported-health-check"
+  /** v0.2.1(#46 리뷰): Prepare와 같은 패키지 출처를 확인할 수 없어 실행하지 않았다(spawn 0). */
+  | "package-source-unverified";
 export const HEALTH_OUTPUT_KILL_BYTES = 1024 * 1024;
 export const HEALTH_SHUTDOWN_GRACE_MS = 2000;
 export const HEALTH_KILL_WAIT_MS = 5000;
@@ -68,11 +73,13 @@ export interface HealthSpawnOptions {
   readonly stdio: readonly ["pipe", "pipe", "pipe"];
   /** POSIX에서 process group kill을 위해 새 group으로 시작한다. */
   readonly detached: boolean;
+  /** 자식 환경(mcpProcessEnv 결과). 항상 있다: 부모 환경을 상속하지 않는다. */
+  readonly env: Record<string, string>;
 }
 export type HealthSpawner = (executable: string, args: readonly string[], options: HealthSpawnOptions) => HealthChild;
 
 export const nodeHealthSpawner: HealthSpawner = (executable, args, options) =>
-  spawn(executable, [...args], { shell: false, cwd: options.cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], detached: options.detached });
+  spawn(executable, [...args], { shell: false, cwd: options.cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], detached: options.detached, env: { ...options.env } });
 
 /** process tree 종료. 성공(이미 없음 포함)이면 true. */
 export type TreeKiller = (pid: number, platform: RecommendPlatform) => Promise<boolean>;
@@ -159,6 +166,11 @@ export interface HealthRunOptions {
   spawner?: HealthSpawner;
   killTree?: TreeKiller;
   /**
+   * MCP 서버 환경의 원본(보통 process.env, CLI·Desktop이 넘긴다). Health는 이 값을 그대로 넘기지 않고 항상 mcpProcessEnv로 거른다.
+   * 없으면 빈 원본(부모 환경 상속 없음).
+   */
+  sourceEnv?: McpSourceEnv;
+  /**
    * 격리 임시 디렉터리 기준. 호출 측이 Health 전에 정한다(os.tmpdir()는 Windows에서 TEMP 환경변수를 읽으므로
    * Health 안에서 부르지 않는다).
    */
@@ -206,7 +218,11 @@ export async function runHealthCheck(verified: VerifiedLifecyclePlan, options: H
     const realCwd = await realpath(cwd);
     const rel = path.relative(realBase, realCwd);
     if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) return { ok: true, result: result("launch-failed", "spawn-failed", environmentUnverified) };
-    const outcome = await handshake(argv, realCwd, step.timeouts, verified.plan.platform, { ...options, killTree: options.killTree ?? createTreeKiller({ cwd: realBase }) });
+    // 비동기 준비(임시 폴더) 뒤 spawn 직전에 원본을 한 번만 읽어, 그 스냅샷으로 출처 확인·승인 digest 비교·환경 필터링을 한다(#46 리뷰).
+    // 원본 누락·오류, 넘길 수 없는 출처 설정, 승인한 출처와 다름(같은 실행의 Prepare 뒤 변경 포함)이면 spawn 0이고 fallback하지 않는다.
+    const spawnEnv = mcpSpawnEnvironment(options.sourceEnv, { backend: verified.plan.backend, declaredNames: verified.plan.requiredEnv.map((e) => e.name) }, step.packageSource ?? null);
+    if (!spawnEnv.ok) return { ok: true, result: result("launch-failed", "package-source-unverified", environmentUnverified, { excerpt: spawnEnv.message }) };
+    const outcome = await handshake(argv, realCwd, step.timeouts, verified.plan.platform, { ...options, killTree: options.killTree ?? createTreeKiller({ cwd: realBase }) }, spawnEnv.env);
     return { ok: true, result: { ...outcome, environmentUnverified } };
   } finally {
     await rm(cwd, { recursive: true, force: true }).catch(() => undefined);
@@ -227,12 +243,30 @@ export type HandshakeOutcome = Outcome;
 /**
  * 승인 검증을 마친 호출 측(Benchmark)이 같은 handshake를 한 번 실행한다. initialize → notifications/initialized → tools/list → 종료만 하고
  * tools/call은 보내지 않는다. cwd는 호출 측이 만든 격리 디렉터리, argv는 healthArgv 규칙으로 만든 값이다.
+ * envInput.approvedPackageSource는 승인한 패키지 출처 digest(없으면 null)다. 매 호출 spawn 직전에 원본을 한 번만 읽어 그 스냅샷으로
+ * 출처 확인·digest 비교·환경 필터링을 하고, 다르면 실행하지 않는다(#46 리뷰: Benchmark 6회 각각).
  */
-export function runHandshake(argv: string[], cwd: string, timeouts: HealthStep["timeouts"], platform: RecommendPlatform, options: Omit<HealthRunOptions, "healthCheckType" | "tempBase"> & { killTree: TreeKiller }, observer: HandshakeObserver): Promise<HandshakeOutcome> {
-  return handshake(argv, cwd, timeouts, platform, { ...options, healthCheckType: "mcp-handshake", tempBase: cwd }, observer);
+export function runHandshake(
+  argv: string[],
+  cwd: string,
+  timeouts: HealthStep["timeouts"],
+  platform: RecommendPlatform,
+  options: Omit<HealthRunOptions, "healthCheckType" | "tempBase"> & { killTree: TreeKiller },
+  observer: HandshakeObserver,
+  envInput: McpChildEnvInput & { approvedPackageSource: string | null },
+): Promise<HandshakeOutcome> {
+  const { approvedPackageSource, ...childInput } = envInput;
+  const spawnEnv = mcpSpawnEnvironment(options.sourceEnv, childInput, approvedPackageSource);
+  if (!spawnEnv.ok) return Promise.resolve({ status: "launch-failed", reason: "package-source-unverified", toolCount: null, terminated: true, excerpt: spawnEnv.message });
+  return handshake(argv, cwd, timeouts, platform, { ...options, healthCheckType: "mcp-handshake", tempBase: cwd }, spawnEnv.env, observer);
 }
 
-function handshake(argv: string[], cwd: string, timeouts: HealthStep["timeouts"], platform: RecommendPlatform, options: HealthRunOptions, observer?: HandshakeObserver): Promise<Outcome> {
+/** 승인된 LifecyclePlan의 MCP 서버 환경(backend·Manifest 선언 이름 기준, fail-closed). */
+export function mcpChildEnvForPlan(plan: VerifiedLifecyclePlan["plan"], sourceEnv: McpSourceEnv | undefined): Record<string, string> {
+  return mcpProcessEnv(sourceEnv, { backend: plan.backend, declaredNames: plan.requiredEnv.map((e) => e.name) });
+}
+
+function handshake(argv: string[], cwd: string, timeouts: HealthStep["timeouts"], platform: RecommendPlatform, options: HealthRunOptions, env: Record<string, string>, observer?: HandshakeObserver): Promise<Outcome> {
   const spawner = options.spawner ?? nodeHealthSpawner;
   const killTree = options.killTree!;
   return new Promise<Outcome>((resolve) => {
@@ -347,7 +381,7 @@ function handshake(argv: string[], cwd: string, timeouts: HealthStep["timeouts"]
     };
 
     try {
-      child = spawner(argv[0]!, argv.slice(1), { shell: false, cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], detached: platform !== "windows" });
+      child = spawner(argv[0]!, argv.slice(1), { shell: false, cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"], detached: platform !== "windows", env });
     } catch {
       resolve({ status: "launch-failed", reason: "spawn-failed", toolCount: null, terminated: true, excerpt: null });
       return;

@@ -132,7 +132,7 @@ export async function adoptCandidatesForRenderer(deps: AdoptDeps): Promise<Adopt
         .sort((a, b) => (a.target.client + ":" + a.target.serverName < b.target.client + ":" + b.target.serverName ? -1 : 1));
       for (const e of managed) {
         const id = "project:" + e.target.client + ":" + e.target.serverName;
-        const planned = await planBenchmark({ toolId: e.toolId, projectRoot: dir, homeDir: deps.homeDir, entries, platform: toRecommendPlatform(deps.platform) ?? "linux", includeUser: false, client: e.target.client as InstallClient, scope: "project", ...(deps.configFs === undefined ? {} : { fs: deps.configFs }) });
+        const planned = await planBenchmark({ toolId: e.toolId, projectRoot: dir, homeDir: deps.homeDir, entries, platform: toRecommendPlatform(deps.platform) ?? "linux", includeUser: false, client: e.target.client as InstallClient, scope: "project", mcpSourceEnv: () => process.env, ...(deps.configFs === undefined ? {} : { fs: deps.configFs }) });
         if (!planned.ok) benchmark.push({ id, toolId: e.toolId, ready: false, reasons: [planned.code + " — " + adoptBenchmarkErrorText(planned.code, planned.message)] });
         else benchmark.push({ id, toolId: e.toolId, ready: planned.planned.plan.status === "ready", reasons: planned.planned.plan.blockers.map(benchmarkBlockerText) });
       }
@@ -173,7 +173,7 @@ export async function benchmarkRunForRenderer(deps: AdoptDeps, id: unknown): Pro
   const key = await projectKeyFor(dir).catch(() => null);
   const entry = state.ok ? Object.values(state.state.entries).find((e) => e.target.scope === "project" && e.target.projectKey === key && e.target.client === parsed.client && e.target.serverName === parsed.serverName) : undefined;
   if (entry === undefined) return { status: "blocked", lines: [tr("benchmark.notManaged")] };
-  const options: BenchmarkPlanOptions = { toolId: entry.toolId, projectRoot: dir, homeDir: deps.homeDir, entries, platform: toRecommendPlatform(deps.platform) ?? "linux", includeUser: false, client: parsed.client, scope: "project", ...(deps.configFs === undefined ? {} : { fs: deps.configFs }) };
+  const options: BenchmarkPlanOptions = { toolId: entry.toolId, projectRoot: dir, homeDir: deps.homeDir, entries, platform: toRecommendPlatform(deps.platform) ?? "linux", includeUser: false, client: parsed.client, scope: "project", mcpSourceEnv: () => process.env, ...(deps.configFs === undefined ? {} : { fs: deps.configFs }) };
   const first = await planBenchmark(options);
   if (!first.ok) return { status: "error", code: first.code, message: adoptBenchmarkErrorText(first.code, first.message) };
   const preview = benchmarkPreviewLines(first.planned);
@@ -187,6 +187,7 @@ export async function benchmarkRunForRenderer(deps: AdoptDeps, id: unknown): Pro
     tempBase: deps.tempBase ?? os.tmpdir(),
     windowsNpx,
     host: { arch: process.arch, nodeVersion: process.versions.node },
+    sourceEnv: () => process.env,
     ...(deps.healthSpawner === undefined ? {} : { spawner: deps.healthSpawner }),
     ...(deps.killTree === undefined ? {} : { killTree: deps.killTree }),
   });

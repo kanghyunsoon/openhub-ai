@@ -348,6 +348,8 @@ function environment(deps: LifecycleDeps, entries: Awaited<ReturnType<typeof loa
     now: deps.now ?? (() => new Date()),
     // npx Prepare의 npm 자식 process에는 허용 목록 환경만 넘긴다(API key·token·클라우드 자격증명 제외).
     npmChildEnv: () => npmChildEnv(process.env),
+    // Health가 실행하는 MCP 서버에는 OS 기본·backend 설정·Manifest가 선언한 환경변수만 넘긴다(그 밖의 API key·token 제외).
+    mcpSourceEnv: () => process.env,
     uvChildEnv: () => uvChildEnv(process.env),
     windowsNpx:
       deps.windowsNpx ??
@@ -530,7 +532,7 @@ export async function planForRenderer(operation: LifecycleOperation, session: Li
 }
 
 /** 실패 코드별 다음 행동(고정 문장, 카탈로그 guide.<CODE>). 코드는 Core LifecycleResult 계약 그대로다. */
-const GUIDED_CODES = ["PLAN_STALE", "CLIENT_LAUNCHER_UNAVAILABLE", "TOOL_CONFIG_DRIFT", "TOOL_CONFIG_STALE", "CONFIG_DRIFT", "CONFIG_RESTORE_FAILED", "COMPENSATION_INCOMPLETE", "MANUAL_SETUP_REQUIRED"] as const;
+const GUIDED_CODES = ["PLAN_STALE", "CLIENT_LAUNCHER_UNAVAILABLE", "TOOL_CONFIG_DRIFT", "TOOL_CONFIG_STALE", "CONFIG_DRIFT", "CONFIG_RESTORE_FAILED", "COMPENSATION_INCOMPLETE", "MANUAL_SETUP_REQUIRED", "package-source-unverified"] as const;
 const guidance = (code: string | undefined): string | undefined => ((GUIDED_CODES as readonly string[]).includes(code ?? "") ? tr(("guide." + code) as MessageKey) : undefined);
 const SUCCEEDED = new Set<LifecycleResultV1["status"]>(["updated", "rolled-back", "health-checked", "repaired", "up-to-date"]);
 

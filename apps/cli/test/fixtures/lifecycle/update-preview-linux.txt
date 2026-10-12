@@ -16,6 +16,7 @@ Client 실행 명령
 Health Check
   필수 — MCP 서버를 격리 임시 디렉터리에서 실행해 initialize·tools/list 응답을 확인합니다(Client 앱은 실행하지 않음)
   제한 시간 startup 20초 · handshake 10초 · 전체 45초
+  MCP 서버 process에는 OS 실행에 필요한 변수(PATH·HOME·TEMP 등)만 넘깁니다(Manifest가 선언한 환경변수 없음). 그 밖의 API 키·token·자격증명 환경변수는 넘기지 않습니다
   Health가 실패하면 설정을 원래 내용으로 되돌리고 Version State를 바꾸지 않습니다
 
 환경변수

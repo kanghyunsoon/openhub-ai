@@ -378,7 +378,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 Kubernetes tool conf
       expect(cursor).toEqual(claude);
       expect(codex).toEqual(claude);
 
-      const lifecycleEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), spawner: nodeExecSpawner, windowsNpx: async () => windowsNpx, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env) };
+      const lifecycleEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), spawner: nodeExecSpawner, windowsNpx: async () => windowsNpx, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env), mcpSourceEnv: () => process.env };
       const runOp = async (operation: LifecycleRequest["operation"]) => {
         const req: LifecycleRequest = { operation, toolId: "kubernetes-mcp-server", projectRoot: h.projectRoot, homeDir: h.homeDir, platform, includeUser: false };
         // CLI·Desktop과 같은 경로(planLifecycleRequest: Windows 실행 경로 검증 포함). 실행 직전 재생성도 같은 함수다.
@@ -542,7 +542,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 Kubernetes 사용자
       };
       expect(await mcpCheck("user installed")).toBe(13);
 
-      const lifecycleEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), spawner: nodeExecSpawner, windowsNpx: async () => windowsNpx, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env) };
+      const lifecycleEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), spawner: nodeExecSpawner, windowsNpx: async () => windowsNpx, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env), mcpSourceEnv: () => process.env };
       const runOp = async (operation: LifecycleRequest["operation"]) => {
         const req: LifecycleRequest = { operation, toolId: "kubernetes-mcp-server", projectRoot: h.projectRoot, homeDir: h.homeDir, platform, includeUser: true, targets: [{ client: "cursor", scope: "user" }] };
         const built = await planLifecycleRequest(req, lifecycleEnv);
@@ -642,7 +642,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 범위별 추가 설
       }
 
       // lifecycle Health(실제 MCP Health): 추가한 Codex 프로젝트 대상만.
-      const lifecycleEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), spawner: nodeExecSpawner, windowsNpx: async () => windowsNpx, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env) };
+      const lifecycleEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), spawner: nodeExecSpawner, windowsNpx: async () => windowsNpx, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env), mcpSourceEnv: () => process.env };
       const req: LifecycleRequest = { operation: "health", toolId: "kubernetes-mcp-server", projectRoot: h.projectRoot, homeDir: h.homeDir, platform, includeUser: false, targets: [{ client: "codex", scope: "project" }] };
       const built = await planLifecycleRequest(req, lifecycleEnv);
       if (!built.ok) throw new Error(built.code);
@@ -703,7 +703,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || process.platform !== "win3
       const before = await entryOf();
       expect(before.command).toBe(old.node);
 
-      const lifecycleEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), spawner: nodeExecSpawner, windowsNpx: async () => current, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env) };
+      const lifecycleEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), spawner: nodeExecSpawner, windowsNpx: async () => current, killTree: createTreeKiller({ cwd: os.tmpdir() }), npmChildEnv: () => npmChildEnv(process.env), mcpSourceEnv: () => process.env };
       const statusOf = async () => {
         const s = await lifecycleStatus({ projectRoot: h.projectRoot, homeDir: h.homeDir, entries, platform: "windows", includeUser: false });
         if (!s.ok) throw new Error(s.code);

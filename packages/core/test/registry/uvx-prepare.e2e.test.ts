@@ -74,7 +74,8 @@ async function installAndHealth(toolId: string, entries: RegistryEntry[]) {
   expect(doc.mcpServers.notes).toEqual({ command: "uvx", args: ["notes-mcp==1.0.0"] });
   if (result.status !== "succeeded") return { planned, result, health: null, config: doc };
   expect(await recordInstallInState(planned, result, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() })).toMatchObject({ ok: true });
-  const life: LifecycleEnvironment = { loadEntries: async () => entries, probe: () => h.env.probe(), tempBase: h.isoBase, now: () => new Date(), runHealth: runHealthCheck, uvChildEnv: () => uvChildEnv(process.env) };
+  // CLI·Desktop과 같은 경로: Health 환경의 원본을 넘기고 core가 허용 목록으로 거른다(#46). 원본이 없으면 빈 환경(fail-closed)이다.
+  const life: LifecycleEnvironment = { loadEntries: async () => entries, probe: () => h.env.probe(), tempBase: h.isoBase, now: () => new Date(), runHealth: runHealthCheck, uvChildEnv: () => uvChildEnv(process.env), mcpSourceEnv: () => process.env };
   const req = { operation: "health" as const, toolId, projectRoot: h.projectRoot, homeDir: h.homeDir, platform, includeUser: false, targets: CLAUDE };
   const plan = await planLifecycleRequest(req, life);
   if (!plan.ok) throw new Error(plan.code);

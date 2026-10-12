@@ -1,5 +1,6 @@
 import {
   CAPABILITIES,
+  PACKAGE_SOURCE_UNAVAILABLE_MESSAGE,
   REVIEWED_TOOL_CONFIGS,
   installTargetChange,
   toolConfigVerificationGaps,
@@ -88,6 +89,8 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   REPAIR_UNSUPPORTED: "Repair is only for tools that use an OpenHub-managed tool config.",
   CLIENT_LAUNCHER_UNAVAILABLE: "The current Node.js installation (node.exe and npm's npx-cli.js) could not be verified, so the client configuration is not changed. Check the Node.js installation and plan again.",
   CLIENT_LAUNCHER_INVALID: "The Node.js launch path recorded in the client configuration is no longer valid (client-launcher-invalid). Fix it with repair.",
+  PACKAGE_SOURCE_UNVERIFIED:
+    "OpenHub could not confirm that it would use the same package source as Prepare: the source environment was unavailable, or an index or registry setting in your environment variables cannot be passed to the MCP server as-is (for example a URL that contains credentials). Nothing was run. Move such credentials to uv.toml or .npmrc and plan again.",
   STATE_DIVERGED: "The selected targets have different current versions. Handle each client and scope separately.",
   PLATFORM_UNSUPPORTED: "This platform is not supported.",
   BACKEND_NOT_IN_MANIFEST: "The current Manifest no longer has this install method.",
@@ -219,6 +222,11 @@ function singleSentenceEn(plan: AnyPlan | null, code: string): string | undefine
  */
 function perItemEn(plan: AnyPlan, code: string): string[] | null | undefined {
   if (code === "required-env" || code === "environment-unverified") return requiredNames(plan).map((n) => requiredEnvEn([n]));
+  if (code === "PACKAGE_SOURCE_UNVERIFIED") {
+    // Core 원문에서 변수 이름 목록만 꺼낸다(값은 원문에도 없다). 형식이 다르면 null → 원문 그대로 미번역 표시.
+    const lines = plan.warnings.filter((w) => w.code === code).map((w) => (w.message === PACKAGE_SOURCE_UNAVAILABLE_MESSAGE ? PACKAGE_SOURCE_UNAVAILABLE_EN : packageSourceNamesOf(w.message)));
+    return lines.every((n): n is string => n !== null) ? lines.map((n) => (n === PACKAGE_SOURCE_UNAVAILABLE_EN ? n : packageSourceUnverifiedEn(n))) : null;
+  }
   if (code === "manual-setup-required") return plan.targets.filter((x) => "envReference" in x && x.envReference === "manual").map((t) => clientName(t.client) + " " + t.scope + " configuration (" + t.file + ") is not written by OpenHub. Set it up yourself.");
   if (code === "CONFIG_KEY_EXISTS") return isInstall(plan) ? plan.targets.filter((x) => installTargetChange(plan, x) === "conflict").map((t) => t.file + " already has a " + t.serverName + " entry; OpenHub does not overwrite it.") : null;
   if (code === "TOOL_CONFIG_UNKNOWN") {
@@ -236,6 +244,17 @@ function perItemEn(plan: AnyPlan, code: string): string[] | null | undefined {
   }
   return undefined;
 }
+
+/** "패키지 출처 설정(UV_INDEX_URL, NPM_CONFIG_REGISTRY)…"에서 이름 목록. 환경변수 이름 형식만 받는다. */
+function packageSourceNamesOf(message: string): string | null {
+  const m = /^패키지 출처 설정\(([A-Za-z0-9_:@./, -]+)\)/u.exec(message);
+  return m === null ? null : m[1]!;
+}
+
+export const packageSourceUnverifiedEn = (names: string) =>
+  "A package source setting in your environment (" + names + ") cannot be passed to the MCP server as-is (for example an index or registry URL that contains credentials), so OpenHub cannot confirm that Health and Benchmark use the same package source as Prepare. Nothing was run. Move the credentials to uv.toml or .npmrc, remove them from the environment variable, and create a new plan.";
+export const PACKAGE_SOURCE_UNAVAILABLE_EN =
+  "OpenHub did not receive the environment the MCP server would start with (missing or failed), so it cannot confirm that the package source matches Prepare. Nothing was run. Plan again.";
 
 /**
  * warning 목록 → 영어 줄(경고 하나에 한 줄, 같은 순서). 원칙:
@@ -340,6 +359,15 @@ export function installPreviewEn(planned: PlannedInstall): string[] {
 }
 
 const OPERATION_EN = { update: "update", rollback: "rollback", health: "Health Check", repair: "repair" } as const;
+/** Health 환경 설명(core healthEnvNotice와 같은 내용, 영어). */
+export function healthEnvNoticeEn(names: readonly string[]): string {
+  if (names.length === 0) return "The MCP server process only receives variables the OS needs to run it (PATH, HOME, TEMP and similar); the Manifest declares none. Other API keys, tokens and credential variables are not passed.";
+  return (
+    "The MCP server process only receives variables the OS needs to run it (PATH, HOME, TEMP and similar) and the variables the Manifest declares (" + names.join(", ") + "). " +
+    "Declared variables are an exception: if they are set, the MCP server receives their values as they are, including secrets such as tokens or connection strings. OpenHub does not read or store them. " +
+    "Other API keys, tokens, credential variables and code-injection variables (NODE_OPTIONS and similar) are not passed."
+  );
+}
 const HEALTH_NOT_VERIFIED_EN = ["Health: Not verified", "Reason: Required environment is unchecked"];
 
 /** LifecyclePlan Preview(영어). Core formatLifecyclePlanPreview와 같은 순서·같은 정보. */
@@ -392,6 +420,7 @@ export function lifecyclePreviewEn(planned: PlannedLifecycle): string[] {
     const t = plan.healthPolicy.timeouts;
     lines.push("  Required — runs the MCP server in an isolated temporary directory and checks the initialize and tools/list responses (the client app is not started)");
     lines.push("  Time limits: startup " + t.startupMs / 1000 + " s · handshake " + t.handshakeMs / 1000 + " s · total " + t.totalMs / 1000 + " s");
+    lines.push("  " + healthEnvNoticeEn(plan.requiredEnv.map((e) => e.name)));
     if (plan.operation !== "health") lines.push("  If Health fails, the configuration is restored and Version State is not changed");
   } else lines.push("  Skipped (approved in advance) — after applying: " + HEALTH_NOT_VERIFIED_EN.join(" / "));
   lines.push("", "Environment variables");

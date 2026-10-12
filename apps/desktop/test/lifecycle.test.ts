@@ -172,7 +172,8 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 Desktop Lifecycle", () => {
     const { entries } = await loadRegistry(REGISTRY);
     const core = await planLifecycleRequest(
       { operation: "update", toolId: "postgres-mcp", projectRoot: w.project, homeDir: w.home, platform: "linux", includeUser: false, targets: [{ client: "claude-code", scope: "project" }] },
-      { loadEntries: async () => entries, probe: async () => PROBES, tempBase: w.base, now: () => new Date(), fetch: w.deps.fetch },
+      // Desktop과 같은 Health 환경 원본(process.env)으로 만든다(#46 리뷰: 원본이 없으면 npx·uvx Health 계획이 막힌다).
+      { loadEntries: async () => entries, probe: async () => PROBES, tempBase: w.base, now: () => new Date(), fetch: w.deps.fetch, mcpSourceEnv: () => process.env },
     );
     if (!core.ok) throw new Error(core.code);
     expect(response.view.previewLines).toEqual(formatLifecyclePlanPreview(core.planned));

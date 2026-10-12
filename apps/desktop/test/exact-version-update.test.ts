@@ -2,8 +2,8 @@ import "./locale-ko";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
-import { loadRegistry, npxCacheKey, readLifecycleState, recordInstallInState, runInstallTransaction, type HealthRunReport } from "@openhub/core";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { loadRegistry, npxCacheKey, readLifecycleState, recordInstallInState, runInstallTransaction, mcpChildEnvForPlan, type HealthRunOptions, type HealthRunReport, type VerifiedLifecyclePlan } from "@openhub/core";
 import { en } from "../src/i18n/en";
 import { setDesktopLocale } from "../src/i18n/index";
 import { ko } from "../src/i18n/ko";
@@ -50,6 +50,8 @@ interface Options {
   /** 대화상자가 열렸을 때 할 일(응답 전). 기본은 승인(1). */
   dialog?: (ctx: { discard: () => Promise<unknown> }) => Promise<number> | number;
   health?: () => HealthRunReport;
+  /** Health 실행기가 받은 옵션(환경 허용 목록 확인용). */
+  onHealth?: (verified: VerifiedLifecyclePlan, options: HealthRunOptions) => void;
 }
 
 async function setup(o: Options = {}) {
@@ -87,7 +89,7 @@ async function setup(o: Options = {}) {
       if (String(url) === "https://registry.npmjs.org/@modelcontextprotocol%2fserver-memory/latest") return new Response(JSON.stringify({ name: PKG, version: V2 }), { status: 200 });
       return new Response("missing", { status: 404 });
     },
-    runHealth: async (verified) => (healthRuns.push(verified.plan.operation), o.health?.() ?? HEALTHY),
+    runHealth: async (verified, options) => (healthRuns.push(verified.plan.operation), o.onHealth?.(verified, options), o.health?.() ?? HEALTHY),
     spawner: life.spawner,
     probe: install.probe,
     tempBase: base,
@@ -154,6 +156,27 @@ async function updateTo(c: Ctx, version: string) {
 }
 
 describe("정확한 버전 입력 검증(main)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("v0.2.1 Desktop update의 Health: MCP 서버 환경은 허용 목록이다(부모의 합성 API key·token 0개, PATH는 있음)", async () => {
+    const synthetic = { OPENAI_API_KEY: "sk-synthetic-desktop-0001", GITHUB_TOKEN: "ghp_synthetic_desktop", AZURE_CLIENT_SECRET: "synthetic-desktop-azure", NODE_OPTIONS: "--require /synthetic.js" };
+    for (const [k, v] of Object.entries(synthetic)) vi.stubEnv(k, v);
+    let seen: Record<string, string> | undefined;
+    let passedSource = false;
+    const c = await setup({ onHealth: (v, o) => ((passedSource = o.sourceEnv !== undefined), (seen = mcpChildEnvForPlan(v.plan, o.sourceEnv))) });
+    expect(await c.installTool("memory-mcp")).toMatchObject({ status: "done" });
+    const { plan, result } = await updateTo(c, V2);
+    expect(result.status).toBe("updated");
+    expect(seen).toBeDefined();
+    expect(passedSource).toBe(true);
+    for (const [k, v] of Object.entries(synthetic)) {
+      expect(seen, k).not.toHaveProperty(k);
+      expect(JSON.stringify(seen)).not.toContain(v);
+    }
+    expect(Object.keys(seen!).some((k) => k.toUpperCase() === "PATH")).toBe(true);
+    expect(JSON.stringify(plan)).toContain("그 밖의 API 키·token·자격증명 환경변수는 넘기지 않습니다");
+  });
+
   it("X.Y.Z만 받고 범위·dist-tag·prerelease·URL·경로·셸 문법·공백·과도한 길이는 거부한다", () => {
     for (const ok of ["0.0.1", "1.2.3", V1, V2, "10.20.30", "0.0.67"]) expect(requestedVersion({ version: ok }), ok).toBe(ok);
     const bad = [
