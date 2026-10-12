@@ -22,7 +22,7 @@ OpenHub runs third-party tools on your machine, so it is built around a few fixe
 - Config edits change only the target entry, keep unknown fields, write atomically and are reverted if a later step fails. `~/.claude.json` is never written.
 - Environment variables are handled by name only. OpenHub does not read or check their values and never stores tokens, credentials or credential-bearing URLs in plans, results, logs, caches or Version State.
 - Outputs do not contain absolute paths of your machine.
-+
+
 ## What environment an MCP server gets
 
 OpenHub starts third-party code in three places. Each one receives only an allowlisted environment, so API keys and tokens that happen to be in your shell do not reach it.
