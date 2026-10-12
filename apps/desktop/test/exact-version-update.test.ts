@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { loadRegistry, npxCacheKey, readLifecycleState, recordInstallInState, runInstallTransaction, type HealthRunOptions, type HealthRunReport } from "@openhub/core";
+import { loadRegistry, npxCacheKey, readLifecycleState, recordInstallInState, runInstallTransaction, mcpChildEnvForPlan, type HealthRunOptions, type HealthRunReport, type VerifiedLifecyclePlan } from "@openhub/core";
 import { en } from "../src/i18n/en";
 import { setDesktopLocale } from "../src/i18n/index";
 import { ko } from "../src/i18n/ko";
@@ -51,7 +51,7 @@ interface Options {
   dialog?: (ctx: { discard: () => Promise<unknown> }) => Promise<number> | number;
   health?: () => HealthRunReport;
   /** Health 실행기가 받은 옵션(환경 허용 목록 확인용). */
-  onHealth?: (options: HealthRunOptions) => void;
+  onHealth?: (verified: VerifiedLifecyclePlan, options: HealthRunOptions) => void;
 }
 
 async function setup(o: Options = {}) {
@@ -89,7 +89,7 @@ async function setup(o: Options = {}) {
       if (String(url) === "https://registry.npmjs.org/@modelcontextprotocol%2fserver-memory/latest") return new Response(JSON.stringify({ name: PKG, version: V2 }), { status: 200 });
       return new Response("missing", { status: 404 });
     },
-    runHealth: async (verified, options) => (healthRuns.push(verified.plan.operation), o.onHealth?.(options), o.health?.() ?? HEALTHY),
+    runHealth: async (verified, options) => (healthRuns.push(verified.plan.operation), o.onHealth?.(verified, options), o.health?.() ?? HEALTHY),
     spawner: life.spawner,
     probe: install.probe,
     tempBase: base,
@@ -162,11 +162,13 @@ describe("정확한 버전 입력 검증(main)", () => {
     const synthetic = { OPENAI_API_KEY: "sk-synthetic-desktop-0001", GITHUB_TOKEN: "ghp_synthetic_desktop", AZURE_CLIENT_SECRET: "synthetic-desktop-azure", NODE_OPTIONS: "--require /synthetic.js" };
     for (const [k, v] of Object.entries(synthetic)) vi.stubEnv(k, v);
     let seen: Record<string, string> | undefined;
-    const c = await setup({ onHealth: (o) => (seen = o.childEnv) });
+    let passedSource = false;
+    const c = await setup({ onHealth: (v, o) => ((passedSource = o.sourceEnv !== undefined), (seen = mcpChildEnvForPlan(v.plan, o.sourceEnv))) });
     expect(await c.installTool("memory-mcp")).toMatchObject({ status: "done" });
     const { plan, result } = await updateTo(c, V2);
     expect(result.status).toBe("updated");
     expect(seen).toBeDefined();
+    expect(passedSource).toBe(true);
     for (const [k, v] of Object.entries(synthetic)) {
       expect(seen, k).not.toHaveProperty(k);
       expect(JSON.stringify(seen)).not.toContain(v);

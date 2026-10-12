@@ -1,4 +1,5 @@
 import { BACKEND_ADAPTERS } from "../installer/backends";
+import { isCodeInjectionEnvName } from "../process/mcp-env";
 import { checkCatalog, loadCatalog } from "../catalog/catalog";
 import { isValidDockerImage, parseNpmSpec } from "../installer/command";
 import { INSTALL_BACKENDS, type InstallBackend } from "../installer/plan";
@@ -34,6 +35,10 @@ const optionString = (step: InstallStep, key: "package" | "image") => (typeof st
 export function fastManifestIssues(manifest: Manifest): { path: string; message: string }[] {
   const out: { path: string; message: string }[] = [];
   out.push(...toolConfigIssues(manifest));
+  // v0.2.1: 실행 코드·라이브러리 경로를 바꾸는 변수는 선언할 수 없다(Health·Benchmark도 넘기지 않는다). 필요하면 별도 정책 결정이 먼저다.
+  manifest.env.forEach((e, i) => {
+    if (isCodeInjectionEnvName(e.name)) out.push({ path: "env[" + String(i) + "].name", message: e.name + "는 실행 코드·라이브러리 경로를 바꾸는 변수라 Manifest에 선언할 수 없습니다" });
+  });
   const preferred = manifest.install.preferredAdapter;
   const source = manifest.update.source;
   if (!(REGISTRY_SUPPORTED_BACKENDS as readonly string[]).includes(preferred)) {

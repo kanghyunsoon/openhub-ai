@@ -108,9 +108,9 @@ async function setup(behaviours: (i: number) => Behaviour = () => ({}), over: Pa
   const o = await requestBenchmarkApproval(first.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
   if (o.status !== "approved") throw new Error(o.status);
   const servers: FakeServer[] = [];
-  const spawns: { exe: string; args: string[]; cwd: string; shell: boolean }[] = [];
+  const spawns: { exe: string; args: string[]; cwd: string; shell: boolean; env: Record<string, string> }[] = [];
   const spawner: HealthSpawner = (exe, args, opts) => {
-    spawns.push({ exe, args: [...args], cwd: opts.cwd, shell: opts.shell });
+    spawns.push({ exe, args: [...args], cwd: opts.cwd, shell: opts.shell, env: opts.env });
     const s = new FakeServer(behaviours(servers.length + 1));
     servers.push(s);
     return s;
@@ -248,6 +248,32 @@ describe("REQ-061 Benchmark 실행과 Report v1", () => {
     expect(ra.report.notes.join(" ")).toContain("not comparable across machines");
     expect(JSON.stringify(ra.report)).not.toMatch(/rank|percentile|score/iu);
     expect(JSON.stringify({ ...rb.report, planDigest: "" })).toBe(JSON.stringify({ ...ra.report, planDigest: "" }));
+  });
+
+  it("v0.2.1 fail-closed: Benchmark가 띄우는 MCP 서버 환경은 항상 거른 값이다(원본 누락·빈 원본 → {}, 원본 있음 → 합성 key 0개)", async () => {
+    const synthetic = { OPENAI_API_KEY: "sk-synthetic-bench-0001", GITHUB_TOKEN: "ghp_synthetic_bench", NODE_OPTIONS: "--require /synthetic.js", LD_PRELOAD: "/synthetic.so" };
+    const saved = new Map(Object.keys(synthetic).map((k) => [k, process.env[k]] as const));
+    Object.assign(process.env, synthetic);
+    try {
+      for (const sourceEnv of [undefined, () => ({}), () => ({ ...synthetic, PATH: "/usr/bin", HOME: "/home/u", NPM_CONFIG_CACHE: "/c/npm" })]) {
+        const s = await setup(() => ({}), sourceEnv === undefined ? {} : { sourceEnv });
+        const r = await runBenchmark(s.approval, s.options);
+        if (!r.ok) throw new Error(r.code);
+        expect(s.spawns).toHaveLength(6);
+        for (const sp of s.spawns) {
+          for (const [k, v] of Object.entries(synthetic)) {
+            expect(sp.env, k).not.toHaveProperty(k);
+            expect(JSON.stringify(sp.env)).not.toContain(v);
+          }
+        }
+        expect(s.spawns[0]!.env).toEqual(sourceEnv === undefined || Object.keys(sourceEnv()).length === 0 ? {} : { PATH: "/usr/bin", HOME: "/home/u", NPM_CONFIG_CACHE: "/c/npm" });
+      }
+    } finally {
+      for (const [k, v] of saved) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
   });
 });
 

@@ -4,7 +4,9 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   createTreeKiller,
+  fastManifestIssues,
   healthEnvNotice,
+  isCodeInjectionEnvName,
   mcpServerChildEnv,
   nodeHealthSpawner,
   planLifecycleRequest,
@@ -84,6 +86,25 @@ describe("mcpServerChildEnv(허용 목록)", () => {
 
   it("승인 화면 설명은 이름만 보여 주고 값은 보여 주지 않는다", () => {
     expect(healthEnvNotice(["DATABASE_URI"])).toContain("DATABASE_URI");
+  });
+
+  it("코드 주입 변수는 Manifest가 선언해도 넘기지 않고, Registry 검증은 선언 자체를 거부한다", async () => {
+    const injection = ["NODE_OPTIONS", "NODE_PATH", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "JAVA_TOOL_OPTIONS", "PERL5OPT", "RUBYOPT", "BASH_ENV", "ELECTRON_RUN_AS_NODE"];
+    const source = Object.fromEntries(injection.map((n) => [n, "/synthetic/" + n]));
+    expect(mcpServerChildEnv(source, { backend: "npx", declaredNames: injection })).toEqual({});
+    for (const n of injection) expect(isCodeInjectionEnvName(n.toLowerCase()), n).toBe(true);
+    expect(isCodeInjectionEnvName("DATABASE_URI")).toBe(false);
+    const seed = await seedEntries();
+    const memory = seed.find((e) => e.manifest.name === "memory-mcp")!.manifest;
+    for (const n of ["NODE_OPTIONS", "PYTHONPATH", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES"]) {
+      const issues = fastManifestIssues({ ...memory, env: [{ name: n, required: false, description: "x" }] });
+      expect(issues.map((i) => i.path), n).toContain("env[0].name");
+    }
+    expect(fastManifestIssues({ ...memory, env: [{ name: "DATABASE_URI", required: true, description: "x" }] }).some((i) => i.path.startsWith("env["))).toBe(false);
+  });
+
+  it("승인 화면 설명은 값을 보여 주지 않는다(빈 목록)", () => {
+    expect(healthEnvNotice(["DATABASE_URI"])).toContain("DATABASE_URI");
     expect(healthEnvNotice([])).toContain("선언한 환경변수 없음");
   });
 });
@@ -116,37 +137,68 @@ const HOST = process.platform === "win32" ? ("windows" as const) : process.platf
 const parentEnv = () => ({ ...process.env, ...SYNTH, DATABASE_URI: "postgresql://probe:synthetic-declared@db/app" });
 
 describe("실제 자식 process가 받는 환경", () => {
-  it("handshake: 허용 목록 환경으로 띄운 MCP 서버는 합성 key를 하나도 받지 못하고 선언된 값만 받는다", async () => {
-    const out = path.join(scratch, "handshake.json");
-    const script = await envRecordingServer(out);
-    const childEnv = mcpServerChildEnv(parentEnv(), { backend: "uvx", declaredNames: ["DATABASE_URI"] });
-    const outcome = await runHandshake([process.execPath, script], scratch, { startupMs: 20_000, handshakeMs: 10_000, totalMs: 45_000 }, HOST, { killTree: createTreeKiller({ cwd: scratch }), childEnv }, { mark: () => undefined });
-    expect(outcome.status).toBe("healthy");
-    const seen = JSON.parse(await readFile(out, "utf8")) as Record<string, string>;
+  const LIMITS = { startupMs: 20_000, handshakeMs: 10_000, totalMs: 45_000 };
+  /** 부모 process.env에 합성 key를 넣은 채로 fn을 실행한다(원본을 주지 않는 호출이 부모 환경을 쓰는지 보기 위해). */
+  async function withParentSecrets<T>(fn: () => Promise<T>): Promise<T> {
+    const saved = new Map(Object.keys(SYNTH).map((k) => [k, process.env[k]] as const));
+    Object.assign(process.env, SYNTH);
+    try {
+      return await fn();
+    } finally {
+      for (const [k, v] of saved) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  }
+  const noSynthetic = (seen: Record<string, string>) => {
     for (const [name, value] of Object.entries(SYNTH)) {
       expect(seen, name).not.toHaveProperty(name);
       expect(JSON.stringify(seen)).not.toContain(value);
     }
+  };
+  /**
+   * Windows의 libuv(uv_spawn)는 env에 없으면 이 OS 변수들을 부모에서 채워 넣는다(값이 비밀이 아닌 OS 정보). POSIX는 채우지 않는다.
+   * 원본 없이 띄운 자식이 볼 수 있는 키는 이 목록뿐이어야 한다.
+   */
+  const LIBUV_REQUIRED = new Set(process.platform === "win32" ? ["HOMEDRIVE", "HOMEPATH", "LOGONSERVER", "PATH", "SYSTEMDRIVE", "SYSTEMROOT", "TEMP", "USERDOMAIN", "USERNAME", "USERPROFILE", "WINDIR"] : []);
+  const onlyOsDefaults = (seen: Record<string, string>) => expect(Object.keys(seen).filter((k) => !LIBUV_REQUIRED.has(k.toUpperCase()))).toEqual([]);
+
+  it("handshake: 허용 목록 환경으로 띄운 MCP 서버는 합성 key를 하나도 받지 못하고 선언된 값만 받는다(선언해도 코드 주입 변수는 제외)", async () => {
+    const out = path.join(scratch, "handshake.json");
+    const script = await envRecordingServer(out);
+    const source = () => ({ ...parentEnv(), LD_PRELOAD: "/synthetic/evil.so", DYLD_INSERT_LIBRARIES: "/synthetic/evil.dylib", NODE_PATH: "/synthetic/node" });
+    const declaredNames = ["DATABASE_URI", "NODE_OPTIONS", "PYTHONPATH", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "NODE_PATH"];
+    const outcome = await runHandshake([process.execPath, script], scratch, LIMITS, HOST, { killTree: createTreeKiller({ cwd: scratch }), sourceEnv: source }, { mark: () => undefined }, { backend: "uvx", declaredNames });
+    expect(outcome.status).toBe("healthy");
+    const seen = JSON.parse(await readFile(out, "utf8")) as Record<string, string>;
+    noSynthetic(seen);
+    for (const name of ["LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "NODE_PATH"]) expect(seen, name).not.toHaveProperty(name);
     expect(seen["DATABASE_URI"]).toBe("postgresql://probe:synthetic-declared@db/app");
     expect(Object.keys(seen).some((k) => k.toUpperCase() === "PATH")).toBe(true);
   }, 30_000);
 
-  it("비교: childEnv 없이 띄우면(이전 동작) 부모의 합성 key가 그대로 전달된다", async () => {
-    const out = path.join(scratch, "inherit.json");
-    const script = await envRecordingServer(out);
-    const previous = process.env["OPENAI_API_KEY"];
-    process.env["OPENAI_API_KEY"] = SYNTH["OPENAI_API_KEY"];
-    try {
-      const outcome = await runHandshake([process.execPath, script], scratch, { startupMs: 20_000, handshakeMs: 10_000, totalMs: 45_000 }, HOST, { killTree: createTreeKiller({ cwd: scratch }) }, { mark: () => undefined });
+  // 재현(이전 HEAD 3027da6): 원본 없이 띄우면 부모 process.env의 합성 key가 그대로 전달됐다(이 자리의 테스트가 누출을 단언했다).
+  // 수정 뒤 같은 시나리오: 원본 누락·빈 원본·예외를 던지는 원본 모두 부모 환경을 쓰지 않는다(fail-closed).
+  for (const [label, sourceEnv] of [
+    ["원본 누락", undefined],
+    ["빈 원본", () => ({})],
+    ["예외를 던지는 원본", () => { throw new Error("boom"); }],
+  ] as const) {
+    it("fail-closed(" + label + "): 부모 process.env에 합성 key가 있어도 MCP 서버는 하나도 받지 못한다", async () => {
+      const out = path.join(scratch, "closed-" + label.length + ".json");
+      const script = await envRecordingServer(out);
+      const outcome = await withParentSecrets(() =>
+        runHandshake([process.execPath, script], scratch, LIMITS, HOST, { killTree: createTreeKiller({ cwd: scratch }), ...(sourceEnv === undefined ? {} : { sourceEnv }) }, { mark: () => undefined }, { backend: "npx", declaredNames: ["OPENAI_API_KEY"] }),
+      );
       expect(outcome.status).toBe("healthy");
-      expect(JSON.parse(await readFile(out, "utf8"))["OPENAI_API_KEY"]).toBe(SYNTH["OPENAI_API_KEY"]);
-    } finally {
-      if (previous === undefined) delete process.env["OPENAI_API_KEY"];
-      else process.env["OPENAI_API_KEY"] = previous;
-    }
-  }, 30_000);
+      const seen = JSON.parse(await readFile(out, "utf8")) as Record<string, string>;
+      noSynthetic(seen);
+      onlyOsDefaults(seen);
+    }, 30_000);
+  }
 
-  it("Lifecycle Health(CLI·Desktop 경로): mcpSourceEnv를 주면 실제 MCP 서버 process에는 합성 key 0개, 결과에도 값 0개", async () => {
+  for (const withSource of [true, false]) it("Lifecycle Health(" + (withSource ? "CLI·Desktop 경로, mcpSourceEnv 있음" : "mcpSourceEnv 누락, fail-closed") + "): 실제 MCP 서버 process에는 합성 key 0개, 결과에도 값 0개", async () => {
     const seed = await seedEntries();
     const PIN = "uvx --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted";
     const entries: RegistryEntry[] = seed.map((e) => (e.manifest.name === "postgres-mcp" ? { ...e, manifest: { ...e.manifest, install: { ...e.manifest.install, options: { command: PIN } } } } : e));
@@ -158,17 +210,17 @@ describe("실제 자식 process가 받는 환경", () => {
     expect(installed.status).toBe("succeeded");
     expect(await recordInstallInState(planned, installed, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date("2026-10-12T00:00:00.000Z") })).toMatchObject({ ok: true });
 
-    const out = path.join(scratch, "lifecycle.json");
+    const out = path.join(scratch, "lifecycle-" + String(withSource) + ".json");
     const script = await envRecordingServer(out);
     const spawned: (Record<string, string> | undefined)[] = [];
     const healthSpawner = (_exe: string, _args: readonly string[], options: HealthSpawnOptions) => (spawned.push(options.env), nodeHealthSpawner(process.execPath, [script], options));
-    const env: LifecycleEnvironment = { loadEntries: async () => entries, probe: () => h.env.probe(), tempBase: h.base, now: () => new Date("2026-10-12T00:00:00.000Z"), configFs: h.env.configFs!, healthSpawner, mcpSourceEnv: parentEnv };
+    const env: LifecycleEnvironment = { loadEntries: async () => entries, probe: () => h.env.probe(), tempBase: h.base, now: () => new Date("2026-10-12T00:00:00.000Z"), configFs: h.env.configFs!, healthSpawner, ...(withSource ? { mcpSourceEnv: parentEnv } : {}) };
     const request: LifecycleRequest = { operation: "health", toolId: "postgres-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, platform: HOST, includeUser: false, targets: CURSOR };
     const built = await planLifecycleRequest(request, env);
     if (!built.ok) throw new Error(built.code);
     const outcome = await requestLifecycleApproval(built.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
     if (outcome.status !== "approved") throw new Error(outcome.status);
-    const result = await runLifecycleTransaction(built.planned, outcome.approval, request, env);
+    const result = await withParentSecrets(() => runLifecycleTransaction(built.planned, outcome.approval, request, env));
     expect(result).toMatchObject({ status: "health-checked", health: { status: "healthy" } });
     expect(spawned).toHaveLength(1);
     expect(spawned[0]).toBeDefined();
@@ -177,7 +229,11 @@ describe("실제 자식 process가 받는 환경", () => {
       expect(seen, name).not.toHaveProperty(name);
       expect(JSON.stringify(seen)).not.toContain(value);
     }
-    expect(seen["DATABASE_URI"]).toBe("postgresql://probe:synthetic-declared@db/app");
+    if (withSource) expect(seen["DATABASE_URI"]).toBe("postgresql://probe:synthetic-declared@db/app");
+    else {
+      expect(spawned[0]).toEqual({});
+      onlyOsDefaults(seen);
+    }
     const serialized = JSON.stringify(result);
     for (const value of [...Object.values(SYNTH), "synthetic-declared"]) expect(serialized).not.toContain(value);
   }, 60_000);

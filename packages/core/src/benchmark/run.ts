@@ -4,7 +4,7 @@ import { z } from "zod";
 import { containsAbsolutePath } from "../analyzer/index";
 import { INSTALL_BACKENDS } from "../installer/plan";
 import { createTreeKiller, healthArgv, runHandshake, type HandshakeMark, type HealthSpawner, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
-import { mcpServerChildEnv } from "../process/mcp-env";
+import type { McpSourceEnv } from "../process/mcp-env";
 import { RECOMMEND_PLATFORMS, TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, redactSensitive } from "../recommendation/index";
 import { verifyApprovedBenchmarkPlan, type BenchmarkApproval, type BenchmarkGateFailure, type BenchmarkPlanResult, type VerifiedBenchmarkPlan } from "./plan";
 
@@ -86,8 +86,8 @@ export interface BenchmarkRunOptions {
   killTree?: TreeKiller;
   /** 단조 증가 시계(ms). 테스트는 주입한다. */
   clock?: () => number;
-  /** MCP 서버 환경의 원본(보통 process.env). OS 기본·backend 설정·Manifest 필수 변수 이름만 넘긴다(mcpServerChildEnv). 없으면 부모 환경 상속. */
-  sourceEnv?: () => Readonly<Record<string, string | undefined>>;
+  /** MCP 서버 환경의 원본(보통 process.env). 항상 mcpProcessEnv로 거른다(OS 기본·backend 설정·Manifest 필수 변수 이름). 없으면 빈 원본(부모 환경 상속 없음). */
+  sourceEnv?: McpSourceEnv;
   /** 실행 환경(호출 측이 process.arch·process.versions.node로 채운다). */
   host: { arch: string; nodeVersion: string };
 }
@@ -133,7 +133,7 @@ async function executeVerifiedBenchmark(verified: VerifiedBenchmarkPlan, options
   const clock = options.clock ?? (() => performance.now());
   const realBase = await realpath(options.tempBase);
   const killTree = options.killTree ?? createTreeKiller({ cwd: realBase });
-  const childEnv = options.sourceEnv === undefined ? undefined : mcpServerChildEnv(options.sourceEnv(), { backend: launch.executable, declaredNames: launch.envNames });
+  const envInput = { backend: launch.executable, declaredNames: launch.envNames };
   const started = clock();
   const runs: BenchmarkRun[] = [];
   let serverInfo: { name: string | null; version: string | null } | null = null;
@@ -154,12 +154,12 @@ async function executeVerifiedBenchmark(verified: VerifiedBenchmarkPlan, options
       if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) outcome = { status: "launch-failed", reason: "spawn-failed", terminated: true };
       else {
         marks.set("begin", clock());
-        outcome = await runHandshake(argv, realCwd, { startupMs: plan.timeouts.startupMs, handshakeMs: plan.timeouts.handshakeMs, totalMs: plan.timeouts.runTotalMs }, plan.platform, { ...(options.spawner === undefined ? {} : { spawner: options.spawner }), ...(childEnv === undefined ? {} : { childEnv }), killTree }, {
+        outcome = await runHandshake(argv, realCwd, { startupMs: plan.timeouts.startupMs, handshakeMs: plan.timeouts.handshakeMs, totalMs: plan.timeouts.runTotalMs }, plan.platform, { ...(options.spawner === undefined ? {} : { spawner: options.spawner }), ...(options.sourceEnv === undefined ? {} : { sourceEnv: options.sourceEnv }), killTree }, {
           mark: (e) => void (marks.has(e) ? undefined : marks.set(e, clock())),
           serverInfo: (info) => {
             if (serverInfo === null) serverInfo = { name: clean(info.name), version: clean(info.version) };
           },
-        });
+        }, envInput);
       }
     } finally {
       await rm(cwd, { recursive: true, force: true }).catch(() => undefined);

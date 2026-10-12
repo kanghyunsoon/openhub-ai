@@ -18,7 +18,7 @@ import {
 } from "../tool-config/index";
 import { executeLifecyclePreparation, type ExecSpawner, type IsolatedDir } from "../process/executor";
 import { createTreeKiller, runHealthCheck, type HealthCheckResult, type HealthRunOptions, type HealthRunReport, type HealthSpawner, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
-import { mcpServerChildEnv } from "../process/mcp-env";
+import type { McpSourceEnv } from "../process/mcp-env";
 import type { BackendProbeReport } from "../process/probe";
 import type { RecommendPlatform } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
@@ -89,9 +89,9 @@ export interface LifecycleEnvironment {
   runHealth?: (verified: VerifiedLifecyclePlan, options: HealthRunOptions) => Promise<HealthRunReport>;
   /**
    * Health가 실행하는 MCP 서버 환경의 원본(보통 process.env, CLI·Desktop이 넘긴다). OS 기본·backend 설정·Manifest가 선언한 이름만
-   * 골라 넘긴다(mcpServerChildEnv). 없으면 부모 환경 상속(테스트).
+   * 골라 넘긴다(mcpProcessEnv). 없으면 빈 원본으로 거른다(부모 환경 상속 없음, fail-closed).
    */
-  mcpSourceEnv?: () => Readonly<Record<string, string | undefined>>;
+  mcpSourceEnv?: McpSourceEnv;
   /** operation별 Plan 생성기 교체(테스트 주입용). 기본은 planLifecycle(update·rollback·health). */
   planners?: Partial<Record<LifecycleOperation, (request: LifecycleRequest, env: LifecycleEnvironment) => Promise<LifecyclePlanResult>>>;
   /** OpenHub 관리 tool config 파일 접근(v0.2.0, 테스트 주입용). */
@@ -565,7 +565,7 @@ async function runTransaction(planned: PlannedLifecycle, approval: LifecycleAppr
         ...(toolConfigFile === undefined ? {} : { toolConfigFile }),
         ...(env.healthSpawner === undefined ? {} : { spawner: env.healthSpawner }),
         ...(env.killTree === undefined ? {} : { killTree: env.killTree }),
-        ...(env.mcpSourceEnv === undefined ? {} : { childEnv: mcpServerChildEnv(env.mcpSourceEnv(), { backend: plan.backend, declaredNames: plan.requiredEnv.map((e) => e.name) }) }),
+        ...(env.mcpSourceEnv === undefined ? {} : { sourceEnv: env.mcpSourceEnv }),
       });
       result = report.ok ? report.result : { status: "launch-failed", reason: "spawn-failed", toolCount: null, environmentUnverified: false, terminated: true, excerpt: report.message };
     } catch (error) {

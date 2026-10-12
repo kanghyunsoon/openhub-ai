@@ -36,6 +36,9 @@ OpenHub starts third-party code in three places. Each one receives only an allow
 Notes:
 
 - The values of declared variables are passed as they are in your environment. OpenHub does not read, check or store them.
+- The filtering happens inside OpenHub's MCP launcher itself and is the default: if a caller passes no source environment (or an empty one), the server starts with an empty environment, never with the parent's. On Windows, the process launcher (libuv) still fills in a few OS variables when they are missing (`PATH`, `SYSTEMROOT`, `WINDIR`, `SYSTEMDRIVE`, `TEMP`, `USERPROFILE`, `USERNAME`, `USERDOMAIN`, `HOMEDRIVE`, `HOMEPATH`, `LOGONSERVER`); these are not secrets.
+- Variables that change which code or libraries run (`NODE_OPTIONS`, `NODE_PATH`, `PYTHONPATH`, `PYTHONSTARTUP`, `PYTHONHOME`, `LD_*` such as `LD_PRELOAD`, `DYLD_*` such as `DYLD_INSERT_LIBRARIES`, `JAVA_TOOL_OPTIONS`, `PERL5OPT`, `RUBYOPT`, `BASH_ENV`, `ELECTRON_RUN_AS_NODE` and similar) are never passed, even if a Manifest declares them, and Registry validation rejects a Manifest that declares one.
+- This is **not a sandbox**. An MCP server started by OpenHub still runs with your user account: it can read files in your home folder (including configuration files that contain secrets), use the network and start other programs. Limiting environment variables only keeps unrelated secrets in your shell environment away from it.
 - Benchmark passes only the Manifest's **required** variables (optional ones such as `KUBECONFIG` are not part of the benchmark plan).
 - A proxy URL that contains a user name and password is passed, because the server may need the network; avoid putting credentials in proxy URLs if that matters to you.
 - `docker pull` and the backend version probes (`docker --version`, `npx --version`, `uvx --version`) run your own installed tools, not third-party code, and keep the normal environment.

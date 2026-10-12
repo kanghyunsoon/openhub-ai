@@ -318,7 +318,9 @@ describe("REQ-044 MCP Health Check", () => {
     expect(alive()).toBe(false);
   }, 30_000);
 
-  it("AC-041-08 spawn 옵션에 env key가 없고 Health 중 process.env 접근이 0회이며 required env면 environmentUnverified다", async () => {
+  // v0.2.1(fail-closed 결정): 예전 계약 "spawn 옵션에 env key가 없다"(부모 환경 상속)는 외부 MCP에 부모의 API key를 넘겼다.
+  // 이제 spawn 옵션에는 항상 env가 있고, 원본이 없으면 빈 원본으로 거른 값({})이다. Health 중 process.env 접근 0회는 그대로다.
+  it("AC-041-08 spawn 옵션 env는 항상 거른 값(원본 없으면 {})이고 Health 중 process.env 접근이 0회이며 required env면 environmentUnverified다", async () => {
     const verified = await verifiedFor("postgres-mcp");
     const f = fake();
     const original = process.env;
@@ -335,7 +337,7 @@ describe("REQ-044 MCP Health Check", () => {
       process.env = original;
     }
     expect(touched).toEqual([]);
-    expect(Object.keys(f.options[0]!)).not.toContain("env");
+    expect(f.options[0]!).toHaveProperty("env", {});
     expect(result).toMatchObject({ status: "healthy", environmentUnverified: true });
     expect((await healthOf(await fake().run(await verifiedFor("memory-mcp")))).environmentUnverified).toBe(false);
   });

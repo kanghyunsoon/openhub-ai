@@ -22,6 +22,10 @@ import type { InstallBackend } from "../installer/plan";
  *
  * core는 process.env를 읽지 않는다. 호출 측(CLI·Desktop)이 원본을 넘긴다. Windows 환경변수 이름은 대소문자를 구분하지 않는다.
  * Client(Claude Code·Codex·Cursor)가 나중에 MCP 서버를 실행할 때 넘기는 환경은 각 Client가 정하며 OpenHub가 제한하지 않는다.
+ *
+ * 기본값은 닫힘(fail-closed): 원본이 없으면 빈 원본으로 거른다. 부모 환경을 그대로 상속하는 경로는 없다(health.ts는 항상 이 결과로 spawn한다).
+ * 코드 주입 변수(NODE_OPTIONS·PYTHONPATH·LD_PRELOAD·DYLD_* 등)는 Manifest가 선언해도 넘기지 않고, Registry 검증에서 선언 자체를 거부한다.
+ * 이 제한은 sandbox가 아니다: MCP 서버는 여전히 사용자 권한으로 홈 폴더 파일·네트워크·다른 프로그램에 접근할 수 있다.
  */
 
 const BASE = new Set([
@@ -45,6 +49,25 @@ const BACKEND: Readonly<Record<InstallBackend, ReadonlySet<string>>> = {
 const CREDENTIAL_NAME = /(?:TOKEN|SECRET|PASSWORD|PASSWD|_AUTH|AUTH_|API_?KEY|CREDENTIAL|PRIVATE_KEY)/u;
 const URL_USERINFO = /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/@\s]+@/u;
 
+/** 실행할 코드·라이브러리·모듈 경로를 바꾸는 변수. Manifest가 선언해도 넘기지 않는다. */
+export const MCP_ENV_CODE_INJECTION_NAMES: readonly string[] = [
+  "NODE_OPTIONS", "NODE_PATH", "NODE_REPL_EXTERNAL_MODULE", "ELECTRON_RUN_AS_NODE",
+  "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PYTHONUSERBASE", "PYTHONINSPECT", "PYTHONBREAKPOINT", "PYTHONEXECUTABLE",
+  "PERL5OPT", "PERL5LIB", "PERLLIB", "RUBYOPT", "RUBYLIB",
+  "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "CLASSPATH",
+  "BASH_ENV", "ENV", "ZDOTDIR", "PROMPT_COMMAND", "SHELLOPTS", "BASHOPTS", "PS4", "IFS",
+  "GIT_SSH_COMMAND", "GIT_EXEC_PATH", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
+];
+const CODE_INJECTION = new Set(MCP_ENV_CODE_INJECTION_NAMES);
+/** LD_PRELOAD·LD_LIBRARY_PATH·LD_AUDIT 등, DYLD_INSERT_LIBRARIES·DYLD_LIBRARY_PATH 등. */
+const CODE_INJECTION_PREFIX = /^(?:LD_|DYLD_)/u;
+
+/** Manifest가 선언해도 MCP 서버에 넘기지 않는 코드 주입 변수인가(대소문자 무관). */
+export function isCodeInjectionEnvName(name: string): boolean {
+  const upper = name.toUpperCase();
+  return CODE_INJECTION.has(upper) || CODE_INJECTION_PREFIX.test(upper);
+}
+
 export interface McpChildEnvInput {
   backend: InstallBackend;
   /** Manifest가 선언한 환경변수 이름(Plan의 requiredEnv·envNames). */
@@ -59,6 +82,7 @@ export function mcpServerChildEnv(source: Readonly<Record<string, string | undef
   for (const [name, value] of Object.entries(source)) {
     if (value === undefined) continue;
     const upper = name.toUpperCase();
+    if (isCodeInjectionEnvName(upper)) continue;
     if (declared.has(upper)) {
       out[name] = value;
       continue;
@@ -70,4 +94,20 @@ export function mcpServerChildEnv(source: Readonly<Record<string, string | undef
     out[name] = value;
   }
   return out;
+}
+
+export type McpSourceEnv = () => Readonly<Record<string, string | undefined>>;
+
+/**
+ * 실제 MCP 실행 경계에서 쓰는 단 하나의 진입점. 원본(sourceEnv)이 없거나 빈 값이면 빈 원본으로 거른다(부모 환경 상속 없음).
+ * 원본 함수가 예외를 던져도 빈 원본으로 간다.
+ */
+export function mcpProcessEnv(sourceEnv: McpSourceEnv | undefined, input: McpChildEnvInput): Record<string, string> {
+  let source: Readonly<Record<string, string | undefined>> = {};
+  try {
+    source = sourceEnv?.() ?? {};
+  } catch {
+    source = {};
+  }
+  return mcpServerChildEnv(source, input);
 }

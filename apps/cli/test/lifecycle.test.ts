@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { containsAbsolutePath, nodeConfigFs, readLifecycleState, type BackendProbeReport, type ConfigFs, type ExecChild, type ExecSpawner, type HealthCheckStatus, type LifecycleEnvironment } from "@openhub/core";
+import { containsAbsolutePath, mcpChildEnvForPlan, nodeConfigFs, readLifecycleState, type BackendProbeReport, type ConfigFs, type ExecChild, type ExecSpawner, type HealthCheckStatus, type LifecycleEnvironment } from "@openhub/core";
 import { runCli } from "../src/cli";
 import type { LifecycleCommandIO } from "../src/lifecycle";
 import { memoryIO } from "./helpers";
@@ -47,7 +47,7 @@ interface RunOptions {
   memoryVersion?: string;
   platform?: string;
   /** Health 실행기가 받은 옵션(환경 허용 목록 확인용). */
-  onHealth?: (options: Parameters<NonNullable<LifecycleEnvironment["runHealth"]>>[1]) => void;
+  onHealth?: (...args: Parameters<NonNullable<LifecycleEnvironment["runHealth"]>>) => void;
 }
 
 async function session(): Promise<Session> {
@@ -83,7 +83,7 @@ async function session(): Promise<Session> {
       };
       const runHealth: NonNullable<LifecycleEnvironment["runHealth"]> = async (verified, options) => {
         s.healthRuns += 1;
-        opts.onHealth?.(options);
+        opts.onHealth?.(verified, options);
         const status = opts.health ?? "healthy";
         return { ok: true, result: { status, reason: status === "healthy" ? null : "tools-list-error", toolCount: status === "healthy" ? 4 : null, environmentUnverified: verified.plan.requiredEnv.some((e) => e.required), terminated: true, excerpt: null } };
       };
@@ -264,7 +264,10 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 CLI lifecycle", () => {
     const synthetic = { OPENAI_API_KEY: "sk-synthetic-cli-0001", ANTHROPIC_API_KEY: "sk-ant-synthetic-cli", GITHUB_TOKEN: "ghp_synthetic_cli_0002", AWS_SECRET_ACCESS_KEY: "synthetic-cli-aws", NPM_TOKEN: "npm_synthetic_cli" };
     for (const [k, v] of Object.entries(synthetic)) vi.stubEnv(k, v);
     let seen: Record<string, string> | undefined;
-    expect(await s.run(["lifecycle", "health", "memory-mcp"], { onHealth: (o) => (seen = o.childEnv) })).toBe(0);
+    // CLI가 원본(process.env)을 넘기고, Core Health가 실제 spawn에 쓰는 환경(mcpChildEnvForPlan)은 허용 목록이다.
+    let passedSource = false;
+    expect(await s.run(["lifecycle", "health", "memory-mcp"], { onHealth: (v, o) => ((passedSource = o.sourceEnv !== undefined), (seen = mcpChildEnvForPlan(v.plan, o.sourceEnv))) })).toBe(0);
+    expect(passedSource).toBe(true);
     expect(seen).toBeDefined();
     for (const [k, v] of Object.entries(synthetic)) {
       expect(seen, k).not.toHaveProperty(k);
