@@ -28,7 +28,7 @@ It shows the Node.js version, which backends were found (node, npx, uvx, docker)
 
 If OpenHub was closed or killed while an update, rollback or repair was changing a client configuration, it keeps an operation record (journal) under `~/.openhub/state/journal`. Until it is recovered, the tool shows `interrupted-update` and update, rollback, Health and repair for it are blocked (`INTERRUPTED_OPERATION`).
 
-Recovery is **CLI only in v0.2.1**; the Desktop app shows the warning but has no recovery screen yet. Desktop users run the same commands in a terminal:
+Recovery is **CLI only in v0.2.1**. The Desktop app has no recovery screen yet, but INSTALLED shows, for each interrupted tool, the exact command that applies right now (recover, `--discard`, or "cannot be recovered automatically" with the reason), how to install the CLI from the release (`npm install -g ./openhub-ai-<version>.tgz`, Node.js 24.15 or later) and how to confirm afterwards. Desktop users run the same commands in a terminal opened in the project folder:
 
 1. `openhub lifecycle status` shows, for each interrupted tool, one of:
    - `복구 가능 … openhub lifecycle recover <tool>`: OpenHub's half-written entry can be put back to the previous entry.
