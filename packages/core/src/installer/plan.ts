@@ -5,6 +5,7 @@ import type { Manifest } from "../manifest/index";
 import type { RegistryEntry } from "../registry/index";
 import { TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, type RecommendationReport } from "../recommendation/index";
 import { parseNpxPrepareArgs } from "../process/npx-prepare";
+import { parseUvxPrepareArgs, uvxPrepareTarget } from "../process/uvx-prepare";
 import { NPX_CLI_PLACEHOLDER, REVIEWED_TOOL_CONFIGS, TOOL_CONFIG_MAX_BYTES, TOOL_CONFIG_PLACEHOLDER, toolConfigDigest, toolConfigFileId, toolConfigVerificationNotices } from "../tool-config/index";
 
 /**
@@ -32,6 +33,7 @@ export const APPROVAL_REQUIREMENTS = [
   "floating-artifact",
   "client-env-parse-risk",
   "tool-config",
+  "source-build",
 ] as const;
 export type ApprovalRequirement = (typeof APPROVAL_REQUIREMENTS)[number];
 export const PLAN_STATUSES = ["installable", "already-installed", "unsupported", "blocked"] as const;
@@ -47,6 +49,13 @@ export const FLOATING_ARTIFACT_NOTICE =
 /** npx Prepare 고지(InstallPlan·LifecyclePlan 공통). */
 export const NPX_PREPARE_NOTICE =
   "설정을 쓰기 전에 이 버전의 npm 패키지를 npx cache에 내려받습니다. MCP 서버는 실행하지 않지만, npm은 설치 중 의존성의 설치 스크립트를 실행할 수 있습니다(Client가 처음 실행할 때와 같습니다). 같은 패키지·버전의 불완전한 cache 항목이 있으면 그 항목만 지우고 다시 받습니다.";
+/** uvx Prepare 고지(v0.2.1, InstallPlan·LifecyclePlan 공통). */
+export const UVX_PREPARE_NOTICE = "클라이언트 설정을 쓰기 전에 이 정확한 버전의 Python 패키지를 uv 캐시에 내려받아 설치합니다. 이 단계에서는 MCP 서버를 실행하지 않습니다.";
+/** 검토된 소스 빌드 고지(source-build 승인과 함께). v0.2.1에서는 소스 빌드 Plan이 차단이라 실행 가능한 계획에는 나오지 않는다. */
+export const UVX_SOURCE_BUILD_NOTICE =
+  "이 도구의 일부 패키지는 소스로만 제공되어 내 컴퓨터에서 빌드됩니다. 빌드 과정에서 제3자 빌드 코드가 실행됩니다. OpenHub는 이 도구의 의존성 목록은 검토했지만 빌드 코드 자체는 검토하지 않았습니다.";
+/** 사용자 지정 패키지 index 고지(v0.2.1). URL·계정은 Plan에 넣지 않는다. */
+export const UVX_CUSTOM_INDEX_NOTICE = "사용자 지정 Python 패키지 출처 설정(index 환경변수 또는 uv.toml)이 있어 uv가 그 설정대로 패키지를 받습니다. 승인 뒤 이 설정이 바뀌면 실행하지 않습니다.";
 export function requiredEnvNotice(name: string): string {
   return `이 도구는 실행 시 ${name} 환경변수가 필요합니다. OpenHub는 값이나 설정 여부를 확인하거나 저장하지 않습니다.`;
 }
@@ -74,14 +83,36 @@ export type ServerEntry = z.output<typeof serverEntrySchema>;
 export const runStepSchema = z.strictObject({
   id: text,
   kind: z.literal("run"),
-  /** docker: docker pull. npx: npx Prepare(고정 인자, process/npx-prepare.ts가 실행). */
-  executable: z.enum(["docker", "npx"]),
+  /** docker: docker pull. npx: npx Prepare(고정 인자, process/npx-prepare.ts). uvx: uvx Prepare(고정 인자, process/uvx-prepare.ts, v0.2.1). */
+  executable: z.enum(["docker", "npx", "uvx"]),
   args: z.array(text).min(1),
   cwd: z.enum(["project", "isolated"]),
   network: z.boolean(),
   timeoutMs: z.number().int().positive(),
+  /** uvx Prepare 전용(v0.2.1): 사용자 지정 패키지 index fingerprint(URL·계정 없음). 기본 index면 없다. */
+  index: z.strictObject({ custom: z.literal(true), digest: z.string().regex(/^sha256:[0-9a-f]{64}$/u) }).optional(),
+  /** uvx 검토된 소스 빌드 전용: 패키지·정확한 버전·PyPI sdist sha256. v0.2.1에서 이 단계가 있는 Plan은 차단이다(UVX_SOURCE_BUILD_DISABLED). */
+  sourceBuild: z
+    .array(z.strictObject({ package: z.string().regex(/^[a-z0-9][a-z0-9-]*$/u), version: z.string().regex(/^\d+\.\d+\.\d+$/u), sha256: z.string().regex(/^[0-9a-f]{64}$/u) }))
+    .min(1)
+    .optional(),
 });
 export type RunStep = z.output<typeof runStepSchema>;
+
+/**
+ * uvx 준비 단계가 launch 대상과 같은 환경을 준비하는가(공통 검사, InstallPlan·LifecyclePlan). 어긋나면 사유, 맞으면 undefined.
+ * source-build 정책이면 승인 요구에 source-build가 있어야 한다.
+ */
+export function uvxPrepareStepIssue(step: RunStep, backend: string | null | undefined, launchArgs: readonly string[] | undefined, approvals: readonly string[]): string | undefined {
+  const parsed = parseUvxPrepareArgs(step.args);
+  if (parsed === null || backend !== "uvx" || launchArgs === undefined) return "uvx 준비 단계는 uvx backend의 정확한 버전 환경만 받을 수 있습니다";
+  const target = uvxPrepareTarget(launchArgs);
+  if (target === null || JSON.stringify(target) !== JSON.stringify(parsed.target)) return "uvx 준비 단계의 --from·--with가 launch 대상과 다릅니다";
+  if (parsed.policy === "source-build-reviewed" && !approvals.includes("source-build")) return "소스 빌드 준비 단계에는 source-build 승인이 필요합니다";
+  if ((parsed.policy === "source-build-reviewed") !== (step.sourceBuild !== undefined)) return "소스 빌드 준비 단계에는 검토 목록(sourceBuild)이 있어야 하고, wheel만 쓰는 단계에는 없어야 한다";
+  if (step.timeoutMs > 600_000) return "uvx 준비 단계 timeout은 10분을 넘을 수 없습니다";
+  return undefined;
+}
 
 export const configPatchStepSchema = z.strictObject({
   id: text,
@@ -194,8 +225,8 @@ export const installPlanSchema = z
         kind: z.enum(["npm-package", "python-package", "container-image"]),
         spec: text,
         pinned: z.boolean(),
-        /** npm-cache: 정확한 버전의 npm 패키지를 승인 후 npx cache에 미리 받는다(npx Prepare). */
-        preparation: z.enum(["launch-on-demand", "pull", "npm-cache"]),
+        /** npm-cache: 정확한 버전의 npm 패키지를 승인 후 npx cache에 미리 받는다(npx Prepare). uv-cache: uvx Prepare(v0.2.1). */
+        preparation: z.enum(["launch-on-demand", "pull", "npm-cache", "uv-cache"]),
       })
       .nullable(),
     launch: z
@@ -231,6 +262,13 @@ export const installPlanSchema = z
     }
     // npx Prepare는 고정 인자·정확한 버전이고, artifact(npm-cache)와 같은 spec이어야 한다.
     plan.steps.forEach((step, i) => {
+      if (step.kind === "run" && (step.index !== undefined || step.sourceBuild !== undefined) && step.executable !== "uvx") ctx.addIssue({ code: "custom", path: ["steps", i, "index"], message: "index fingerprint·sourceBuild는 uvx 준비 단계에만 있다" });
+      if (step.kind === "run" && step.executable === "uvx") {
+        const issue = uvxPrepareStepIssue(step, plan.launch?.executable, plan.launch?.args, plan.approvalRequirements);
+        const spec = parseUvxPrepareArgs(step.args)?.target.from;
+        if (issue !== undefined || plan.artifact?.preparation !== "uv-cache" || plan.artifact.spec !== spec) ctx.addIssue({ code: "custom", path: ["steps", i], message: issue ?? "uvx 준비 단계는 artifact(uv-cache)와 같은 spec이어야 한다" });
+        return;
+      }
       if (step.kind !== "run" || step.executable !== "npx") return;
       const spec = parseNpxPrepareArgs(step.args);
       if (spec === null || plan.artifact?.preparation !== "npm-cache" || plan.artifact.spec !== spec || plan.launch?.executable !== "npx") {
@@ -480,12 +518,17 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
     if (input.artifact !== null && !input.artifact.pinned) approvalRequirements.add("floating-artifact");
     if (requiredNames.length > 0 && writeTargets.some((t) => t.client === "claude-code")) approvalRequirements.add("client-env-parse-risk");
     if (toolConfigSteps.length > 0) approvalRequirements.add("tool-config");
+    // uvx Prepare: --no-build 없는 준비 단계(검토된 소스 빌드)는 별도 승인 항목이다. v0.2.1에서는 그 Plan 자체가 차단이라 실행되지 않는다.
+    if (steps.some((s) => s.kind === "run" && s.executable === "uvx" && s.args[0] !== "--no-build")) approvalRequirements.add("source-build");
   }
 
   const warnings: InstallPlanV1["warnings"] = blockers.map((b) => ({ code: b.code, message: b.message }));
   if (!installed) {
     if (input.artifact !== null && !input.artifact.pinned) warnings.push({ code: "floating-artifact", message: FLOATING_ARTIFACT_NOTICE });
     if (input.artifact?.preparation === "npm-cache") warnings.push({ code: "npx-prepare", message: NPX_PREPARE_NOTICE });
+    if (input.artifact?.preparation === "uv-cache") warnings.push({ code: "uvx-prepare", message: UVX_PREPARE_NOTICE });
+    if (approvalRequirements.has("source-build")) warnings.push({ code: "uvx-source-build", message: UVX_SOURCE_BUILD_NOTICE });
+    if (steps.some((s) => s.kind === "run" && s.index !== undefined)) warnings.push({ code: "uvx-custom-index", message: UVX_CUSTOM_INDEX_NOTICE });
     if (input.backend?.adapter === "docker") warnings.push({ code: "docker-daemon-unchecked", message: "docker 데몬 연결 여부는 확인하지 않았습니다. 데몬이 꺼져 있으면 준비 단계가 실패합니다" });
     for (const name of requiredNames) warnings.push({ code: "required-env", message: requiredEnvNotice(name) });
     if (manifest.category.includes("database") && requiredNames.length > 0) warnings.push({ code: "database-credential-scope", message: DATABASE_CREDENTIAL_NOTICE });

@@ -37,6 +37,7 @@ export const INSTALL_APPROVAL_EN: Readonly<Record<ApprovalRequirement, string>> 
   "floating-artifact": "The remote package version is not pinned. Running later may download a different artifact.",
   "client-env-parse-risk": "You must prepare the required environment variables in the environment where Claude Code runs. OpenHub does not check their values or whether they exist.",
   "tool-config": "OpenHub creates or replaces a reviewed server policy file under ~/.openhub/tool-config and makes the client configuration use it.",
+  "source-build": "Some packages of this tool are only available as source and are built on your computer. Building runs third-party build code. OpenHub reviewed this tool's dependency list, but not the build code itself.",
 };
 
 export const LIFECYCLE_APPROVAL_EN: Readonly<Record<LifecycleApprovalRequirement, string>> = {
@@ -47,6 +48,7 @@ export const LIFECYCLE_APPROVAL_EN: Readonly<Record<LifecycleApprovalRequirement
   "health-gate-skipped": "This tool needs environment variables to run, but OpenHub does not check their values or whether they are set. If Health Check is skipped, whether the MCP server actually works after the update is not verified.",
   "rollback-to-previous": "Rolls back to the previous version recorded in Version State. The current version's configuration changes.",
   "tool-config": "OpenHub creates or replaces a reviewed server policy file under ~/.openhub/tool-config and makes the client configuration use it.",
+  "source-build": "Some packages of this tool are only available as source and are built on your computer. Building runs third-party build code. OpenHub reviewed this tool's dependency list, but not the build code itself.",
 };
 
 const requiredEnvEn = (names: readonly string[]) =>
@@ -55,6 +57,9 @@ const requiredEnvEn = (names: readonly string[]) =>
 const NOTICE_EN: Readonly<Record<string, string>> = {
   "floating-artifact": "This install plan pins the command and configuration, but not the remote package content itself. Running the same plan later may download a different artifact.",
   "npx-prepare": "Before writing configuration, the npm package of this version is downloaded into the npx cache. The MCP server is not started, but npm may run install scripts of dependencies during installation (as on the client's first start). If an incomplete cache entry of the same package and version exists, only that entry is removed and downloaded again.",
+  "uvx-prepare": "Before writing the client configuration, OpenHub downloads and installs the Python packages for this exact version into uv's cache. The MCP server is not started during this step.",
+  "uvx-source-build": "Some packages of this tool are only available as source and are built on your computer. Building runs third-party build code. OpenHub reviewed this tool's dependency list, but not the build code itself.",
+  "uvx-custom-index": "Custom Python package source settings are configured (index environment variables or uv.toml), so uv downloads packages according to them. If these settings change after approval, the plan does not run.",
   "database-credential-scope": "This tool acts with the permissions of the database credentials in its environment variable. The MCP server's read-only setting does not reduce database permissions, so use a database account with read permission only.",
   "health-execution": "Health Check runs the MCP server (third-party code) in an isolated temporary directory and may download packages or images.",
   "client-wrapper-not-verified": "Health Check verifies the artifact. It does not verify the cmd /d /c npx wrapper in the client configuration itself.",
@@ -134,6 +139,8 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   OPERATION_IN_PROGRESS: "Another OpenHub operation is in progress (for example an update waiting for Health). Nothing was changed. Try again when it finishes.",
   OPERATION_LOCK_FAILED: "OpenHub could not create its operation lock in the state folder, so nothing was run or changed.",
   UP_TO_DATE: "The tool is already at the target version.",
+  UVX_CONFIG_UNSUPPORTED: "A uv configuration file (uv.toml) could not be read or is not valid TOML, so the uvx preparation step was not planned. Fix the file and create a new plan. No configuration file was changed.",
+  UVX_SOURCE_BUILD_DISABLED: "This tool needs a source build (a reviewed sdist), which is blocked in v0.2.1: uvx does not check the file hashes of the build that prepares the environment your client uses, so OpenHub cannot guarantee that the reviewed file is the one that gets built. It is not installed or updated until a policy decision is made. No configuration file was changed.",
 };
 
 /** 대문자 차단·오류 code 또는 notice code 하나의 영어 문장(없으면 undefined). */
@@ -293,7 +300,10 @@ export function installPreviewEn(planned: PlannedInstall): string[] {
           : runSteps.map((s) => s.executable + " " + s.args.join(" ")).join(", ") +
             (plan.artifact.preparation === "npm-cache"
               ? " — OpenHub downloads this version into the npx cache before writing configuration (the MCP server is not started; network, download, dependency install scripts)"
-              : " — run by OpenHub (network, download)")),
+              : plan.artifact.preparation === "uv-cache"
+                ? " — OpenHub installs the Python packages of this exact version into the uv cache before writing configuration and checks them again offline (the MCP server is not started" +
+                  (runSteps.some((s) => s.executable === "uvx" && s.args[0] !== "--no-build") ? "; source-build step — blocked in v0.2.1)" : "; wheels only, no build)")
+                : " — run by OpenHub (network, download)")),
     );
   }
   if (plan.launch !== null) {
@@ -351,7 +361,10 @@ export function lifecyclePreviewEn(planned: PlannedLifecycle): string[] {
           : run.map((s) => s.executable + " " + s.args.join(" ")).join(", ") +
             (run.every((s) => s.executable === "npx")
               ? " — OpenHub downloads this version into the npx cache before changing configuration (the MCP server is not started; network, download, dependency install scripts)"
-              : " — run by OpenHub (network, download; downloaded images are not removed)")),
+              : run.every((s) => s.executable === "uvx")
+                ? " — OpenHub installs the Python packages of this exact version into the uv cache before changing configuration and checks them again offline (the MCP server is not started" +
+                  (run.some((s) => s.args[0] !== "--no-build") ? "; source-build step — blocked in v0.2.1)" : "; wheels only, no build)")
+                : " — run by OpenHub (network, download; downloaded images are not removed)")),
     );
     lines.push("Client command");
     lines.push("  current  " + spec(plan.current.clientSpec));
@@ -489,6 +502,12 @@ const INSTALL_CODE_EN: Readonly<Record<string, string>> = {
   MANUAL_SETUP_REQUIRED: "The Node.js launch path for the client configuration could not be verified, so nothing was changed.",
   TOOL_CONFIG_STALE: "The tool config changed after approval. Review the new plan and approve again.",
   COMPENSATION_INCOMPLETE: "Some files could not be restored (changed elsewhere after this run, or not writable). They were not overwritten; check them with lifecycle status.",
+  UVX_WHEEL_UNAVAILABLE: "Some packages are not available as wheels and would need a source build. OpenHub does not build from source (no automatic fallback). No configuration file was changed.",
+  UVX_PREPARE_VERIFY_FAILED: "The prepared environment could not be found again without network (offline check failed). No configuration file was changed.",
+  UVX_PREPARE_REJECTED: "The uvx preparation step only accepts exact Python package versions. No configuration file was changed.",
+  UVX_PREPARE_UNAVAILABLE: "The uvx preparation step could not run in this environment. No configuration file was changed.",
+  UVX_CONFIG_UNSUPPORTED: "A uv configuration file (uv.toml) could not be read or is not valid TOML, so the uvx preparation step was not planned. Fix the file and create a new plan. No configuration file was changed.",
+  UVX_SOURCE_BUILD_DISABLED: "This tool needs a source build (a reviewed sdist), which is blocked in v0.2.1: uvx does not check the file hashes of the build that prepares the environment your client uses, so OpenHub cannot guarantee that the reviewed file is the one that gets built. It is not installed or updated until a policy decision is made. No configuration file was changed.",
   STATE_RECORD_FAILED: "Version State could not be recorded, so the configuration written by this install was restored to its original content. Check the cause and install again.",
 };
 

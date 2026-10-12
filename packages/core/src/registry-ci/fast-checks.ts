@@ -1,4 +1,4 @@
-import { BACKEND_ADAPTERS } from "../installer/backends";
+import { BACKEND_ADAPTERS, uvxBuildPolicyOf } from "../installer/backends";
 import { checkCatalog, loadCatalog } from "../catalog/catalog";
 import { isValidDockerImage, parseNpmSpec } from "../installer/command";
 import { INSTALL_BACKENDS, type InstallBackend } from "../installer/plan";
@@ -34,6 +34,12 @@ const optionString = (step: InstallStep, key: "package" | "image") => (typeof st
 export function fastManifestIssues(manifest: Manifest): { path: string; message: string }[] {
   const out: { path: string; message: string }[] = [];
   out.push(...toolConfigIssues(manifest));
+  // v0.2.1(#45 리뷰): 검토된 소스 빌드는 일시 차단이다. 설치할 수 없는 Manifest를 Registry에 넣지 않는다.
+  [stepOf(manifest), ...manifest.install.fallback].forEach((step, i) => {
+    if (step.adapter !== "uvx") return;
+    const policy = uvxBuildPolicyOf(step, "uvx");
+    if (policy.ok && policy.policy === "source-build-reviewed") out.push({ path: i === 0 ? "install.options.prepare" : "install.fallback[" + String(i - 1) + "].options.prepare", message: "source-build-reviewed는 v0.2.1에서 일시 차단되었습니다(uvx가 Client용 빌드 입력의 hash를 확인하지 않음). 정책 결정 전까지 쓸 수 없습니다" });
+  });
   const preferred = manifest.install.preferredAdapter;
   const source = manifest.update.source;
   if (!(REGISTRY_SUPPORTED_BACKENDS as readonly string[]).includes(preferred)) {

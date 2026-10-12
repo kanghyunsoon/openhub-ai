@@ -10,6 +10,7 @@ import {
   loadRegistry,
   locateWindowsNpxLauncher,
   npmChildEnv,
+  uvChildEnv,
   planInstall,
   probeBackends,
   readLifecycleState,
@@ -186,7 +187,9 @@ export function buildInstallPlanView(planned: PlannedInstall): InstallPlanView {
   };
 }
 
-const preparedLabel = (value: string) => (value === "launch-on-demand" ? tr("install.prepared.launchOnDemand") : value === "cached" ? tr("install.prepared.cached") : value);
+/** Prepared 표시. cached는 backend에 따라 npx cache(npm)·uv cache(Python, v0.2.1)로 나눈다. */
+const preparedLabel = (value: string, backend: string | null) =>
+  value === "launch-on-demand" ? tr("install.prepared.launchOnDemand") : value === "cached" ? tr(backend === "uvx" ? "install.prepared.cachedUv" : "install.prepared.cached") : value;
 
 /** InstallResult → 화면 데이터. plan이 있으면 English 모드의 다음에 할 일·경고를 Plan 구조에서 만든다(한국어는 Core 문장 그대로). */
 export function buildInstallResultView(result: InstallResultV1, plan?: InstallPlanV1): InstallResultView {
@@ -199,7 +202,7 @@ export function buildInstallResultView(result: InstallResultV1, plan?: InstallPl
       v === null
         ? []
         : [
-            { name: "Prepared", value: preparedLabel(v.prepared) },
+            { name: "Prepared", value: preparedLabel(v.prepared, result.backend) },
             { name: "Configured", value: tr(v.configured ? "common.yes" : "common.no") },
             { name: "Detected", value: v.detected === "skipped" ? tr("install.detected.skipped") : tr(v.detected ? "common.yes" : "common.no") },
           ],
@@ -344,6 +347,7 @@ function environment(deps: InstallDeps, entries: readonly RegistryEntry[]): Inst
     // npx Prepare(정확한 버전 npx 패키지)는 Windows에서 cmd 없이 node.exe + npx-cli.js로 실행한다.
     // npx Prepare의 npm 자식 process에는 허용 목록 환경만 넘긴다(API key·token·클라우드 자격증명 제외).
     npmChildEnv: () => npmChildEnv(process.env),
+    uvChildEnv: () => uvChildEnv(process.env),
     windowsNpx: async () => {
       const host = defaultHostEnvironment();
       return locateWindowsNpxLauncher({ pathEnv: host.pathEnv, fs: host.fs });

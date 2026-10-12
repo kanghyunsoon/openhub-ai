@@ -1,0 +1,335 @@
+import { EventEmitter } from "node:events";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import {
+  HEALTH_TIMEOUTS,
+  fastManifestIssues,
+  formatInstallPlanPreview,
+  installPlanSchema,
+  planInstall,
+  requestApproval,
+  runInstallTransaction,
+  uvxPrepareArgs,
+  uvxVerifyArgs,
+  type ExecChild,
+  type ExecSpawner,
+  type RegistryEntry,
+} from "../../src/index";
+import { seedEntries } from "../recommendation/helpers";
+import { newScratch } from "../lifecycle/helpers";
+import { approveAll, createHarness, plannedOf } from "./harness";
+
+/**
+ * v0.2.1 uvx Prepare — 설치 경로(docs/specs/uvx-prepare.md D1–D9). 실제 Registry Manifest는 바꾸지 않고 합성 Manifest로 확인한다
+ * (Registry 고정은 #39). 가짜 spawner만 쓴다(network·실제 uv 0).
+ */
+const seed = await seedEntries();
+const scratch = await newScratch("uvx-prepare-install-test");
+afterAll(() => rm(scratch, { recursive: true, force: true }));
+const PIN = "uvx --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted";
+const TARGET = { from: "postgres-mcp==0.3.0", withPins: ["mcp==1.30.0"] };
+const withPostgres = (options: Record<string, unknown>): RegistryEntry[] =>
+  seed.map((e) => (e.manifest.name === "postgres-mcp" ? { ...e, manifest: { ...e.manifest, install: { ...e.manifest.install, options } } } : e));
+const manifestOf = (entries: RegistryEntry[]) => entries.find((e) => e.manifest.name === "postgres-mcp")!.manifest;
+const pinned = withPostgres({ command: PIN });
+const PROXY_SHA = "ccb3751f529c047e2d8a58440d86b205303cf0fe8146f784d1cbcd94f0a28010";
+const SOURCE_BUILD = { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1.0", source: "pypi-sdist", sha256: PROXY_SHA }] };
+const sourceBuild = withPostgres({ command: PIN, prepare: SOURCE_BUILD });
+const CURSOR = [{ client: "cursor" as const, scope: "project" as const }];
+
+/** uvx 호출을 code로 닫는 spawner(그 밖은 성공). */
+function uvxSpawner(spawns: string[][], codes: number[], stderr = ""): ExecSpawner {
+  let n = 0;
+  return (executable, args) => {
+    spawns.push([executable, ...args]);
+    const code = executable === "uvx" ? (codes[n++] ?? 0) : 0;
+    const events = new EventEmitter();
+    const err = new EventEmitter();
+    queueMicrotask(() => {
+      if (code !== 0 && stderr !== "") err.emit("data", Buffer.from(stderr));
+      events.emit("close", code, null);
+    });
+    return { pid: 7000 + n, stdout: null, stderr: err, on: (e: string, l: (...a: unknown[]) => void) => events.on(e, l), kill: () => true } as unknown as ExecChild;
+  };
+}
+
+describe("uvx Prepare: 설치 계획", () => {
+  it("정확한 버전 uvx는 준비 단계가 설정 쓰기 앞에 오고(wheel만) floating·source-build 승인이 없으며 Preview가 설명한다", async () => {
+    const h = await createHarness(scratch, { entries: pinned });
+    const planned = await plannedOf(h, h.request("postgres-mcp", CURSOR));
+    const { plan } = planned;
+    expect(plan.artifact).toEqual({ kind: "python-package", spec: "postgres-mcp==0.3.0", pinned: true, preparation: "uv-cache" });
+    expect(plan.steps.map((s) => s.id)).toEqual(["uvx-prepare", "config-cursor-project"]);
+    expect(plan.steps[0]).toEqual({ id: "uvx-prepare", kind: "run", executable: "uvx", args: uvxPrepareArgs(TARGET, "wheels-only"), cwd: "isolated", network: true, timeoutMs: 600_000 });
+    expect(plan.approvalRequirements).not.toContain("floating-artifact");
+    expect(plan.approvalRequirements).not.toContain("source-build");
+    expect(plan.warnings.map((w) => w.code)).toContain("uvx-prepare");
+    expect(formatInstallPlanPreview(planned).join("\n")).toContain("uv cache에 설치하고 네트워크 없이 다시 확인합니다");
+    // Health 시작 한도는 그대로 20 s다(Prepare가 시간을 옮길 뿐 늘리지 않는다).
+    expect(HEALTH_TIMEOUTS.startupMs).toBe(20_000);
+  });
+
+  it("고정되지 않은 uvx(현재 Registry), --with가 떠 있는 경우, 다른 uv 플래그가 앞에 있는 경우는 준비하지 않는다", async () => {
+    for (const [entries, pinnedExpected] of [
+      [seed, false],
+      [withPostgres({ command: "uvx --from postgres-mcp==0.3.0 --with mcp postgres-mcp" }), false],
+      [withPostgres({ command: "uvx --python 3.12 --from postgres-mcp==0.3.0 postgres-mcp" }), false],
+    ] as const) {
+      const h = await createHarness(scratch, { entries });
+      const { plan } = await plannedOf(h, h.request("postgres-mcp", CURSOR));
+      expect(plan.artifact).toMatchObject({ pinned: pinnedExpected, preparation: "launch-on-demand" });
+      expect(plan.steps.some((s) => s.kind === "run")).toBe(false);
+      expect(plan.approvalRequirements).toContain("floating-artifact");
+    }
+  });
+
+  it("검토된 소스 빌드 Manifest는 v0.2.1에서 계획 단계에서 막힌다(UVX_SOURCE_BUILD_DISABLED, #45 리뷰: uvx가 Client용 빌드 입력 hash를 확인하지 않음)", async () => {
+    const h = await createHarness(scratch, { entries: sourceBuild });
+    const { plan } = await plannedOf(h, h.request("postgres-mcp", CURSOR));
+    expect(plan.status).toBe("blocked");
+    expect(plan.warnings.map((w) => w.code)).toContain("UVX_SOURCE_BUILD_DISABLED");
+    // 사용자 지정 index가 없어도(기본 PyPI) 막힌다.
+    const plain = await planInstall(h.request("postgres-mcp", CURSOR), { ...h.env, uvChildEnv: () => ({}), readUvConfig: async () => null });
+    if (!plain.result.ok) throw new Error(plain.result.code);
+    expect(plain.result.planned.plan.status).toBe("blocked");
+  });
+
+  it("검토되지 않은 빌드 정책은 Manifest 단계에서 거부한다(계획 0, Registry 검사 실패)", async () => {
+    const bad: Record<string, unknown>[] = [
+      { command: PIN, prepare: { build: "source-build-reviewed" } },
+      { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [] } },
+      { command: PIN, prepare: { build: "wheels-only", sourceBuild: SOURCE_BUILD.sourceBuild } },
+      { command: PIN, prepare: { build: "anything" } },
+      { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1", source: "pypi-sdist", sha256: PROXY_SHA }] } },
+      { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1.0", source: "https://example.invalid/x.tar.gz", sha256: PROXY_SHA }] } },
+      // v0.2.1 #45: sha256 없음·형식 오류·중복(이름 정규화 후)은 거부한다.
+      { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1.0", source: "pypi-sdist" }] } },
+      { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1.0", source: "pypi-sdist", sha256: PROXY_SHA.toUpperCase() }] } },
+      { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1.0", source: "pypi-sdist", sha256: PROXY_SHA.slice(1) }] } },
+      { command: PIN, prepare: { build: "source-build-reviewed", sourceBuild: [SOURCE_BUILD.sourceBuild[0], { package: "Proxy_Tools", version: "0.1.0", source: "pypi-sdist", sha256: PROXY_SHA }] } },
+      { command: PIN, prepare: { build: "wheels-only", extra: true } },
+      { command: "uvx postgres-mcp --access-mode=restricted", prepare: SOURCE_BUILD },
+    ];
+    for (const options of bad) {
+      const entries = withPostgres(options);
+      const h = await createHarness(scratch, { entries });
+      const built = await planInstall(h.request("postgres-mcp", CURSOR), h.env);
+      expect(built.result, JSON.stringify(options)).toMatchObject({ ok: false, code: "MANIFEST_COMMAND_REJECTED" });
+      expect(fastManifestIssues(manifestOf(entries)).length, JSON.stringify(options)).toBeGreaterThan(0);
+    }
+    expect(fastManifestIssues(manifestOf(pinned))).toEqual([]);
+    // 형식이 맞아도 source-build-reviewed는 Registry 검증에서 일시 차단으로 실패한다.
+    expect(fastManifestIssues(manifestOf(sourceBuild)).map((i) => i.path)).toContain("install.options.prepare");
+  });
+
+  it("InstallPlan schema는 launch 대상과 다른 준비 단계·index 인자·승인 없는 소스 빌드를 거부한다", async () => {
+    const h = await createHarness(scratch, { entries: pinned });
+    const { plan } = await plannedOf(h, h.request("postgres-mcp", CURSOR));
+    expect(installPlanSchema.safeParse(plan).success).toBe(true);
+    const withArgs = (args: string[]) => ({ ...plan, steps: plan.steps.map((s) => (s.kind === "run" ? { ...s, args } : s)) });
+    expect(installPlanSchema.safeParse(withArgs(uvxPrepareArgs({ from: "postgres-mcp==0.3.1", withPins: ["mcp==1.30.0"] }, "wheels-only"))).success).toBe(false);
+    expect(installPlanSchema.safeParse(withArgs(uvxPrepareArgs({ from: "postgres-mcp==0.3.0", withPins: ["mcp==1.31.0"] }, "wheels-only"))).success).toBe(false);
+    expect(installPlanSchema.safeParse(withArgs(uvxPrepareArgs({ from: "postgres-mcp==0.3.0", withPins: [] }, "wheels-only"))).success).toBe(false);
+    expect(installPlanSchema.safeParse(withArgs(["--no-build", "--index-url", "https://example.invalid/simple", ...uvxPrepareArgs(TARGET, "wheels-only").slice(1)])).success).toBe(false);
+    expect(installPlanSchema.safeParse(withArgs(uvxPrepareArgs(TARGET, "source-build-reviewed"))).success).toBe(false); // source-build 승인 없음
+    expect(installPlanSchema.safeParse({ ...plan, steps: plan.steps.map((s) => (s.kind === "run" ? { ...s, timeoutMs: 3_600_000 } : s)) }).success).toBe(false);
+  });
+});
+
+describe("uvx Prepare: 설치 실행", () => {
+  it("성공하면 준비 → 네트워크 없는 확인 → 설정 쓰기 순서이고 Prepared는 cached다", async () => {
+    const h = await createHarness(scratch, { entries: pinned });
+    const request = h.request("postgres-mcp", CURSOR);
+    const planned = await plannedOf(h, request);
+    h.reset();
+    const result = await runInstallTransaction(planned, await approveAll(planned), request, h.env);
+    expect(result.status).toBe("succeeded");
+    expect(result.verification?.prepared).toBe("cached");
+    expect(h.spawns).toEqual([["uvx", ...uvxPrepareArgs(TARGET, "wheels-only")], ["uvx", ...uvxVerifyArgs(TARGET, "wheels-only")]]);
+    expect(h.log.indexOf("spawn")).toBeLessThan(h.log.indexOf("write"));
+    const config = JSON.parse(await readFile(path.join(h.projectRoot, ".cursor", "mcp.json"), "utf8"));
+    // v0.2.1(#45 리뷰): 준비한 고정 버전 wheel-only 도구는 Client도 --no-build로 실행한다(cache가 지워져도 검토되지 않은 sdist를 빌드하지 않는다).
+    expect(config.mcpServers.postgres).toMatchObject({ command: "uvx", args: ["--no-build", "--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"] });
+  });
+
+  it("Client 실행 인자의 --no-build: 고정 버전 wheel-only에만 붙고, 떠 있는 명령은 그대로이며, Manifest에 이미 있으면 중복하지 않는다", async () => {
+    const pinnedPlan = (await plannedOf(await createHarness(scratch, { entries: pinned }), (await createHarness(scratch, { entries: pinned })).request("postgres-mcp", CURSOR))).plan;
+    expect(pinnedPlan.launch?.args.slice(0, 2)).toEqual(["--no-build", "--from"]);
+    expect(pinnedPlan.artifact).toMatchObject({ pinned: true, preparation: "uv-cache" });
+    // Health도 같은 인자로 실행한다(launch.args).
+    const floating = await createHarness(scratch, { entries: seed });
+    const floatingPlan = (await plannedOf(floating, floating.request("postgres-mcp", CURSOR))).plan;
+    expect(floatingPlan.launch?.args).not.toContain("--no-build");
+    const explicit = await createHarness(scratch, { entries: withPostgres({ command: "uvx --no-build --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted" }) });
+    const explicitPlan = (await plannedOf(explicit, explicit.request("postgres-mcp", CURSOR))).plan;
+    expect(explicitPlan.launch?.args.filter((a) => a === "--no-build")).toHaveLength(1);
+    expect(explicitPlan.artifact).toMatchObject({ pinned: true, preparation: "uv-cache" });
+    expect(explicitPlan.steps[0]).toMatchObject({ args: uvxPrepareArgs(TARGET, "wheels-only") });
+  });
+
+  it("준비가 실패하면(wheel 없음) 설정 파일을 바꾸지 않고 소스 빌드로 재시도하지 않는다", async () => {
+    const h = await createHarness(scratch, { entries: pinned });
+    const existing = '{\n  "mcpServers": {\n    "notes": { "command": "uvx", "args": ["notes-mcp==1.0.0"] }\n  }\n}\n';
+    await mkdir(path.join(h.projectRoot, ".cursor"), { recursive: true });
+    await writeFile(path.join(h.projectRoot, ".cursor", "mcp.json"), existing);
+    const request = h.request("postgres-mcp", CURSOR);
+    const planned = await plannedOf(h, request);
+    const spawns: string[][] = [];
+    const result = await runInstallTransaction(planned, await approveAll(planned), request, { ...h.env, spawner: uvxSpawner(spawns, [2], "error: Wheels are required for `proxy-tools` because building from source is disabled") });
+    expect(result).toMatchObject({ status: "failed", code: "UVX_WHEEL_UNAVAILABLE", verification: { prepared: "failed", configured: false } });
+    expect(spawns).toEqual([["uvx", ...uvxPrepareArgs(TARGET, "wheels-only")]]);
+    expect(await readFile(path.join(h.projectRoot, ".cursor", "mcp.json"), "utf8")).toBe(existing);
+    expect(existsSync(path.join(h.homeDir, ".openhub", "state", "lifecycle.json"))).toBe(false);
+  });
+
+  it("확인(offline)이 실패해도 설정 파일을 바꾸지 않는다", async () => {
+    const h = await createHarness(scratch, { entries: pinned });
+    const request = h.request("postgres-mcp", CURSOR);
+    const planned = await plannedOf(h, request);
+    const spawns: string[][] = [];
+    const result = await runInstallTransaction(planned, await approveAll(planned), request, { ...h.env, spawner: uvxSpawner(spawns, [0, 2]) });
+    expect(result).toMatchObject({ status: "failed", code: "UVX_PREPARE_VERIFY_FAILED" });
+    expect(existsSync(path.join(h.projectRoot, ".cursor", "mcp.json"))).toBe(false);
+  });
+
+  it("막힌 소스 빌드 계획은 승인할 수 없고 실행해도 준비·빌드·쓰기 0이다(기존 설정·Version State 그대로)", async () => {
+    const h = await createHarness(scratch, { entries: sourceBuild });
+    const existing = '{\n  "mcpServers": {\n    "notes": { "command": "uvx", "args": ["notes-mcp==1.0.0"] }\n  }\n}\n';
+    await mkdir(path.join(h.projectRoot, ".cursor"), { recursive: true });
+    await writeFile(path.join(h.projectRoot, ".cursor", "mcp.json"), existing);
+    const request = h.request("postgres-mcp", CURSOR);
+    const planned = await plannedOf(h, request);
+    const outcome = await requestApproval(planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
+    expect(outcome.status).not.toBe("approved");
+    h.reset();
+    const result = await runInstallTransaction(planned, undefined, request, h.env);
+    expect(result.status).not.toBe("succeeded");
+    expect(h.spawns).toEqual([]);
+    expect(await readFile(path.join(h.projectRoot, ".cursor", "mcp.json"), "utf8")).toBe(existing);
+    expect(existsSync(path.join(h.homeDir, ".openhub", "state", "lifecycle.json"))).toBe(false);
+  });
+
+  it("승인 뒤 Manifest 버전이 바뀌면 PLAN_STALE이고 준비·쓰기 0이다", async () => {
+    const h = await createHarness(scratch, { entries: pinned });
+    const request = h.request("postgres-mcp", CURSOR);
+    const planned = await plannedOf(h, request);
+    const approval = await approveAll(planned);
+    const changed = withPostgres({ command: PIN.replace("postgres-mcp==0.3.0", "postgres-mcp==0.3.1") });
+    h.reset();
+    const result = await runInstallTransaction(planned, approval, request, { ...h.env, loadEntries: async () => changed });
+    expect(result).toMatchObject({ status: "stale", code: "PLAN_STALE" });
+    expect(h.spawns).toEqual([]);
+    expect(existsSync(path.join(h.projectRoot, ".cursor", "mcp.json"))).toBe(false);
+  });
+
+  it("사용자 지정 index는 계정 없이 fingerprint로 계획에 들어가고, 승인 뒤 index가 바뀌면 PLAN_STALE이다(비밀번호만 바뀌면 그대로)", async () => {
+    const h = await createHarness(scratch, { entries: pinned });
+    const request = h.request("postgres-mcp", CURSOR);
+    let indexEnv: Record<string, string> = { UV_INDEX_URL: "https://ci-user:Index-Pass-1@idx.example/simple" };
+    const env = { ...h.env, uvChildEnv: () => indexEnv };
+    const built = await planInstall(request, env);
+    if (!built.result.ok) throw new Error(built.result.code);
+    const planned = built.result.planned;
+    const step = planned.plan.steps[0]!;
+    expect(step).toMatchObject({ kind: "run", executable: "uvx", index: { custom: true } });
+    expect(planned.plan.warnings.map((w) => w.code)).toContain("uvx-custom-index");
+    const json = JSON.stringify(planned.plan);
+    expect(json).not.toContain("Index-Pass-1");
+    expect(json).not.toContain("idx.example");
+    expect(json).not.toContain("ci-user");
+    const approval = await approveAll(planned);
+    indexEnv = { UV_INDEX_URL: "https://other.example/simple" };
+    h.reset();
+    expect(await runInstallTransaction(planned, approval, request, env)).toMatchObject({ status: "stale", code: "PLAN_STALE" });
+    expect(h.spawns).toEqual([]);
+    // 같은 index에서 비밀번호만 바뀌면 같은 계획이다.
+    indexEnv = { UV_INDEX_URL: "https://ci-user:Index-Pass-1@idx.example/simple" };
+    const again = await planInstall(request, env);
+    if (!again.result.ok) throw new Error(again.result.code);
+    const approval2 = await approveAll(again.result.planned);
+    indexEnv = { UV_INDEX_URL: "https://ci-user:Index-Pass-2@idx.example/simple" };
+    expect((await runInstallTransaction(again.result.planned, approval2, request, env)).status).toBe("succeeded");
+  });
+});
+
+describe("uvx Prepare: uv 설정 파일(uv.toml)과 소스 빌드 제한(v0.2.1 #45)", () => {
+  /** 합성 사용자 환경: 플랫폼과 무관하게 사용자 uv.toml 한 개만 보이게 한다. */
+  const UV_ENV = { APPDATA: "/appdata", HOME: "/home/u" };
+  const userToml = (get: () => string | null) => async (file: string) => {
+    const f = file.split("\\").join("/");
+    return f === "/appdata/uv/uv.toml" || f === "/home/u/.config/uv/uv.toml" ? get() : null;
+  };
+  const INDEX = (pass: string, host = "idx.example") => '[[index]]\nname = "corp"\nurl = "https://ci-user:' + pass + "@" + host + '/simple"\ndefault = true\n';
+
+  it("uv.toml에 사용자 지정 index가 있으면 wheel만 쓰는 준비는 fingerprint·고지와 함께 허용되고, 소스 빌드는 index와 무관하게 막힌다", async () => {
+    const toml = INDEX("Toml-Pass-1");
+    const source = await createHarness(scratch, { entries: sourceBuild });
+    const blocked = await planInstall(source.request("postgres-mcp", CURSOR), { ...source.env, uvChildEnv: () => UV_ENV, readUvConfig: userToml(() => toml) });
+    if (!blocked.result.ok) throw new Error(blocked.result.code);
+    expect(blocked.result.planned.plan.status).toBe("blocked");
+    expect(blocked.result.planned.plan.warnings.map((w) => w.code)).toContain("UVX_SOURCE_BUILD_DISABLED");
+
+    const wheels = await createHarness(scratch, { entries: pinned });
+    const ok = await planInstall(wheels.request("postgres-mcp", CURSOR), { ...wheels.env, uvChildEnv: () => UV_ENV, readUvConfig: userToml(() => toml) });
+    if (!ok.result.ok) throw new Error(ok.result.code);
+    expect(ok.result.planned.plan.status).toBe("installable");
+    expect(ok.result.planned.plan.steps[0]).toMatchObject({ executable: "uvx", index: { custom: true } });
+    expect(ok.result.planned.plan.warnings.map((w) => w.code)).toContain("uvx-custom-index");
+    const json = JSON.stringify(ok.result.planned.plan);
+    for (const s of ["Toml-Pass-1", "ci-user", "idx.example", "appdata", "/home/u"]) expect(json).not.toContain(s);
+  });
+
+  it("cache-dir 같은 출처와 무관한 uv.toml은 Plan을 바꾸지 않는다(기존 사용자 영향 없음)", async () => {
+    const h = await createHarness(scratch, { entries: pinned });
+    const request = h.request("postgres-mcp", CURSOR);
+    const plain = await plannedOf(h, request);
+    const withToml = await planInstall(request, { ...h.env, uvChildEnv: () => UV_ENV, readUvConfig: userToml(() => 'cache-dir = "/c"\n') });
+    if (!withToml.result.ok) throw new Error(withToml.result.code);
+    expect(withToml.result.planned.planDigest).toBe(plain.planDigest);
+  });
+
+  it("승인 뒤 uv.toml의 index가 바뀌거나 새로 생기면 PLAN_STALE이고 준비·쓰기 0이다(비밀번호만 바뀌면 그대로 실행)", async () => {
+    const h = await createHarness(scratch, { entries: pinned });
+    const request = h.request("postgres-mcp", CURSOR);
+    let toml: string | null = INDEX("Toml-Pass-1");
+    const env = { ...h.env, uvChildEnv: () => UV_ENV, readUvConfig: userToml(() => toml) };
+    for (const next of [INDEX("Toml-Pass-1", "other.example"), null]) {
+      toml = INDEX("Toml-Pass-1");
+      const built = await planInstall(request, env);
+      if (!built.result.ok) throw new Error(built.result.code);
+      const approval = await approveAll(built.result.planned);
+      toml = next;
+      h.reset();
+      expect(await runInstallTransaction(built.result.planned, approval, request, env)).toMatchObject({ status: "stale", code: "PLAN_STALE" });
+      expect(h.spawns).toEqual([]);
+      expect(existsSync(path.join(h.projectRoot, ".cursor", "mcp.json"))).toBe(false);
+    }
+    // index가 없던 계획에 승인 뒤 index가 생겨도 PLAN_STALE이다.
+    toml = null;
+    const fresh = await planInstall(request, env);
+    if (!fresh.result.ok) throw new Error(fresh.result.code);
+    const freshApproval = await approveAll(fresh.result.planned);
+    toml = INDEX("Toml-Pass-1");
+    expect(await runInstallTransaction(fresh.result.planned, freshApproval, request, env)).toMatchObject({ status: "stale", code: "PLAN_STALE" });
+    // 같은 index에서 비밀번호만 바뀌면 같은 계획이다.
+    toml = INDEX("Toml-Pass-1");
+    const again = await planInstall(request, env);
+    if (!again.result.ok) throw new Error(again.result.code);
+    const approval2 = await approveAll(again.result.planned);
+    toml = INDEX("Toml-Pass-2");
+    expect((await runInstallTransaction(again.result.planned, approval2, request, env)).status).toBe("succeeded");
+  });
+
+  it("uv.toml이 TOML이 아니면 uvx 준비 계획을 막는다(UVX_CONFIG_UNSUPPORTED, 원문 비노출)", async () => {
+    const h = await createHarness(scratch, { entries: pinned });
+    const built = await planInstall(h.request("postgres-mcp", CURSOR), { ...h.env, uvChildEnv: () => UV_ENV, readUvConfig: userToml(() => 'index-url = "https://u:Broken-Pass@idx') });
+    if (!built.result.ok) throw new Error(built.result.code);
+    expect(built.result.planned.plan.status).toBe("blocked");
+    expect(built.result.planned.plan.warnings.map((w) => w.code)).toContain("UVX_CONFIG_UNSUPPORTED");
+    expect(JSON.stringify(built.result.planned.plan)).not.toContain("Broken-Pass");
+  });
+
+});
+

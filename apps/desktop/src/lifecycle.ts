@@ -10,6 +10,7 @@ import {
   loadRegistry,
   locateWindowsNpxLauncher,
   npmChildEnv,
+  uvChildEnv,
   npxCacheKey,
   parseNpmSpec,
   planLifecycleRequest,
@@ -347,6 +348,7 @@ function environment(deps: LifecycleDeps, entries: Awaited<ReturnType<typeof loa
     now: deps.now ?? (() => new Date()),
     // npx Prepare의 npm 자식 process에는 허용 목록 환경만 넘긴다(API key·token·클라우드 자격증명 제외).
     npmChildEnv: () => npmChildEnv(process.env),
+    uvChildEnv: () => uvChildEnv(process.env),
     windowsNpx:
       deps.windowsNpx ??
       (async () => {

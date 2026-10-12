@@ -19,8 +19,8 @@ export const PREPARED_STATES = ["launch-on-demand", "pulled", "cached", "failed"
 export type PreparedState = (typeof PREPARED_STATES)[number];
 
 /** 준비 단계가 모두 성공했을 때의 Prepared 상태. */
-export function preparedStateOf(preparation: "launch-on-demand" | "pull" | "npm-cache" | undefined): Exclude<PreparedState, "failed"> {
-  return preparation === "pull" ? "pulled" : preparation === "npm-cache" ? "cached" : "launch-on-demand";
+export function preparedStateOf(preparation: "launch-on-demand" | "pull" | "npm-cache" | "uv-cache" | undefined): Exclude<PreparedState, "failed"> {
+  return preparation === "pull" ? "pulled" : preparation === "npm-cache" || preparation === "uv-cache" ? "cached" : "launch-on-demand";
 }
 
 const text = z.string().min(1).max(400);

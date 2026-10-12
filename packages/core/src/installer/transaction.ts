@@ -4,6 +4,7 @@ import type { BackendProbeReport } from "../process/probe";
 import { probeToRecommendContext } from "../process/probe";
 import { executeVerifiedPlan, type ExecSpawner, type IsolatedDir, type StepOutcome } from "../process/executor";
 import { createTreeKiller, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
+import { uvSourceSettings, type UvConfigReader } from "../process/uvx-prepare";
 import { recommend, type MetadataSnapshot, type RecommendPlatform, type RecommendationReport } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
 import { verifyApprovedPlan, type InstallApproval, type VerifiedPlan } from "./approval-v1";
@@ -78,6 +79,10 @@ export interface InstallEnvironment {
   killTree?: TreeKiller;
   /** npx Prepare의 npm 자식 process 환경(보통 npmChildEnv(process.env), CLI·Desktop이 넘긴다). 없으면 OS 기본 상속. */
   npmChildEnv?: () => Record<string, string>;
+  /** v0.2.1 uvx Prepare의 uv 자식 process 환경(보통 uvChildEnv(process.env), CLI·Desktop이 넘긴다). 패키지 index fingerprint도 여기서 만든다. */
+  uvChildEnv?: () => Record<string, string>;
+  /** uv 설정 파일(uv.toml) 읽기. 테스트 주입용, 기본은 실제 파일. */
+  readUvConfig?: UvConfigReader;
   /** 확인 단계(TASK-034). 없으면 Prepared·Configured만 확인하고 Detected는 skipped다. */
   verify?: InstallVerifier;
   /** OpenHub 관리 tool config 파일 접근(v0.2.0, 테스트에서 실패를 주입한다). */
@@ -105,7 +110,8 @@ export async function planInstall(request: InstallRequest, env: InstallEnvironme
   const planForms = entry?.manifest.toolConfig === undefined ? undefined : await toolConfigPlanForms(request, env);
   const targets = await Promise.all(request.targets.map((t) => inspectConfigTarget(t.client, t.scope, alias, roots, planForms?.get(t.scope) ?? defaultEntryPlanForm)));
   const toolConfigs = entry?.manifest.toolConfig === undefined ? undefined : await inspectToolConfigs(request, [...new Set(request.targets.map((t) => t.scope))], env);
-  const result = buildInstallPlan({ toolId: request.toolId, entries, report, probes, targets, platform: request.platform, ...(toolConfigs === undefined ? {} : { toolConfigs }) });
+  const uvSource = env.uvChildEnv === undefined ? undefined : await uvSourceSettings(env.uvChildEnv(), request.platform, env.readUvConfig);
+  const result = buildInstallPlan({ toolId: request.toolId, entries, report, probes, targets, platform: request.platform, ...(uvSource === undefined ? {} : { uvSource }), ...(toolConfigs === undefined ? {} : { toolConfigs }) });
   return { result, report, profile };
 }
 
@@ -171,10 +177,14 @@ const requiredEnvOf = (plan: PlannedInstall["plan"]) => plan.requiredEnv.filter(
 
 /** npx 준비 단계가 있을 때만 npx Prepare 문맥(플랫폼·Windows 실행 경로·tree killer)을 만든다. */
 async function npxContextFor(plan: VerifiedPlan["plan"], request: InstallRequest, env: InstallEnvironment) {
-  if (!plan.steps.some((s) => s.kind === "run" && s.executable === "npx") || plan.launch === null) return {};
+  const uvx =
+    plan.steps.some((s) => s.kind === "run" && s.executable === "uvx") && plan.launch !== null
+      ? { uvx: { platform: plan.launch.platform, killTree: env.killTree ?? createTreeKiller({ cwd: request.projectRoot }), ...(env.uvChildEnv === undefined ? {} : { childEnv: env.uvChildEnv() }), ...(env.readUvConfig === undefined ? {} : { readUvConfig: env.readUvConfig }) } }
+      : {};
+  if (!plan.steps.some((s) => s.kind === "run" && s.executable === "npx") || plan.launch === null) return uvx;
   const platform = plan.launch.platform;
   const windowsNpx = platform === "windows" && env.windowsNpx !== undefined ? await env.windowsNpx() : null;
-  return { npx: { platform, windowsNpx, killTree: env.killTree ?? createTreeKiller({ cwd: request.projectRoot }), ...(env.npmChildEnv === undefined ? {} : { childEnv: env.npmChildEnv() }) } };
+  return { ...uvx, npx: { platform, windowsNpx, killTree: env.killTree ?? createTreeKiller({ cwd: request.projectRoot }), ...(env.npmChildEnv === undefined ? {} : { childEnv: env.npmChildEnv() }) } };
 }
 
 function finalize(result: InstallResultV1): InstallResultV1 {
