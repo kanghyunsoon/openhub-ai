@@ -1,6 +1,6 @@
 import type { RecommendPlatform, RecommendationReport } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
-import { unknownToolError } from "../registry/withdrawn";
+import { resolveRegistryTool } from "../registry/withdrawn";
 import { UVX_SOURCE_BUILD_DISABLED_TEXT, type UvSourceSettings } from "../process/uvx-prepare";
 import { BACKEND_ADAPTERS, type BackendLaunch } from "./backends";
 import { INSTALL_BACKENDS, assembleInstallPlan, registryDigestExcluding, type InstallBackend, type PlanAssemblyInput, type PlanBlocker, type PlanTargetInput, type PlannedInstall, type ProbeSnapshot } from "./plan";
@@ -45,10 +45,10 @@ const probeReason = (probe: ProbeSnapshot | undefined) =>
   probe === undefined ? "not-probed" : probe.available === false ? "not-found" : probe.available === "unknown" ? "probe-" + probe.status : undefined;
 
 export function buildInstallPlan(input: PlanBuildInput): PlanBuildResult {
-  const entry = input.entries.find((e) => e.manifest.name === input.toolId);
-  // 지원 중단 도구(v0.2.1 #39)는 TOOL_NOT_FOUND 대신 사유를 안내한다.
-  if (entry === undefined) return unknownToolError(input.toolId);
-  const manifest = entry.manifest;
+  // 지원 중단 도구(v0.2.1 #39)는 Registry에 Manifest가 있어도(사용자 Registry 포함) 계획하지 않고 사유를 안내한다.
+  const found = resolveRegistryTool(input.entries, input.toolId);
+  if (!found.ok) return found;
+  const manifest = found.entry.manifest;
   if (manifest.verification === "draft") return { ok: false, code: "MANIFEST_DRAFT", message: "검증되지 않은 draft Manifest는 설치하지 않습니다(CON-005)" };
 
   const blockers: PlanBlocker[] = [];

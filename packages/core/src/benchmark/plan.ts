@@ -17,7 +17,7 @@ import { nodeConfigFs, readConfiguredEntry, type ConfigFs } from "../installer/c
 import { CONFIG_SCOPES, INSTALL_BACKENDS, INSTALL_CLIENTS, canonicalize, manifestDigest, registryDigestExcluding, sha256Digest, type ConfigScope, type InstallClient } from "../installer/plan";
 import { RECOMMEND_PLATFORMS, TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, type RecommendPlatform } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
-import { unknownToolError } from "../registry/withdrawn";
+import { resolveRegistryTool } from "../registry/withdrawn";
 import { PROJECT_KEY_PATTERN, artifactIdentitySchema, entryKeyOf, type ToolState } from "../lifecycle/state";
 import { TOOL_CONFIG_PLACEHOLDER } from "../tool-config/index";
 import { configEntryDigest } from "../lifecycle/status";
@@ -142,8 +142,9 @@ const argsOfClientSpec = (spec: { command: string; args: readonly string[] }) =>
 export async function planBenchmark(options: BenchmarkPlanOptions): Promise<BenchmarkPlanResult> {
   const fs = options.fs ?? nodeConfigFs;
   const registry = options.entries.filter((e): e is RegistryEntry => isRecord(e) && isRecord(e.manifest) && typeof e.manifest.name === "string" && isRecord(e.manifest.repository));
-  const entry = registry.find((e) => e.manifest.name === options.toolId);
-  if (entry === undefined) return unknownToolError(options.toolId);
+  const found = resolveRegistryTool(registry, options.toolId);
+  if (!found.ok) return found;
+  const entry = found.entry;
   const manifest = entry.manifest;
   const read = await readLifecycleState({ homeDir: options.homeDir, fs });
   if (!read.ok) return read;

@@ -16,6 +16,7 @@ import {
   loadRegistry,
   locateWindowsNpxLauncher,
   npmChildEnv,
+  resolveRegistryTool,
   uvChildEnv,
   planLifecycleRequest,
   probeBackends,
@@ -294,8 +295,10 @@ export async function runLifecycleOperation(operation: LifecycleOperation, argv:
     return 3;
   }
   const entries = await registryOf(io);
-  if (!entries.some((e) => e.manifest.name === toolId)) {
-    io.err("Registry에 없는 Tool입니다. openhub registry list로 Tool ID를 확인하세요.");
+  // v0.2.1 #39 리뷰: 지원 중단 도구(update·rollback·health·repair)는 Core 판정의 사유(TOOL_WITHDRAWN)를 그대로 보여 준다.
+  const found = resolveRegistryTool(entries, toolId);
+  if (!found.ok) {
+    io.err(found.code === "TOOL_WITHDRAWN" ? found.message : "Registry에 없는 Tool입니다. openhub registry list로 Tool ID를 확인하세요.");
     return 2;
   }
   const platform = toRecommendPlatform(io.platform ?? process.platform);

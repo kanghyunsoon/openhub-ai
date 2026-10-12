@@ -12,7 +12,11 @@ import {
   readConfiguredEntry,
   readLifecycleState,
   releaseRequestOf,
+  resolveRegistryTool,
   summarizeReleases,
+  toolWithdrawnMessageEn,
+  withdrawnManifestOf,
+  withdrawnToolOf,
   type BackendProbeReport,
   type ConfigFs,
   type FetchLike,
@@ -142,8 +146,15 @@ export async function pinokioPreviewForRenderer(deps: ReleaseDeps, toolId: unkno
   try {
     if (typeof toolId !== "string") return { status: "error", code: "PINOKIO_NOT_SUPPORTED", message: tr("pinokio.chooseTool") };
     const { entries } = await loadRegistry(deps.registryDir);
-    const manifest = entries.find((e) => e.manifest.name === toolId)?.manifest;
-    if (manifest === undefined) return { status: "error", code: "TOOL_NOT_FOUND", message: tr("pinokio.toolNotFound") };
+    // v0.2.1 #39 리뷰: 지원 중단 도구는 Registry 항목 유무와 관계없이 Core 판정의 사유를 보여 준다(English 모드는 영어 사유).
+    const found = resolveRegistryTool(entries, toolId);
+    if (!found.ok) {
+      if (found.code === "TOOL_NOT_FOUND") return { status: "error", code: "TOOL_NOT_FOUND", message: tr("pinokio.toolNotFound") };
+      const listed = entries.find((e) => e.manifest.name === toolId)?.manifest;
+      const withdrawn = withdrawnToolOf(toolId) ?? (listed === undefined ? undefined : withdrawnManifestOf(listed));
+      return { status: "error", code: found.code, message: getDesktopLocale() === "en" && withdrawn !== undefined ? toolWithdrawnMessageEn(withdrawn) : found.message };
+    }
+    const manifest = found.entry.manifest;
     const probe: PinokioProbeEnv = {
       pathEnv: deps.pinokioProbe?.pathEnv ?? "",
       platform: deps.pinokioProbe?.platform ?? process.platform,

@@ -31,6 +31,10 @@ describe("v0.2.1 postgres-mcp Manifest", () => {
   it("serena는 Registry에 없고 지원 중단 목록에 있으며(재지원은 Issue #59), 목록에는 실행 명령이 없다", () => {
     expect(entries.map((e) => e.manifest.name)).not.toContain("serena");
     expect(withdrawnToolOf("serena")).toMatchObject({ toolId: "serena", since: "0.2.1", issue: "https://github.com/kanghyunsoon/openhub-ai/issues/59" });
-    for (const t of WITHDRAWN_TOOLS) expect(Object.keys(t).sort()).toEqual(["displayName", "issue", "reason", "reasonEn", "since", "toolId"]);
+    // #39 리뷰: 이름이 다른 Manifest를 식별하는 identity(저장소·MCP alias·PyPI 패키지)가 추가됐다. 식별 값만 있고 실행 명령·인자·image는 없다.
+    for (const t of WITHDRAWN_TOOLS) {
+      expect(Object.keys(t).sort()).toEqual(["displayName", "identity", "issue", "reason", "reasonEn", "since", "toolId"]);
+      expect(Object.keys(t.identity).sort()).toEqual(["mcpServerNames", "pypiPackages", "repositories"]);
+    }
   });
 });

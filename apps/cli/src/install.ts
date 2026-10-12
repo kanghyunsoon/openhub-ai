@@ -14,6 +14,7 @@ import {
   loadRegistry,
   locateWindowsNpxLauncher,
   npmChildEnv,
+  resolveRegistryTool,
   uvChildEnv,
   planInstall,
   probeBackends,
@@ -210,8 +211,10 @@ export async function runInstall(argv: readonly string[], io: InstallCommandIO, 
 
   const { entries, issues } = await loadRegistry(registryDirOf(io));
   for (const issue of issues) io.err("경고: " + formatRegistryIssue(issue));
-  if (!entries.some((e) => e.manifest.name === toolId)) {
-    io.err("Registry에 없는 Tool입니다. openhub registry list로 Tool ID를 확인하세요.");
+  // v0.2.1 #39 리뷰: 지원 중단 도구는 Registry 항목 유무와 관계없이 Core 판정의 사유(TOOL_WITHDRAWN)를 그대로 보여 준다.
+  const found = resolveRegistryTool(entries, toolId);
+  if (!found.ok) {
+    io.err(found.code === "TOOL_WITHDRAWN" ? found.message : "Registry에 없는 Tool입니다. openhub registry list로 Tool ID를 확인하세요.");
     return 2;
   }
   const platform = toRecommendPlatform(io.platform ?? process.platform);
