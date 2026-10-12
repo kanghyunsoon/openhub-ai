@@ -4,7 +4,7 @@ import type { BackendProbeReport } from "../process/probe";
 import { probeToRecommendContext } from "../process/probe";
 import { executeVerifiedPlan, type ExecSpawner, type IsolatedDir, type StepOutcome } from "../process/executor";
 import { createTreeKiller, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
-import { uvSourceSettings, type UvConfigReader, type UvxPrepareContext } from "../process/uvx-prepare";
+import { uvSourceSettings, type UvConfigReader } from "../process/uvx-prepare";
 import { recommend, type MetadataSnapshot, type RecommendPlatform, type RecommendationReport } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
 import { verifyApprovedPlan, type InstallApproval, type VerifiedPlan } from "./approval-v1";
@@ -83,8 +83,6 @@ export interface InstallEnvironment {
   uvChildEnv?: () => Record<string, string>;
   /** uv 설정 파일(uv.toml) 읽기. 테스트 주입용, 기본은 실제 파일. */
   readUvConfig?: UvConfigReader;
-  /** 검토된 소스 빌드의 PyPI 확인 HTTP(테스트 주입용, 기본 globalThis.fetch). */
-  uvxFetch?: UvxPrepareContext["fetch"];
   /** 확인 단계(TASK-034). 없으면 Prepared·Configured만 확인하고 Detected는 skipped다. */
   verify?: InstallVerifier;
   /** OpenHub 관리 tool config 파일 접근(v0.2.0, 테스트에서 실패를 주입한다). */
@@ -181,7 +179,7 @@ const requiredEnvOf = (plan: PlannedInstall["plan"]) => plan.requiredEnv.filter(
 async function npxContextFor(plan: VerifiedPlan["plan"], request: InstallRequest, env: InstallEnvironment) {
   const uvx =
     plan.steps.some((s) => s.kind === "run" && s.executable === "uvx") && plan.launch !== null
-      ? { uvx: { platform: plan.launch.platform, killTree: env.killTree ?? createTreeKiller({ cwd: request.projectRoot }), ...(env.uvChildEnv === undefined ? {} : { childEnv: env.uvChildEnv() }), ...(env.readUvConfig === undefined ? {} : { readUvConfig: env.readUvConfig }), ...(env.uvxFetch === undefined ? {} : { fetch: env.uvxFetch }) } }
+      ? { uvx: { platform: plan.launch.platform, killTree: env.killTree ?? createTreeKiller({ cwd: request.projectRoot }), ...(env.uvChildEnv === undefined ? {} : { childEnv: env.uvChildEnv() }), ...(env.readUvConfig === undefined ? {} : { readUvConfig: env.readUvConfig }) } }
       : {};
   if (!plan.steps.some((s) => s.kind === "run" && s.executable === "npx") || plan.launch === null) return uvx;
   const platform = plan.launch.platform;

@@ -1,6 +1,6 @@
 import type { RecommendPlatform, RecommendationReport } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
-import type { UvSourceSettings } from "../process/uvx-prepare";
+import { UVX_SOURCE_BUILD_DISABLED_TEXT, type UvSourceSettings } from "../process/uvx-prepare";
 import { BACKEND_ADAPTERS, type BackendLaunch } from "./backends";
 import { INSTALL_BACKENDS, assembleInstallPlan, registryDigestExcluding, type InstallBackend, type PlanAssemblyInput, type PlanBlocker, type PlanTargetInput, type PlannedInstall, type ProbeSnapshot } from "./plan";
 import { installCandidates } from "./router";
@@ -113,15 +113,12 @@ export function buildInstallPlan(input: PlanBuildInput): PlanBuildResult {
 /**
  * uvx 준비 단계의 패키지 출처 차단(v0.2.1, InstallPlan·LifecyclePlan 공통).
  * - uv 설정 파일을 확인하지 못하면 준비하지 않는다(UVX_CONFIG_UNSUPPORTED).
- * - 검토된 소스 빌드는 기본 PyPI에서만 허용한다. 사용자 지정 index·find-links가 있으면 막는다(UVX_SOURCE_BUILD_CUSTOM_INDEX):
- *   OpenHub가 sha256을 확인한 PyPI sdist와 uv가 실제로 받는 파일이 같다는 보장이 없다.
+ * - 검토된 소스 빌드(sourceBuild 단계)는 일시 차단한다(UVX_SOURCE_BUILD_DISABLED, #45 리뷰). docs/specs/uvx-prepare.md 참고.
  */
 export function uvSourceBlockers(uvxSteps: readonly { sourceBuild?: readonly unknown[] | undefined }[], source: UvSourceSettings | undefined): PlanBlocker[] {
-  if (uvxSteps.length === 0 || source === undefined) return [];
+  if (uvxSteps.length === 0) return [];
   const out: PlanBlocker[] = [];
-  if (source.unsupported !== null) out.push({ code: "UVX_CONFIG_UNSUPPORTED", message: source.unsupported + ". uv 설정 파일을 고친 뒤 새 계획을 만드세요" });
-  if (source.customIndex && uvxSteps.some((s) => s.sourceBuild !== undefined)) {
-    out.push({ code: "UVX_SOURCE_BUILD_CUSTOM_INDEX", message: "사용자 지정 패키지 index(환경변수 또는 uv.toml)가 설정되어 있어 검토된 소스 빌드를 할 수 없습니다. 기본 PyPI index에서만 허용합니다" });
-  }
+  if (uvxSteps.some((s) => s.sourceBuild !== undefined)) out.push({ code: "UVX_SOURCE_BUILD_DISABLED", message: UVX_SOURCE_BUILD_DISABLED_TEXT });
+  if (source !== undefined && source.unsupported !== null) out.push({ code: "UVX_CONFIG_UNSUPPORTED", message: source.unsupported + ". uv 설정 파일을 고친 뒤 새 계획을 만드세요" });
   return out;
 }

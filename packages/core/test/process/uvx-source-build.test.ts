@@ -1,212 +1,49 @@
-import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
-  builtPackages,
-  containsAbsolutePath,
   prepareUvxPackage,
-  unbuildablePackage,
   uvChildEnv,
   uvConfigCandidates,
   uvSourceSettings,
   uvxPrepareArgs,
-  uvxVerifyArgs,
   type ExecChild,
   type NpxSpawner,
   type UvConfigReader,
 } from "../../src/index";
 
 /**
- * v0.2.1 #45: 검토된 소스 빌드 허용 목록 강제와 uv 설정(uv.toml) 확인. 가짜 uv·uvx·fetch만 쓴다(network 0, 실제 uv 0).
- * 실제 uv 확인은 OPENHUB_E2E(uvx-prepare.e2e.test.ts)와 PR 본문의 Windows·Linux 실행 기록이다.
+ * v0.2.1 #45: 검토된 소스 빌드 일시 차단과 uv 설정(uv.toml) 확인. 가짜 uvx만 쓴다(network 0, 실제 uv 0).
+ * 차단 이유(uvx가 constraints·build-constraints·with-requirements hash를 확인하지 않음)의 실제 uv 재현은 registry/uvx-prepare.e2e.test.ts.
  */
 const scratch = await mkdtemp(path.join(tmpdir(), "openhub-uvx-source-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 
-const SERENA = { from: "serena-agent==1.7.0", withPins: [] as string[] };
-const SDIST = Buffer.from("proxy-tools 0.1.0 sdist bytes (synthetic)");
-const SHA = createHash("sha256").update(SDIST).digest("hex");
-const ENTRY = { package: "proxy-tools", version: "0.1.0", sha256: SHA };
-const FILE_URL = "https://files.pythonhosted.org/packages/aa/bb/proxy_tools-0.1.0.tar.gz";
-const ENV_LIST = "proxy-tools==0.1.0\nserena-agent==1.7.0\nsensai-utils==1.5.0\nmcp==1.30.0\n";
-const BT = "\x60";
-
-type Reply = { code?: number; stdout?: string; stderr?: string; wheel?: string };
-type Handler = (executable: string, args: readonly string[]) => Reply;
-
-function fakeUv(handler: Handler) {
-  const calls: { executable: string; args: string[]; env: Record<string, string> | undefined }[] = [];
-  const spawner: NpxSpawner = (executable, args, options) => {
-    expect(options.shell).toBe(false);
-    calls.push({ executable, args: [...args], env: options.env });
-    const reply = handler(executable, args);
-    const events = new EventEmitter();
-    const stdout = new EventEmitter();
-    const stderr = new EventEmitter();
-    void (async () => {
-      await new Promise((resolve) => setImmediate(resolve));
-      if (reply.wheel !== undefined) await writeFile(path.join(args[3]!, reply.wheel), "wheel");
-      if (reply.stdout !== undefined) stdout.emit("data", Buffer.from(reply.stdout));
-      if (reply.stderr !== undefined) stderr.emit("data", Buffer.from(reply.stderr));
-      events.emit("close", reply.code ?? 0, null);
-    })();
-    return { pid: 5000 + calls.length, stdout, stderr, on: (e: string, l: (...a: unknown[]) => void) => events.on(e, l), kill: () => true } as unknown as ExecChild;
-  };
-  return { calls, spawner };
-}
-
-/** 정상 경로: uv build는 검토 wheel, wheel만 확인은 전체 목록, 소스 빌드 단계는 proxy-tools만 빌드했다고 알린다. */
-const happy: Handler = (executable, args) => {
-  if (executable === "uv") return { wheel: "proxy_tools-0.1.0-py3-none-any.whl" };
-  if (args[0] === "--no-build" && args[1] === "--find-links") return { stdout: ENV_LIST };
-  if (args[0] === "--compile-bytecode") return { stderr: "Resolved 4 packages\n   Built proxy-tools==0.1.0\nInstalled 4 packages\n" };
-  return {};
-};
-
-function fakeFetch(opts: { jsonSha?: string; url?: string; bytes?: Buffer; fail?: "json" | "file" } = {}) {
-  const urls: string[] = [];
-  const fetch = async (url: string) => {
-    urls.push(url);
-    if (url.startsWith("https://pypi.org/pypi/")) {
-      if (opts.fail === "json") throw new Error("offline");
-      const body = JSON.stringify({
-        urls: [
-          { packagetype: "bdist_wheel", filename: "other.whl", url: "https://files.pythonhosted.org/x.whl", digests: { sha256: "0".repeat(64) } },
-          { packagetype: "sdist", filename: "proxy_tools-0.1.0.tar.gz", url: opts.url ?? FILE_URL, digests: { sha256: opts.jsonSha ?? SHA } },
-        ],
-      });
-      return new Response(body, { status: 200 });
+describe("검토된 소스 빌드: 일시 차단(fail-closed)", () => {
+  it("source-build-reviewed 준비 단계는 어떤 입력에서도 실행하지 않는다(UVX_SOURCE_BUILD_DISABLED, spawn 0, network 0)", async () => {
+    const spawns: string[][] = [];
+    const spawner: NpxSpawner = (executable, args) => {
+      spawns.push([executable, ...args]);
+      const events = new EventEmitter();
+      queueMicrotask(() => events.emit("close", 0, null));
+      return { pid: 1, stdout: new EventEmitter(), stderr: new EventEmitter(), on: (e: string, l: (...a: unknown[]) => void) => events.on(e, l), kill: () => true } as unknown as ExecChild;
+    };
+    const fetched: string[] = [];
+    const saved = globalThis.fetch;
+    globalThis.fetch = (async (url: string) => (fetched.push(String(url)), new Response("x"))) as typeof fetch;
+    try {
+      for (const target of [{ from: "serena-agent==1.7.0", withPins: [] }, { from: "serena-agent==1.7.0", withPins: ["docopt==0.6.2"] }]) {
+        const r = await prepareUvxPackage(uvxPrepareArgs(target, "source-build-reviewed"), scratch, { platform: "linux", spawner, childEnv: {}, readUvConfig: async () => null });
+        expect(r).toMatchObject({ status: "failed", code: "UVX_SOURCE_BUILD_DISABLED" });
+        expect(r.excerpt).toContain("설정 파일은 바꾸지 않았습니다");
+      }
+    } finally {
+      globalThis.fetch = saved;
     }
-    if (opts.fail === "file") throw new Error("offline");
-    return new Response(new Uint8Array(opts.bytes ?? SDIST), { status: 200 });
-  };
-  return { urls, fetch };
-}
-
-const noConfig: UvConfigReader = async () => null;
-let seq = 0;
-function run(handler: Handler, extra: Record<string, unknown> = {}, fetchOpts: Parameters<typeof fakeFetch>[0] = {}) {
-  const uv = fakeUv(handler);
-  const f = fakeFetch(fetchOpts);
-  const cwd = path.join(scratch, "run-" + String(++seq));
-  const result = (async () => {
-    await mkdir(cwd, { recursive: true });
-    return prepareUvxPackage(uvxPrepareArgs(SERENA, "source-build-reviewed"), cwd, { platform: "linux", spawner: uv.spawner, fetch: f.fetch, readUvConfig: noConfig, sourceBuild: [ENTRY], childEnv: {}, ...extra });
-  })();
-  return { uv, f, result };
-}
-
-describe("검토된 소스 빌드: 허용 목록 강제", () => {
-  it("성공: sha256 확인 → 검토 sdist만 빌드 → wheel만으로 전체 목록 확인 → 목록 밖 전부 --no-build-package → 오프라인 확인", async () => {
-    const t = run(happy);
-    const r = await t.result;
-    expect(r).toMatchObject({ status: "done" });
-    expect(t.f.urls).toEqual(["https://pypi.org/pypi/proxy-tools/0.1.0/json", FILE_URL]);
-    expect(t.uv.calls.map((c) => [c.executable, c.args[0], c.args[1]])).toEqual([
-      ["uv", "build", "--wheel"],
-      ["uvx", "--no-build", "--find-links"],
-      ["uvx", "--compile-bytecode", "--constraints"],
-      ["uvx", "--offline", "--from"],
-    ]);
-    const phaseB = t.uv.calls[2]!.args;
-    const blocked = phaseB.flatMap((a, i) => (a === "--no-build-package" ? [phaseB[i + 1]!] : []));
-    expect(blocked.sort()).toEqual(["mcp", "sensai-utils", "serena-agent"]);
-    expect(t.uv.calls[3]!.args).toEqual(uvxVerifyArgs(SERENA, "source-build-reviewed"));
-    expect(r.excerpt).toContain("proxy-tools==0.1.0");
-    expect(containsAbsolutePath(r.excerpt ?? "")).toBe(false);
-  });
-
-  it("실패 재현(이전 동작): 검토 목록 없는 소스 빌드 단계는 실행하지 않는다(spawn 0, fetch 0)", async () => {
-    const t = run(happy, { sourceBuild: undefined });
-    expect(await t.result).toMatchObject({ status: "failed", code: "UVX_PREPARE_REJECTED" });
-    expect(t.uv.calls).toEqual([]);
-    expect(t.f.urls).toEqual([]);
-  });
-
-  it("PyPI의 sdist sha256이 검토 값과 다르면 내려받지도 빌드하지도 않는다", async () => {
-    const t = run(happy, {}, { jsonSha: "f".repeat(64) });
-    expect(await t.result).toMatchObject({ status: "failed", code: "UVX_SOURCE_UNVERIFIED" });
-    expect(t.uv.calls).toEqual([]);
-    expect(t.f.urls).toHaveLength(1);
-  });
-
-  it("내려받은 파일 sha256이 다르면 빌드하지 않는다", async () => {
-    const t = run(happy, {}, { bytes: Buffer.from("tampered") });
-    expect(await t.result).toMatchObject({ status: "failed", code: "UVX_SOURCE_UNVERIFIED" });
-    expect(t.uv.calls).toEqual([]);
-  });
-
-  it("파일 URL이 files.pythonhosted.org가 아니면 받지 않는다", async () => {
-    const t = run(happy, {}, { url: "https://evil.example/proxy_tools-0.1.0.tar.gz" });
-    expect(await t.result).toMatchObject({ status: "failed", code: "UVX_SOURCE_UNVERIFIED" });
-    expect(t.f.urls).toHaveLength(1);
-    expect(t.uv.calls).toEqual([]);
-  });
-
-  it("네트워크 실패는 UVX_SOURCE_UNVERIFIED이고 빌드 0이다", async () => {
-    for (const fail of ["json", "file"] as const) {
-      const t = run(happy, {}, { fail });
-      expect(await t.result).toMatchObject({ status: "failed", code: "UVX_SOURCE_UNVERIFIED" });
-      expect(t.uv.calls).toEqual([]);
-    }
-  });
-
-  it("검토 목록 밖 패키지가 소스 빌드를 요구하면 그 패키지를 빌드하지 않고 멈춘다(소스 빌드 단계 0회)", async () => {
-    for (const stderr of [
-      "  x No solution found when resolving tool dependencies:\n  Because docopt==0.6.2 has no usable wheels and building from source is disabled, we can conclude that ...",
-      "error: Wheels are required for " + BT + "docopt" + BT + " because building from source is disabled",
-    ]) {
-      const t = run((exe, args) => (exe === "uvx" && args[0] === "--no-build" ? { code: 1, stderr } : happy(exe, args)));
-      const r = await t.result;
-      expect(r).toMatchObject({ status: "failed", code: "UVX_UNREVIEWED_SOURCE_BUILD" });
-      expect(r.excerpt).toContain("docopt");
-      expect(t.uv.calls.map((c) => c.args[0])).toEqual(["build", "--no-build"]);
-    }
-  });
-
-  it("uv build가 검토 목록과 다른 wheel을 만들면 실패한다", async () => {
-    const t = run((exe, args) => (exe === "uv" ? { wheel: "proxy_tools-0.2.0-py3-none-any.whl" } : happy(exe, args)));
-    expect(await t.result).toMatchObject({ status: "failed", code: "UVX_SOURCE_BUILD_MISMATCH" });
-    expect(t.uv.calls).toHaveLength(1);
-  });
-
-  it("검토 목록의 패키지가 실제 환경에 없으면 실패한다(목록과 Manifest 불일치)", async () => {
-    const t = run((exe, args) => (exe === "uvx" && args[0] === "--no-build" ? { stdout: "serena-agent==1.7.0\nmcp==1.30.0\n" } : happy(exe, args)));
-    expect(await t.result).toMatchObject({ status: "failed", code: "UVX_SOURCE_BUILD_MISMATCH" });
-  });
-
-  it("소스 빌드 단계에서 uv가 목록 밖 패키지를 빌드했다고 알리면 실패하고 오프라인 확인으로 넘어가지 않는다", async () => {
-    const t = run((exe, args) => (exe === "uvx" && args[0] === "--compile-bytecode" ? { stderr: "   Built proxy-tools==0.1.0\n   Built docopt==0.6.2\n" } : happy(exe, args)));
-    expect(await t.result).toMatchObject({ status: "failed", code: "UVX_SOURCE_BUILD_MISMATCH" });
-    expect(t.uv.calls.some((c) => c.args[0] === "--offline")).toBe(false);
-  });
-
-  it("사용자 지정 index(환경변수·uv.toml)가 있으면 실행 직전에 막는다(fetch 0, spawn 0)", async () => {
-    const a = run(happy, { childEnv: { UV_INDEX_URL: "https://idx.example/simple" } });
-    expect(await a.result).toMatchObject({ status: "failed", code: "UVX_SOURCE_BUILD_CUSTOM_INDEX" });
-    expect(a.uv.calls).toEqual([]);
-    expect(a.f.urls).toEqual([]);
-    const reader: UvConfigReader = async (file) => (file === "/home/u/.config/uv/uv.toml" ? '[[index]]\nurl = "https://idx.example/simple"\ndefault = true\n' : null);
-    const b = run(happy, { childEnv: { HOME: "/home/u" }, readUvConfig: reader });
-    expect(await b.result).toMatchObject({ status: "failed", code: "UVX_SOURCE_BUILD_CUSTOM_INDEX" });
-    expect(b.uv.calls).toEqual([]);
-  });
-
-  it("uv 설정 파일을 읽지 못하면 소스 빌드를 하지 않는다", async () => {
-    const t = run(happy, { childEnv: { HOME: "/home/u" }, readUvConfig: async () => "not = [valid" });
-    expect(await t.result).toMatchObject({ status: "failed", code: "UVX_CONFIG_UNSUPPORTED" });
-    expect(t.uv.calls).toEqual([]);
-  });
-
-  it("출력 해석: Built 줄과 wheel 없음 메시지", () => {
-    expect(builtPackages("Resolved 3 packages\n   Built Proxy_Tools==0.1.0\nPrepared 3 packages")).toEqual(["proxy-tools==0.1.0"]);
-    expect(builtPackages("Building proxy-tools==0.1.0\n")).toEqual([]);
-    expect(unbuildablePackage("Because docopt==0.6.2 has no usable wheels and building")).toBe("docopt");
-    expect(unbuildablePackage("Wheels are required for " + BT + "x-y" + BT + " because")).toBe("x-y");
-    expect(unbuildablePackage("network error")).toBeNull();
+    expect(spawns).toEqual([]);
+    expect(fetched).toEqual([]);
   });
 });
 
@@ -275,4 +112,3 @@ describe("uv 설정 파일(uv.toml)", () => {
     expect(off.fingerprint).not.toBeNull();
   });
 });
-

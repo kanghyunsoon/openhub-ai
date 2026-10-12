@@ -140,10 +140,7 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   OPERATION_LOCK_FAILED: "OpenHub could not create its operation lock in the state folder, so nothing was run or changed.",
   UP_TO_DATE: "The tool is already at the target version.",
   UVX_CONFIG_UNSUPPORTED: "A uv configuration file (uv.toml) could not be read or is not valid TOML, so the uvx preparation step was not planned. Fix the file and create a new plan. No configuration file was changed.",
-  UVX_SOURCE_BUILD_CUSTOM_INDEX: "A custom package index is set (environment variable or uv.toml), so the reviewed source build is blocked. It is only allowed from the default PyPI index, where OpenHub can verify the reviewed file. No configuration file was changed.",
-  UVX_SOURCE_UNVERIFIED: "The reviewed source package could not be verified on PyPI (missing, different sha256, or network error), so nothing was built. No configuration file was changed.",
-  UVX_UNREVIEWED_SOURCE_BUILD: "A package that is not on the reviewed list needs a source build, so OpenHub stopped before building it. The Manifest needs review. No configuration file was changed.",
-  UVX_SOURCE_BUILD_MISMATCH: "The packages built from source did not match the reviewed list, so the preparation failed. No configuration file was changed.",
+  UVX_SOURCE_BUILD_DISABLED: "This tool needs a source build (a reviewed sdist), which is blocked in v0.2.1: uvx does not check the file hashes of the build that prepares the environment your client uses, so OpenHub cannot guarantee that the reviewed file is the one that gets built. It is not installed or updated until a policy decision is made. No configuration file was changed.",
 };
 
 /** 대문자 차단·오류 code 또는 notice code 하나의 영어 문장(없으면 undefined). */
@@ -505,15 +502,12 @@ const INSTALL_CODE_EN: Readonly<Record<string, string>> = {
   MANUAL_SETUP_REQUIRED: "The Node.js launch path for the client configuration could not be verified, so nothing was changed.",
   TOOL_CONFIG_STALE: "The tool config changed after approval. Review the new plan and approve again.",
   COMPENSATION_INCOMPLETE: "Some files could not be restored (changed elsewhere after this run, or not writable). They were not overwritten; check them with lifecycle status.",
-  UVX_WHEEL_UNAVAILABLE: "Some packages are not available as wheels and would need a source build. OpenHub does not build from source without a reviewed Manifest and a separate approval. No configuration file was changed.",
+  UVX_WHEEL_UNAVAILABLE: "Some packages are not available as wheels and would need a source build. OpenHub does not build from source (no automatic fallback). No configuration file was changed.",
   UVX_PREPARE_VERIFY_FAILED: "The prepared environment could not be found again without network (offline check failed). No configuration file was changed.",
   UVX_PREPARE_REJECTED: "The uvx preparation step only accepts exact Python package versions. No configuration file was changed.",
   UVX_PREPARE_UNAVAILABLE: "The uvx preparation step could not run in this environment. No configuration file was changed.",
   UVX_CONFIG_UNSUPPORTED: "A uv configuration file (uv.toml) could not be read or is not valid TOML, so the uvx preparation step was not planned. Fix the file and create a new plan. No configuration file was changed.",
-  UVX_SOURCE_BUILD_CUSTOM_INDEX: "A custom package index is set (environment variable or uv.toml), so the reviewed source build is blocked. It is only allowed from the default PyPI index, where OpenHub can verify the reviewed file. No configuration file was changed.",
-  UVX_SOURCE_UNVERIFIED: "The reviewed source package could not be verified on PyPI (missing, different sha256, or network error), so nothing was built. No configuration file was changed.",
-  UVX_UNREVIEWED_SOURCE_BUILD: "A package that is not on the reviewed list needs a source build, so OpenHub stopped before building it. The Manifest needs review. No configuration file was changed.",
-  UVX_SOURCE_BUILD_MISMATCH: "The packages built from source did not match the reviewed list, so the preparation failed. No configuration file was changed.",
+  UVX_SOURCE_BUILD_DISABLED: "This tool needs a source build (a reviewed sdist), which is blocked in v0.2.1: uvx does not check the file hashes of the build that prepares the environment your client uses, so OpenHub cannot guarantee that the reviewed file is the one that gets built. It is not installed or updated until a policy decision is made. No configuration file was changed.",
   STATE_RECORD_FAILED: "Version State could not be recorded, so the configuration written by this install was restored to its original content. Check the cause and install again.",
 };
 

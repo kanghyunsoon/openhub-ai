@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { isPinnedPythonSpec } from "../installer/command";
@@ -284,10 +284,6 @@ export interface UvxPrepareContext {
   /** uv 자식 process 환경. 보통 uvChildEnv(원본 환경). 생략하면 OS 기본 상속이다(테스트). */
   childEnv?: Record<string, string>;
   graceMs?: number;
-  /** source-build-reviewed 준비 단계의 검토 목록(Plan의 run step sourceBuild). 소스 빌드는 이 목록의 패키지만 허용한다. */
-  sourceBuild?: readonly UvxSourceBuildEntry[] | undefined;
-  /** 검토한 sdist 확인용 HTTP(PyPI JSON·files.pythonhosted.org만). 기본 globalThis.fetch. */
-  fetch?: (url: string, init?: RequestInit) => Promise<Response>;
   /** uv 설정 파일 읽기(테스트 주입용). 기본은 실제 파일. */
   readUvConfig?: UvConfigReader;
 }
@@ -304,117 +300,10 @@ const outcome = (status: StepOutcome["status"], extra: Partial<StepOutcome> = {}
 const lastLines = (text: string) => text.split(/\r?\n/u).filter((l) => l.trim() !== "").slice(-6).join("\n").slice(-900);
 /** Python 패키지 이름 정규화(PEP 503). */
 export const normalizePyName = (name: string) => name.toLowerCase().replace(/[-_.]+/gu, "-");
-const PYPI_JSON_MAX = 8 * 1024 * 1024;
-const SDIST_MAX = 64 * 1024 * 1024;
-const HTTP_TIMEOUT_MS = 30_000;
-const SDIST_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(?:tar\.gz|zip)$/u;
-/** 환경의 배포 목록을 출력하는 고정 Python 코드(도구 패키지를 import하지 않는다). */
-const LIST_CODE = "import importlib.metadata as m;print(chr(10).join(sorted(set(d.metadata['Name'].lower().replace('_','-').replace('.','-')+'=='+d.version for d in m.distributions()))))";
 
-/** wheel만으로 풀리지 않을 때 uv가 알려 준 패키지 이름(두 메시지 형식). 찾지 못하면 null. */
-export function unbuildablePackage(text: string): string | null {
-  const a = /Wheels are required for `([^`]+)`/u.exec(text);
-  if (a !== null) return a[1]!;
-  const b = /Because ([A-Za-z0-9][A-Za-z0-9._-]*)(?:==\S+)? has no usable wheels/u.exec(text);
-  return b === null ? null : b[1]!;
-}
-
-/** uv가 이번 실행에서 빌드한 패키지("Built name==version" 줄). */
-export function builtPackages(text: string): string[] {
-  return [...text.matchAll(/^\s*Built ([A-Za-z0-9][A-Za-z0-9._-]*)==(\S+)\s*$/gmu)].map((m) => normalizePyName(m[1]!) + "==" + m[2]!);
-}
-
-async function fetchBounded(fetchFn: NonNullable<UvxPrepareContext["fetch"]>, url: string, max: number): Promise<Buffer> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
-  try {
-    const res = await fetchFn(url, { signal: controller.signal, redirect: "error", headers: { accept: "application/json, application/octet-stream" } });
-    if (!res.ok) throw new Error("HTTP " + String(res.status));
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > max) throw new Error("too large");
-    return buf;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-type Phase = { ok: true; excerpt: string } | { ok: false; outcome: StepOutcome };
-const fail = (code: string, excerpt: string, extra: Partial<StepOutcome> = {}): Phase => ({ ok: false, outcome: outcome("failed", { code, excerpt: excerpt + " 설정 파일은 바꾸지 않았습니다.", ...extra }) });
-
-/**
- * 검토된 소스 빌드(D3, v0.2.1 보완). uv에는 "이 패키지만 빌드 허용" 옵션이 없으므로(--no-build·--no-build-package만 있다) 두 단계로 강제한다.
- * A. 검토 목록의 sdist를 PyPI에서 받아 sha256을 확인하고 그 파일만 `uv build --wheel`로 빌드한다. 그 wheel을 --find-links로 주고
- *    `uvx --no-build`로 환경을 푼다. 성공하면 목록 밖의 어떤 패키지도 소스 빌드가 필요 없다는 증명이고, 전체 패키지·버전 목록을 얻는다.
- *    목록 밖 sdist가 필요하면 여기서 멈춘다(UVX_UNREVIEWED_SOURCE_BUILD, 그 패키지는 빌드하지 않는다).
- * B. Client와 같은 cache 항목을 만들기 위해 uv가 PyPI sdist에서 직접 빌드하게 하되, A의 전체 버전을 constraints로 고정하고
- *    목록 밖 모든 패키지에 --no-build-package를 준다. uv가 빌드했다고 알린 패키지가 목록과 다르면 실패다.
- * 사용자 지정 index에서는 소스 빌드를 계획 단계에서 막는다(검증한 PyPI 파일과 uv가 받는 파일이 같다는 보장이 없다).
- */
-async function runSourceBuild(target: UvxPrepareTarget, entries: readonly UvxSourceBuildEntry[], cwd: string, remaining: () => number, ctx: UvxPrepareContext, cctx: Parameters<typeof capture>[3]): Promise<Phase> {
-  // 실행 직전 다시 확인한다(Plan 재생성과 별개의 방어). 사용자 지정 index가 있으면 PyPI에서 확인한 파일과 uv가 받는 파일이 같다는 보장이 없다.
-  const settings = await uvSourceSettings(ctx.childEnv ?? {}, ctx.platform, ctx.readUvConfig);
-  if (settings.unsupported !== null) return fail("UVX_CONFIG_UNSUPPORTED", settings.unsupported + ". 빌드하지 않았습니다.");
-  if (settings.customIndex) return fail("UVX_SOURCE_BUILD_CUSTOM_INDEX", "사용자 지정 패키지 index가 설정되어 있어 검토된 소스 빌드를 실행하지 않았습니다(PyPI 기본 index에서만 허용).");
-  const fetchFn = ctx.fetch ?? ((url, init) => globalThis.fetch(url, init));
-  const wheels = path.join(cwd, "reviewed-wheels");
-  await mkdir(wheels, { recursive: true });
-  const allowed = new Set(entries.map((e) => normalizePyName(e.package) + "==" + e.version));
-  for (const [i, e] of entries.entries()) {
-    let file: { url: string; filename: string } | undefined;
-    try {
-      const doc = JSON.parse((await fetchBounded(fetchFn, "https://pypi.org/pypi/" + encodeURIComponent(e.package) + "/" + encodeURIComponent(e.version) + "/json", PYPI_JSON_MAX)).toString("utf8")) as { urls?: { packagetype?: string; filename?: string; url?: string; digests?: { sha256?: string } }[] };
-      const hit = (doc.urls ?? []).find((u) => u.packagetype === "sdist" && u.digests?.sha256 === e.sha256);
-      if (hit !== undefined && typeof hit.url === "string" && typeof hit.filename === "string") file = { url: hit.url, filename: hit.filename };
-    } catch {
-      return fail("UVX_SOURCE_UNVERIFIED", "PyPI에서 " + e.package + "==" + e.version + " 정보를 확인하지 못했습니다(네트워크).");
-    }
-    if (file === undefined || !SDIST_FILE.test(file.filename) || !file.url.startsWith("https://files.pythonhosted.org/")) {
-      return fail("UVX_SOURCE_UNVERIFIED", "PyPI의 " + e.package + "==" + e.version + " sdist가 검토한 sha256과 다르거나 없습니다. 빌드하지 않았습니다.");
-    }
-    let bytes: Buffer;
-    try {
-      bytes = await fetchBounded(fetchFn, file.url, SDIST_MAX);
-    } catch {
-      return fail("UVX_SOURCE_UNVERIFIED", e.package + " sdist를 내려받지 못했습니다(네트워크).");
-    }
-    if (createHash("sha256").update(bytes).digest("hex") !== e.sha256) return fail("UVX_SOURCE_UNVERIFIED", "내려받은 " + e.package + " sdist의 sha256이 검토한 값과 다릅니다. 빌드하지 않았습니다.");
-    const sdist = path.join(cwd, file.filename);
-    await writeFile(sdist, bytes);
-    const buildDir = path.join(cwd, "build-" + String(i));
-    await mkdir(buildDir, { recursive: true });
-    const built = await capture({ executable: "uv", args: ["build", "--wheel", "--out-dir", wheels, sdist] }, buildDir, remaining(), cctx);
-    if (built.status !== "done") return fail(built.terminated ? "STEP_FAILED" : "STEP_TIMEOUT_UNCONFIRMED", "검토한 " + e.package + "==" + e.version + " sdist를 wheel로 빌드하지 못했습니다.\n" + lastLines(built.stderr || built.stdout), { exitCode: built.exitCode, signal: built.signal });
-  }
-  // 빌드 결과는 검토 목록과 정확히 같아야 한다(이름·버전, 다른 wheel 없음).
-  const made = (await readdir(wheels)).filter((n) => n.endsWith(".whl")).map((n) => {
-    const [name, version] = n.split("-");
-    return normalizePyName(name ?? "") + "==" + (version ?? "");
-  });
-  if (made.length !== allowed.size || made.some((m) => !allowed.has(m))) return fail("UVX_SOURCE_BUILD_MISMATCH", "빌드한 wheel(" + made.join(", ") + ")이 검토 목록과 다릅니다.");
-
-  const envArgs = ["--from", target.from, ...target.withPins.flatMap((w) => ["--with", w])];
-  const check = await capture({ executable: "uvx", args: ["--no-build", "--find-links", wheels, ...envArgs, "python", "-c", LIST_CODE] }, cwd, remaining(), cctx);
-  if (check.status !== "done") {
-    const pkg = unbuildablePackage(check.stderr + check.stdout);
-    if (pkg !== null) return fail("UVX_UNREVIEWED_SOURCE_BUILD", "검토 목록에 없는 패키지(" + pkg + ")가 소스 빌드를 요구합니다. 그 패키지는 빌드하지 않았습니다. Manifest 검토가 필요합니다.", { exitCode: check.exitCode });
-    return fail(check.terminated ? "STEP_FAILED" : "STEP_TIMEOUT_UNCONFIRMED", "wheel만으로 환경을 확인하지 못했습니다.\n" + lastLines(check.stderr || check.stdout), { exitCode: check.exitCode, signal: check.signal });
-  }
-  const packages = check.stdout.split(/\r?\n/u).map((l) => l.trim()).filter((l) => /^[a-z0-9][a-z0-9-]*==\S+$/u.test(l));
-  for (const a of allowed) if (!packages.includes(a)) return fail("UVX_SOURCE_BUILD_MISMATCH", "검토 목록의 " + a + "가 이 환경에서 쓰이지 않습니다. Manifest 검토가 필요합니다.");
-
-  const constraints = path.join(cwd, "constraints.txt");
-  await writeFile(constraints, packages.join("\n") + "\n");
-  const blocked = packages.map((p) => p.split("==")[0]!).filter((n) => ![...allowed].some((a) => a.startsWith(n + "=="))).flatMap((n) => ["--no-build-package", n]);
-  const run = await capture({ executable: "uvx", args: ["--compile-bytecode", "--constraints", constraints, ...blocked, ...envArgs, "python", "-c", "pass"] }, cwd, remaining(), cctx);
-  const built = builtPackages(run.stderr + "\n" + run.stdout);
-  if (built.some((b) => !allowed.has(b))) return fail("UVX_SOURCE_BUILD_MISMATCH", "uv가 검토 목록 밖의 패키지를 빌드했다고 알렸습니다(" + built.join(", ") + ").");
-  if (run.status !== "done") {
-    const pkg = unbuildablePackage(run.stderr + run.stdout);
-    if (pkg !== null) return fail("UVX_UNREVIEWED_SOURCE_BUILD", "검토 목록에 없는 패키지(" + pkg + ")가 소스 빌드를 요구합니다. 빌드하지 않았습니다.", { exitCode: run.exitCode });
-    return fail(run.terminated ? (run.code ?? "STEP_FAILED") : "STEP_TIMEOUT_UNCONFIRMED", "uv가 패키지를 준비하지 못했습니다.\n" + lastLines(run.stderr || run.stdout), { exitCode: run.exitCode, signal: run.signal });
-  }
-  return { ok: true, excerpt: "source build: " + [...allowed].join(", ") + " (PyPI sdist sha256 verified; " + String(packages.length - allowed.size) + " other packages wheels only)" };
-}
+/** 검토된 소스 빌드 일시 차단 안내(Plan blocker·준비 실패 공통). */
+export const UVX_SOURCE_BUILD_DISABLED_TEXT =
+  "이 도구는 소스 빌드(검토된 sdist)가 필요하지만 v0.2.1에서는 막았습니다. uvx는 Client가 쓰는 환경을 만드는 빌드의 입력 파일 hash를 확인하지 않아, OpenHub가 검토한 파일과 실제로 빌드되는 파일이 같다고 보장할 수 없습니다. 정책 결정 전까지 설치·업데이트하지 않습니다. 설정 파일은 바꾸지 않았습니다.";
 
 /**
  * 준비 단계 하나를 실행한다. step 검증(고정 인자·정확한 버전)은 여기서 다시 한다. cwd는 executor가 만든 격리 임시 디렉터리다.
@@ -428,34 +317,29 @@ export async function prepareUvxPackage(stepArgs: readonly string[], cwd: string
   const remaining = () => Math.max(1, started + budget - Date.now());
   const cctx = { platform: ctx.platform, spawner: ctx.spawner, ...(ctx.killTree === undefined ? {} : { killTree: ctx.killTree }), ...(ctx.graceMs === undefined ? {} : { graceMs: ctx.graceMs }), ...(ctx.childEnv === undefined ? {} : { childEnv: ctx.childEnv }) };
 
-  let sourceNote = "";
-  if (parsed.policy === "source-build-reviewed") {
-    // 검토 목록이 없으면 소스 빌드를 시작하지 않는다(--no-build 없는 인자만으로는 무엇이 빌드될지 제한할 수 없다).
-    if (ctx.sourceBuild === undefined || ctx.sourceBuild.length === 0) return outcome("failed", { code: "UVX_PREPARE_REJECTED", excerpt: "소스 빌드 준비 단계에 검토 목록(sourceBuild)이 없어 실행하지 않았습니다" });
-    const phase = await runSourceBuild(parsed.target, ctx.sourceBuild, cwd, remaining, ctx, cctx);
-    if (!phase.ok) return phase.outcome;
-    sourceNote = "; " + phase.excerpt;
-  } else {
-    const run = await capture({ executable: "uvx", args: [...stepArgs] }, cwd, remaining(), cctx);
-    if (run.status !== "done") {
-      const tail = lastLines(run.stderr || run.stdout);
-      if (/wheels are required|building from source is disabled/iu.test(run.stderr + run.stdout)) {
-        return outcome("failed", {
-          code: "UVX_WHEEL_UNAVAILABLE",
-          exitCode: run.exitCode,
-          signal: run.signal,
-          excerpt: "일부 패키지가 wheel로 제공되지 않아 소스 빌드가 필요합니다. OpenHub는 검토된 Manifest(source-build-reviewed)와 별도 승인 없이는 소스를 빌드하지 않습니다. 설정 파일은 바꾸지 않았습니다." + (tail === "" ? "" : "\n" + tail),
-        });
-      }
-      const code = !run.terminated ? "STEP_TIMEOUT_UNCONFIRMED" : (run.code ?? "STEP_FAILED");
-      const head =
-        code === "STEP_TIMEOUT"
-          ? "준비 시간이 지나 uv process tree를 종료했습니다. 설정 파일은 바꾸지 않았습니다."
-          : code === "STEP_TIMEOUT_UNCONFIRMED"
-            ? "준비 시간이 지나 uv process 종료를 요청했지만 종료를 확인하지 못했습니다. 설정 파일은 바꾸지 않았습니다. 잠시 뒤 다시 시도하세요."
-            : "uv가 패키지를 준비하지 못했습니다. 설정 파일은 바꾸지 않았습니다. 네트워크·index 설정을 확인한 뒤 새 계획으로 다시 시도하세요.";
-      return outcome("failed", { code, exitCode: run.exitCode, signal: run.signal, excerpt: head + (tail === "" ? "" : "\n" + tail) });
+  // v0.2.1 리뷰 결정(#45): 검토된 소스 빌드는 일시 차단한다. uvx는 constraints·build-constraints·with-requirements의 hash를 검증하지 않아(uv 0.12.3 실측)
+  // Client가 쓰는 cache를 만드는 빌드의 입력 무결성을 보장할 수 없고, 검토한 wheel만으로 만든 환경은 Client가 재사용하지 않는다. spawn·network 0.
+  if (parsed.policy === "source-build-reviewed") return outcome("failed", { code: "UVX_SOURCE_BUILD_DISABLED", excerpt: UVX_SOURCE_BUILD_DISABLED_TEXT });
+
+  const run = await capture({ executable: "uvx", args: [...stepArgs] }, cwd, remaining(), cctx);
+  if (run.status !== "done") {
+    const tail = lastLines(run.stderr || run.stdout);
+    if (/wheels are required|building from source is disabled/iu.test(run.stderr + run.stdout)) {
+      return outcome("failed", {
+        code: "UVX_WHEEL_UNAVAILABLE",
+        exitCode: run.exitCode,
+        signal: run.signal,
+        excerpt: "일부 패키지가 wheel로 제공되지 않아 소스 빌드가 필요합니다. OpenHub는 소스를 빌드하지 않습니다(자동 전환 없음). 설정 파일은 바꾸지 않았습니다." + (tail === "" ? "" : "\n" + tail),
+      });
     }
+    const code = !run.terminated ? "STEP_TIMEOUT_UNCONFIRMED" : (run.code ?? "STEP_FAILED");
+    const head =
+      code === "STEP_TIMEOUT"
+        ? "준비 시간이 지나 uv process tree를 종료했습니다. 설정 파일은 바꾸지 않았습니다."
+        : code === "STEP_TIMEOUT_UNCONFIRMED"
+          ? "준비 시간이 지나 uv process 종료를 요청했지만 종료를 확인하지 못했습니다. 설정 파일은 바꾸지 않았습니다. 잠시 뒤 다시 시도하세요."
+          : "uv가 패키지를 준비하지 못했습니다. 설정 파일은 바꾸지 않았습니다. 네트워크·index 설정을 확인한 뒤 새 계획으로 다시 시도하세요.";
+    return outcome("failed", { code, exitCode: run.exitCode, signal: run.signal, excerpt: head + (tail === "" ? "" : "\n" + tail) });
   }
 
   const verify = await capture({ executable: "uvx", args: uvxVerifyArgs(parsed.target, parsed.policy) }, cwd, Math.min(UVX_VERIFY_TIMEOUT_MS, remaining()), cctx);
@@ -468,5 +352,5 @@ export async function prepareUvxPackage(stepArgs: readonly string[], cwd: string
       excerpt: "준비한 환경을 네트워크 없이 다시 찾지 못했습니다(--offline 확인 실패). 설정 파일은 바꾸지 않았습니다." + (tail === "" ? "" : "\n" + tail),
     });
   }
-  return outcome("done", { exitCode: 0, signal: null, excerpt: "uv cache: prepared (" + parsed.target.from + (parsed.target.withPins.length === 0 ? "" : " + " + parsed.target.withPins.join(", ")) + sourceNote + "; offline check passed)" });
+  return outcome("done", { exitCode: 0, signal: null, excerpt: "uv cache: prepared (" + parsed.target.from + (parsed.target.withPins.length === 0 ? "" : " + " + parsed.target.withPins.join(", ")) + "; offline check passed)" });
 }

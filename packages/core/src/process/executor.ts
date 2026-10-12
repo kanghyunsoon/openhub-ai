@@ -160,7 +160,7 @@ async function resolveCwd(kind: RunStep["cwd"], options: ExecutorOptions): Promi
 async function runAnyStep(step: RunStep, cwd: string, spawner: ExecSpawner, options: ExecutorOptions): Promise<StepOutcome> {
   if (step.executable === "uvx") {
     if (options.uvx === undefined) return { id: step.id, status: "failed", code: "UVX_PREPARE_UNAVAILABLE", excerpt: "uvx 준비 단계를 실행할 문맥(플랫폼)이 없습니다" };
-    const outcome = await prepareUvxPackage(step.args, cwd, { ...options.uvx, spawner: spawner === nodeExecSpawner ? nodeNpxSpawner : spawner, timeoutMs: step.timeoutMs, ...(step.sourceBuild === undefined ? {} : { sourceBuild: step.sourceBuild }) });
+    const outcome = await prepareUvxPackage(step.args, cwd, { ...options.uvx, spawner: spawner === nodeExecSpawner ? nodeNpxSpawner : spawner, timeoutMs: step.timeoutMs });
     return { ...outcome, id: step.id, ...(outcome.excerpt === undefined ? {} : { excerpt: redactExcerpt(outcome.excerpt) }) };
   }
   if (step.executable !== "npx") return runStep(step, cwd, spawner);

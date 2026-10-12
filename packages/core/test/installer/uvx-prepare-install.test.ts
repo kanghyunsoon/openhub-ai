@@ -85,13 +85,15 @@ describe("uvx Prepare: 설치 계획", () => {
     }
   });
 
-  it("검토된 소스 빌드 Manifest는 --no-build 없이 준비하고 source-build 승인과 제3자 코드 고지가 붙는다", async () => {
+  it("검토된 소스 빌드 Manifest는 v0.2.1에서 계획 단계에서 막힌다(UVX_SOURCE_BUILD_DISABLED, #45 리뷰: uvx가 Client용 빌드 입력 hash를 확인하지 않음)", async () => {
     const h = await createHarness(scratch, { entries: sourceBuild });
     const { plan } = await plannedOf(h, h.request("postgres-mcp", CURSOR));
-    expect(plan.steps[0]).toMatchObject({ id: "uvx-prepare", args: uvxPrepareArgs(TARGET, "source-build-reviewed") });
-    expect(plan.steps[0]).toMatchObject({ sourceBuild: [{ package: "proxy-tools", version: "0.1.0", sha256: PROXY_SHA }] });
-    expect(plan.approvalRequirements).toContain("source-build");
-    expect(plan.warnings.map((w) => w.code)).toEqual(expect.arrayContaining(["uvx-prepare", "uvx-source-build"]));
+    expect(plan.status).toBe("blocked");
+    expect(plan.warnings.map((w) => w.code)).toContain("UVX_SOURCE_BUILD_DISABLED");
+    // 사용자 지정 index가 없어도(기본 PyPI) 막힌다.
+    const plain = await planInstall(h.request("postgres-mcp", CURSOR), { ...h.env, uvChildEnv: () => ({}), readUvConfig: async () => null });
+    if (!plain.result.ok) throw new Error(plain.result.code);
+    expect(plain.result.planned.plan.status).toBe("blocked");
   });
 
   it("검토되지 않은 빌드 정책은 Manifest 단계에서 거부한다(계획 0, Registry 검사 실패)", async () => {
@@ -118,7 +120,8 @@ describe("uvx Prepare: 설치 계획", () => {
       expect(fastManifestIssues(manifestOf(entries)).length, JSON.stringify(options)).toBeGreaterThan(0);
     }
     expect(fastManifestIssues(manifestOf(pinned))).toEqual([]);
-    expect(fastManifestIssues(manifestOf(sourceBuild))).toEqual([]);
+    // 형식이 맞아도 source-build-reviewed는 Registry 검증에서 일시 차단으로 실패한다.
+    expect(fastManifestIssues(manifestOf(sourceBuild)).map((i) => i.path)).toContain("install.options.prepare");
   });
 
   it("InstallPlan schema는 launch 대상과 다른 준비 단계·index 인자·승인 없는 소스 빌드를 거부한다", async () => {
@@ -175,20 +178,21 @@ describe("uvx Prepare: 설치 실행", () => {
     expect(existsSync(path.join(h.projectRoot, ".cursor", "mcp.json"))).toBe(false);
   });
 
-  it("source-build를 확인하지 않은 승인은 실행 게이트에서 막힌다(APPROVAL_INCOMPLETE, 빌드 0회, 쓰기 0)", async () => {
+  it("막힌 소스 빌드 계획은 승인할 수 없고 실행해도 준비·빌드·쓰기 0이다(기존 설정·Version State 그대로)", async () => {
     const h = await createHarness(scratch, { entries: sourceBuild });
+    const existing = '{\n  "mcpServers": {\n    "notes": { "command": "uvx", "args": ["notes-mcp==1.0.0"] }\n  }\n}\n';
+    await mkdir(path.join(h.projectRoot, ".cursor"), { recursive: true });
+    await writeFile(path.join(h.projectRoot, ".cursor", "mcp.json"), existing);
     const request = h.request("postgres-mcp", CURSOR);
     const planned = await plannedOf(h, request);
-    const outcome = await requestApproval(planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id).filter((id) => id !== "source-build") });
-    if (outcome.status !== "approved") throw new Error(outcome.status);
-    expect(outcome.approval.acknowledgements).not.toContain("source-build");
+    const outcome = await requestApproval(planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
+    expect(outcome.status).not.toBe("approved");
     h.reset();
-    const result = await runInstallTransaction(planned, outcome.approval, request, h.env);
-    expect(result).toMatchObject({ status: "approval-required", code: "APPROVAL_INCOMPLETE" });
+    const result = await runInstallTransaction(planned, undefined, request, h.env);
+    expect(result.status).not.toBe("succeeded");
     expect(h.spawns).toEqual([]);
-    expect(existsSync(path.join(h.projectRoot, ".cursor", "mcp.json"))).toBe(false);
-    // 사람이 거절하면(rejected) 승인이 없다.
-    expect(await requestApproval(planned, { channel: "cli-tty", confirm: async () => "rejected" })).toEqual({ status: "rejected" });
+    expect(await readFile(path.join(h.projectRoot, ".cursor", "mcp.json"), "utf8")).toBe(existing);
+    expect(existsSync(path.join(h.homeDir, ".openhub", "state", "lifecycle.json"))).toBe(false);
   });
 
   it("승인 뒤 Manifest 버전이 바뀌면 PLAN_STALE이고 준비·쓰기 0이다", async () => {
@@ -243,13 +247,13 @@ describe("uvx Prepare: uv 설정 파일(uv.toml)과 소스 빌드 제한(v0.2.1 
   };
   const INDEX = (pass: string, host = "idx.example") => '[[index]]\nname = "corp"\nurl = "https://ci-user:' + pass + "@" + host + '/simple"\ndefault = true\n';
 
-  it("uv.toml에 사용자 지정 index가 있으면 검토된 소스 빌드는 계획 단계에서 막히고, wheel만 쓰는 준비는 fingerprint·고지와 함께 허용된다", async () => {
+  it("uv.toml에 사용자 지정 index가 있으면 wheel만 쓰는 준비는 fingerprint·고지와 함께 허용되고, 소스 빌드는 index와 무관하게 막힌다", async () => {
     const toml = INDEX("Toml-Pass-1");
     const source = await createHarness(scratch, { entries: sourceBuild });
     const blocked = await planInstall(source.request("postgres-mcp", CURSOR), { ...source.env, uvChildEnv: () => UV_ENV, readUvConfig: userToml(() => toml) });
     if (!blocked.result.ok) throw new Error(blocked.result.code);
     expect(blocked.result.planned.plan.status).toBe("blocked");
-    expect(blocked.result.planned.plan.warnings.map((w) => w.code)).toContain("UVX_SOURCE_BUILD_CUSTOM_INDEX");
+    expect(blocked.result.planned.plan.warnings.map((w) => w.code)).toContain("UVX_SOURCE_BUILD_DISABLED");
 
     const wheels = await createHarness(scratch, { entries: pinned });
     const ok = await planInstall(wheels.request("postgres-mcp", CURSOR), { ...wheels.env, uvChildEnv: () => UV_ENV, readUvConfig: userToml(() => toml) });
@@ -311,28 +315,5 @@ describe("uvx Prepare: uv 설정 파일(uv.toml)과 소스 빌드 제한(v0.2.1 
     expect(JSON.stringify(built.result.planned.plan)).not.toContain("Broken-Pass");
   });
 
-  it("소스 빌드 확인이 실행 중 실패하면(PyPI sha256 불일치) 빌드 0회, 설정 파일·Version State 불변이다", async () => {
-    const h = await createHarness(scratch, { entries: sourceBuild });
-    const existing = '{\n  "mcpServers": {\n    "notes": { "command": "uvx", "args": ["notes-mcp==1.0.0"] }\n  }\n}\n';
-    await mkdir(path.join(h.projectRoot, ".cursor"), { recursive: true });
-    await writeFile(path.join(h.projectRoot, ".cursor", "mcp.json"), existing);
-    const request = h.request("postgres-mcp", CURSOR);
-    const env = { ...h.env, uvChildEnv: () => ({}), readUvConfig: async () => null };
-    const built = await planInstall(request, env);
-    if (!built.result.ok) throw new Error(built.result.code);
-    const approval = await approveAll(built.result.planned);
-    const urls: string[] = [];
-    const uvxFetch = async (url: string) => {
-      urls.push(url);
-      return new Response(JSON.stringify({ urls: [{ packagetype: "sdist", filename: "proxy_tools-0.1.0.tar.gz", url: "https://files.pythonhosted.org/p/proxy_tools-0.1.0.tar.gz", digests: { sha256: "e".repeat(64) } }] }), { status: 200 });
-    };
-    h.reset();
-    const result = await runInstallTransaction(built.result.planned, approval, request, { ...env, uvxFetch });
-    expect(result).toMatchObject({ status: "failed", code: "UVX_SOURCE_UNVERIFIED", verification: { prepared: "failed", configured: false } });
-    expect(urls).toEqual(["https://pypi.org/pypi/proxy-tools/0.1.0/json"]);
-    expect(h.spawns).toEqual([]);
-    expect(await readFile(path.join(h.projectRoot, ".cursor", "mcp.json"), "utf8")).toBe(existing);
-    expect(existsSync(path.join(h.homeDir, ".openhub", "state", "lifecycle.json"))).toBe(false);
-  });
 });
 

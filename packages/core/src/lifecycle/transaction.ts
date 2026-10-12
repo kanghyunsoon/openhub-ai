@@ -19,7 +19,7 @@ import {
 import { executeLifecyclePreparation, type ExecSpawner, type IsolatedDir } from "../process/executor";
 import { createTreeKiller, runHealthCheck, type HealthCheckResult, type HealthRunOptions, type HealthRunReport, type HealthSpawner, type TreeKiller, type WindowsNpxLauncher } from "../process/health";
 import type { BackendProbeReport } from "../process/probe";
-import { uvSourceSettings, type UvConfigReader, type UvxPrepareContext } from "../process/uvx-prepare";
+import { uvSourceSettings, type UvConfigReader } from "../process/uvx-prepare";
 import type { RecommendPlatform } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
 import { replaceConfigEntry } from "./config-replace";
@@ -89,8 +89,6 @@ export interface LifecycleEnvironment {
   uvChildEnv?: () => Record<string, string>;
   /** uv 설정 파일(uv.toml) 읽기. 테스트 주입용, 기본은 실제 파일. */
   readUvConfig?: UvConfigReader;
-  /** 검토된 소스 빌드의 PyPI 확인 HTTP(테스트 주입용, 기본 globalThis.fetch). */
-  uvxFetch?: UvxPrepareContext["fetch"];
   /** Health 실행기(테스트 주입용). 기본 runHealthCheck. */
   runHealth?: (verified: VerifiedLifecyclePlan, options: HealthRunOptions) => Promise<HealthRunReport>;
   /** operation별 Plan 생성기 교체(테스트 주입용). 기본은 planLifecycle(update·rollback·health). */
@@ -304,7 +302,7 @@ async function runTransaction(planned: PlannedLifecycle, approval: LifecycleAppr
     ...(hasNpxPrepare
       ? { npx: { platform: plan.platform, windowsNpx, killTree: env.killTree ?? createTreeKiller({ cwd: env.tempBase }), ...(env.npmChildEnv === undefined ? {} : { childEnv: env.npmChildEnv() }) } }
       : {}),
-    ...(hasUvxPrepare ? { uvx: { platform: plan.platform, killTree: env.killTree ?? createTreeKiller({ cwd: env.tempBase }), ...(env.uvChildEnv === undefined ? {} : { childEnv: env.uvChildEnv() }), ...(env.readUvConfig === undefined ? {} : { readUvConfig: env.readUvConfig }), ...(env.uvxFetch === undefined ? {} : { fetch: env.uvxFetch }) } } : {}),
+    ...(hasUvxPrepare ? { uvx: { platform: plan.platform, killTree: env.killTree ?? createTreeKiller({ cwd: env.tempBase }), ...(env.uvChildEnv === undefined ? {} : { childEnv: env.uvChildEnv() }), ...(env.readUvConfig === undefined ? {} : { readUvConfig: env.readUvConfig }) } } : {}),
   });
   if (!prep.ok) return finalize({ planned: verified, status: "approval-required", code: prep.code, retryable: true });
   steps.push(...prep.steps);
