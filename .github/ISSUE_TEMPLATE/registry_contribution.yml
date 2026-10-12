@@ -1,0 +1,58 @@
+name: Registry contribution
+description: Propose adding or changing a tool in the curated Registry.
+labels: ["enhancement"]
+title: "Registry: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The Registry is curated. A tool is added only after its Manifest is reviewed and `pnpm registry:validate` passes.
+        Candidate text from discovery is untrusted; do not copy install commands without checking them. See CONTRIBUTING.md, "Registry contributions".
+  - type: input
+    id: repo
+    attributes:
+      label: Tool repository
+      description: Public source repository URL.
+    validations:
+      required: true
+  - type: input
+    id: license
+    attributes:
+      label: License
+    validations:
+      required: true
+  - type: textarea
+    id: install
+    attributes:
+      label: Install command and backend
+      description: Exact command with a pinned version (npx, uvx or Docker image digest). Explain if no wheel or no pinned version exists.
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Required environment variables
+      description: Names only, with what they are for. Never paste values.
+  - type: textarea
+    id: scope
+    attributes:
+      label: Capabilities, clients and platforms
+      description: Which capability it covers, which clients (Claude Code, Codex, Cursor) and which OSes you tested.
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Permissions and risks
+      description: What the server can read, write or call (files, network, cloud APIs), and any read-only or restricted mode.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues, pull requests and the Registry.
+          required: true
+        - label: I will not claim a verification level the tool has not reached.
+          required: true
