@@ -55,7 +55,7 @@ export function formatLifecyclePlanPreview(planned: PlannedLifecycle): string[] 
               ? " — OpenHub가 설정을 바꾸기 전에 이 버전을 npx cache에 받습니다(MCP 서버는 실행하지 않음, 네트워크·다운로드·의존성 설치 스크립트)"
               : run.every((s) => s.executable === "uvx")
                 ? " — OpenHub가 설정을 바꾸기 전에 이 정확한 버전의 Python 패키지를 uv cache에 설치하고 네트워크 없이 다시 확인합니다(MCP 서버는 실행하지 않음" +
-                  (run.some((s) => s.args[0] !== "--no-build") ? ", 검토된 소스 빌드 포함)" : ", wheel만·빌드 없음)")
+                  (run.some((s) => s.args[0] !== "--no-build") ? ", 소스 빌드 단계 — v0.2.1에서 차단)" : ", wheel만·빌드 없음)")
                 : " — OpenHub가 실행합니다(네트워크·다운로드, 받은 image는 지우지 않습니다)")),
     );
     lines.push("Client 실행 명령");

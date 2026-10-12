@@ -136,7 +136,8 @@ const SHA256_HEX = /^[0-9a-f]{64}$/u;
 /**
  * install.options.prepare(v0.2.1, D3). 기본 wheels-only. source-build-reviewed는 소스 빌드할 패키지 목록(이름·정확한 버전·출처)이
  * 반드시 있어야 하고, wheels-only에는 목록이 없어야 한다. 알 수 없는 key·uvx가 아닌 backend의 prepare는 거부한다.
- * 각 항목은 PyPI sdist 파일의 sha256을 가져야 한다(Prepare가 받은 파일과 PyPI 기록을 이 값과 대조한다). 같은 패키지는 한 번만 쓴다.
+ * 각 항목은 PyPI sdist 파일의 sha256을 가져야 하고 같은 패키지는 한 번만 쓴다. v0.2.1: 형식 검사만 하고 이 정책의 Plan은 차단한다
+ * (UVX_SOURCE_BUILD_DISABLED). 형식을 남기는 이유는 이후 정책 결정 때 schema를 바꾸지 않기 위해서다.
  */
 export function uvxBuildPolicyOf(step: InstallStep, backend: InstallBackend): UvxBuildPolicyResult {
   const raw = step.options?.["prepare"];

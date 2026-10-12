@@ -302,7 +302,7 @@ export function installPreviewEn(planned: PlannedInstall): string[] {
               ? " — OpenHub downloads this version into the npx cache before writing configuration (the MCP server is not started; network, download, dependency install scripts)"
               : plan.artifact.preparation === "uv-cache"
                 ? " — OpenHub installs the Python packages of this exact version into the uv cache before writing configuration and checks them again offline (the MCP server is not started" +
-                  (runSteps.some((s) => s.executable === "uvx" && s.args[0] !== "--no-build") ? "; includes a reviewed source build)" : "; wheels only, no build)")
+                  (runSteps.some((s) => s.executable === "uvx" && s.args[0] !== "--no-build") ? "; source-build step — blocked in v0.2.1)" : "; wheels only, no build)")
                 : " — run by OpenHub (network, download)")),
     );
   }
@@ -363,7 +363,7 @@ export function lifecyclePreviewEn(planned: PlannedLifecycle): string[] {
               ? " — OpenHub downloads this version into the npx cache before changing configuration (the MCP server is not started; network, download, dependency install scripts)"
               : run.every((s) => s.executable === "uvx")
                 ? " — OpenHub installs the Python packages of this exact version into the uv cache before changing configuration and checks them again offline (the MCP server is not started" +
-                  (run.some((s) => s.args[0] !== "--no-build") ? "; includes a reviewed source build)" : "; wheels only, no build)")
+                  (run.some((s) => s.args[0] !== "--no-build") ? "; source-build step — blocked in v0.2.1)" : "; wheels only, no build)")
                 : " — run by OpenHub (network, download; downloaded images are not removed)")),
     );
     lines.push("Client command");

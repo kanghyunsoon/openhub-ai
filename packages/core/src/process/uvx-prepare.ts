@@ -18,7 +18,8 @@ import { capture, type NpxSpawner } from "./npx-prepare";
  * - 정확한 버전만: `--from pkg==X.Y.Z`와 모든 `--with dep==A.B.C`. 그 밖의 uv 플래그가 command 앞에 있으면 준비하지 않는다.
  * - `uvx [--no-build] --compile-bytecode --from … --with … python -c pass`: 도구 환경을 만들고 빈 Python 프로그램만 실행한다.
  *   도구 패키지를 import하지 않으므로 MCP 서버 코드는 실행하지 않는다. 기본은 --no-build(wheel만, 제3자 빌드 코드 없음).
- *   검토된 Manifest(source-build-reviewed)만 --no-build 없이 실행하고, 그때는 Plan에 source-build 승인이 있다. 자동 전환은 없다.
+ *   소스 빌드는 하지 않는다: v0.2.1에서 source-build-reviewed 단계는 계획·준비·Registry 검증 모두에서 차단이다(UVX_SOURCE_BUILD_DISABLED,
+ *   docs/specs/uvx-prepare.md). wheel이 없으면 UVX_WHEEL_UNAVAILABLE로 끝나고 소스 빌드로 자동 전환하지 않는다.
  * - 끝나면 `uvx --offline … python -c pass`로 네트워크 없이 같은 환경을 찾는지 확인한다(Client의 다음 실행이 재사용한다).
  * - Client와 같은 uv cache를 써야 하므로 UV_CACHE_DIR를 바꾸지 않는다. uv cache 항목을 지우지 않는다.
  * - 준비 전용 timeout(최대 10분). 시간이 지나면 process tree 종료를 요청하고 종료를 확인한다(확인하지 못하면 결과에 남긴다).
@@ -150,7 +151,7 @@ export function uvIndexFingerprint(env: Readonly<Record<string, string>>): strin
  *   모두 출처 설정으로 본다(index·find-links·constraint/override·no-build/no-binary·exclude-newer·sources, 앞으로 생길 키 포함).
  * - fingerprint: 그 설정을 TOML로 읽고 URL의 계정 정보를 지우고, 이름에 password·token·secret·credential이 들어간 키의 값은 버린 뒤
  *   정규화한 JSON의 sha256. 원문·경로·자격증명은 Plan·로그에 남기지 않는다.
- * - customIndex: 그런 설정이 하나라도 있으면 true(Plan에 index fingerprint와 고지가 붙고, 검토된 소스 빌드는 막는다).
+ * - customIndex: 그런 설정이 하나라도 있으면 true(Plan에 index fingerprint와 고지가 붙는다. 소스 빌드는 index와 무관하게 v0.2.1에서 차단이다).
  * - 읽을 수 없거나(권한·크기) TOML이 아니면 unsupported: uvx 준비 단계 Plan을 막는다(uv 자체도 그 파일을 쓰지 못한다).
  */
 export interface UvSourceSettings {

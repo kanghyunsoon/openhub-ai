@@ -51,7 +51,7 @@ export const NPX_PREPARE_NOTICE =
   "설정을 쓰기 전에 이 버전의 npm 패키지를 npx cache에 내려받습니다. MCP 서버는 실행하지 않지만, npm은 설치 중 의존성의 설치 스크립트를 실행할 수 있습니다(Client가 처음 실행할 때와 같습니다). 같은 패키지·버전의 불완전한 cache 항목이 있으면 그 항목만 지우고 다시 받습니다.";
 /** uvx Prepare 고지(v0.2.1, InstallPlan·LifecyclePlan 공통). */
 export const UVX_PREPARE_NOTICE = "클라이언트 설정을 쓰기 전에 이 정확한 버전의 Python 패키지를 uv 캐시에 내려받아 설치합니다. 이 단계에서는 MCP 서버를 실행하지 않습니다.";
-/** 검토된 소스 빌드 고지(v0.2.1, source-build 승인과 함께). */
+/** 검토된 소스 빌드 고지(source-build 승인과 함께). v0.2.1에서는 소스 빌드 Plan이 차단이라 실행 가능한 계획에는 나오지 않는다. */
 export const UVX_SOURCE_BUILD_NOTICE =
   "이 도구의 일부 패키지는 소스로만 제공되어 내 컴퓨터에서 빌드됩니다. 빌드 과정에서 제3자 빌드 코드가 실행됩니다. OpenHub는 이 도구의 의존성 목록은 검토했지만 빌드 코드 자체는 검토하지 않았습니다.";
 /** 사용자 지정 패키지 index 고지(v0.2.1). URL·계정은 Plan에 넣지 않는다. */
@@ -91,7 +91,7 @@ export const runStepSchema = z.strictObject({
   timeoutMs: z.number().int().positive(),
   /** uvx Prepare 전용(v0.2.1): 사용자 지정 패키지 index fingerprint(URL·계정 없음). 기본 index면 없다. */
   index: z.strictObject({ custom: z.literal(true), digest: z.string().regex(/^sha256:[0-9a-f]{64}$/u) }).optional(),
-  /** uvx 검토된 소스 빌드 전용(v0.2.1): 빌드를 허용하는 패키지·정확한 버전·PyPI sdist sha256. 이 목록 밖의 소스 빌드는 실행하지 않는다. */
+  /** uvx 검토된 소스 빌드 전용: 패키지·정확한 버전·PyPI sdist sha256. v0.2.1에서 이 단계가 있는 Plan은 차단이다(UVX_SOURCE_BUILD_DISABLED). */
   sourceBuild: z
     .array(z.strictObject({ package: z.string().regex(/^[a-z0-9][a-z0-9-]*$/u), version: z.string().regex(/^\d+\.\d+\.\d+$/u), sha256: z.string().regex(/^[0-9a-f]{64}$/u) }))
     .min(1)
@@ -518,7 +518,7 @@ export function assembleInstallPlan(input: PlanAssemblyInput): PlannedInstall {
     if (input.artifact !== null && !input.artifact.pinned) approvalRequirements.add("floating-artifact");
     if (requiredNames.length > 0 && writeTargets.some((t) => t.client === "claude-code")) approvalRequirements.add("client-env-parse-risk");
     if (toolConfigSteps.length > 0) approvalRequirements.add("tool-config");
-    // v0.2.1 uvx Prepare: --no-build 없는 준비 단계(검토된 소스 빌드 Manifest)는 별도 승인이다. 거절하면 빌드 0회다.
+    // uvx Prepare: --no-build 없는 준비 단계(검토된 소스 빌드)는 별도 승인 항목이다. v0.2.1에서는 그 Plan 자체가 차단이라 실행되지 않는다.
     if (steps.some((s) => s.kind === "run" && s.executable === "uvx" && s.args[0] !== "--no-build")) approvalRequirements.add("source-build");
   }
 
