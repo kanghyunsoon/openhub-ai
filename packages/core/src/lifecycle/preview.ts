@@ -107,8 +107,12 @@ export function formatLifecyclePlanPreview(planned: PlannedLifecycle): string[] 
 
 /** Health가 MCP 서버 process에 넘기는 환경(mcpServerChildEnv)의 승인 화면 설명. 이름만 쓰고 값은 쓰지 않는다. */
 export function healthEnvNotice(names: readonly string[]): string {
-  const passed = names.length === 0 ? "OS 실행에 필요한 변수(PATH·HOME·TEMP 등)만 넘깁니다(Manifest가 선언한 환경변수 없음)" : "OS 실행에 필요한 변수(PATH·HOME·TEMP 등)와 Manifest가 선언한 " + names.join(", ") + "(값이 설정되어 있을 때)만 넘깁니다";
-  return "MCP 서버 process에는 " + passed + ". 그 밖의 API 키·token·자격증명 환경변수는 넘기지 않습니다";
+  if (names.length === 0) return "MCP 서버 process에는 OS 실행에 필요한 변수(PATH·HOME·TEMP 등)만 넘깁니다(Manifest가 선언한 환경변수 없음). 그 밖의 API 키·token·자격증명 환경변수는 넘기지 않습니다";
+  return (
+    "MCP 서버 process에는 OS 실행에 필요한 변수(PATH·HOME·TEMP 등)와 Manifest가 선언한 " + names.join(", ") + "만 넘깁니다. " +
+    "선언된 변수는 예외입니다: 값이 설정되어 있으면(토큰·접속 문자열 등 비밀값 포함) MCP 서버가 그 값을 그대로 받습니다. OpenHub는 값을 읽거나 저장하지 않습니다. " +
+    "그 밖의 API 키·token·자격증명 환경변수와 코드 주입 변수(NODE_OPTIONS 등)는 넘기지 않습니다"
+  );
 }
 
 export function formatLifecycleResult(result: LifecycleResultV1): string[] {

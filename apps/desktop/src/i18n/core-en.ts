@@ -332,8 +332,12 @@ export function installPreviewEn(planned: PlannedInstall): string[] {
 const OPERATION_EN = { update: "update", rollback: "rollback", health: "Health Check", repair: "repair" } as const;
 /** Health 환경 설명(core healthEnvNotice와 같은 내용, 영어). */
 export function healthEnvNoticeEn(names: readonly string[]): string {
-  const passed = names.length === 0 ? "variables the OS needs to run it (PATH, HOME, TEMP and similar); the Manifest declares none" : "variables the OS needs to run it (PATH, HOME, TEMP and similar) and the variables the Manifest declares (" + names.join(", ") + ", when set)";
-  return "The MCP server process only receives " + passed + ". Other API keys, tokens and credential variables are not passed.";
+  if (names.length === 0) return "The MCP server process only receives variables the OS needs to run it (PATH, HOME, TEMP and similar); the Manifest declares none. Other API keys, tokens and credential variables are not passed.";
+  return (
+    "The MCP server process only receives variables the OS needs to run it (PATH, HOME, TEMP and similar) and the variables the Manifest declares (" + names.join(", ") + "). " +
+    "Declared variables are an exception: if they are set, the MCP server receives their values as they are, including secrets such as tokens or connection strings. OpenHub does not read or store them. " +
+    "Other API keys, tokens, credential variables and code-injection variables (NODE_OPTIONS and similar) are not passed."
+  );
 }
 const HEALTH_NOT_VERIFIED_EN = ["Health: Not verified", "Reason: Required environment is unchecked"];
 

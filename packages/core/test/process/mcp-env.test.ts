@@ -86,6 +86,9 @@ describe("mcpServerChildEnv(허용 목록)", () => {
 
   it("승인 화면 설명은 이름만 보여 주고 값은 보여 주지 않는다", () => {
     expect(healthEnvNotice(["DATABASE_URI"])).toContain("DATABASE_URI");
+    // 선언된 자격증명 예외를 숨기지 않는다: 값이 있으면 MCP 서버가 받는다는 것을 승인 전에 알린다.
+    expect(healthEnvNotice(["GITHUB_PERSONAL_ACCESS_TOKEN"])).toContain("MCP 서버가 그 값을 그대로 받습니다");
+    expect(healthEnvNotice(["GITHUB_PERSONAL_ACCESS_TOKEN"])).not.toMatch(/ghp_|synthetic/u);
   });
 
   it("코드 주입 변수는 Manifest가 선언해도 넘기지 않고, Registry 검증은 선언 자체를 거부한다", async () => {
