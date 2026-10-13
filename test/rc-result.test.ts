@@ -71,13 +71,13 @@ describe("checkRcResult", () => {
 
   it("C4 (v0.2.1): 하네스는 명시적 테스트 응답 없이 승인하지 않고, 예상 밖 대화상자·남은 응답을 RC 오류로 남긴다", () => {
     const harness = readFileSync(path.join(ROOT, "scripts/rc/packaged-rc.mjs"), "utf8");
-    // 기본 응답은 거절(취소 버튼)이고 예상 밖으로 기록한다. 예전 기본값 { action: "approve" }는 없다.
-    expect(harness).toContain('const next = queued ? globalThis.__rcAnswers.shift() : { action: "reject" };');
-    expect(harness).not.toMatch(/: \{ action: "approve" \};/u);
-    expect(harness).toContain("typeof o.cancelId === \"number\" ? o.cancelId : 0");
+    // 대화상자 응답은 dialog-answer.mjs의 함수 소스를 그대로 주입해서 쓴다(동작은 rc-dialog-answer.test.ts). 예전 기본 승인은 없다.
+    expect(harness).toContain("const answerDialog = ${answerDialog.toString()};");
+    expect(harness).toContain("const installDialogAnswers = ${installDialogAnswers.toString()};");
+    expect(harness).not.toContain('globalThis.__rcAnswers.shift() : { action: "approve" }');
+    expect(harness).toContain("const approve = (n = 1) => answers(");
     // 감사 결과가 results.errors에 들어가야 checkRcResult(D)로 실패한다.
-    expect(harness).toContain("dialog(s) without an explicit test answer were rejected");
-    expect(harness).toContain("queued test answer(s) were not used");
+    expect(harness).toContain("results.errors.push(...dialogAuditErrors(ctx.dialogAudit));");
     // 승인 장면마다 직전에 명시적 승인(app.approve)이 있다: 설치·Health·Update·Rollback·Repair 호출 수와 같다.
     const approvals = [...harness.matchAll(/await app\.approve\(\);/gu)].length;
     const approving = [...harness.matchAll(/window\.__openhub(?:Install|LifecycleRun|LifecycleUpdateTo|Repair)\(/gu)].length;

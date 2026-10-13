@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { checkRcResult, formatVerdict } from "./check-rc-result.mjs";
+import { answerDialog, dialogAuditErrors, installDialogAnswers } from "./dialog-answer.mjs";
 import http from "node:http";
 import net from "node:net";
 import os from "node:os";
@@ -170,20 +171,12 @@ const PATCH_DIALOG = String.raw`(async () => {
   const fs = process.mainModule.require("node:fs");
   // inspector는 앱이 준비되기 전에 붙을 수 있다(Linux에서 실측). 준비된 뒤에 대화상자를 바꾸고 언어를 읽는다.
   await app.whenReady();
-  globalThis.__rcDialogs = globalThis.__rcDialogs || [];
-  globalThis.__rcAnswers = globalThis.__rcAnswers || [];
-  globalThis.__rcUnexpected = globalThis.__rcUnexpected || [];
-  // 승인은 하네스가 그 단계 직전에 명시적으로 넣은 응답(app.approve·app.answers)으로만 한다. 넣어 둔 응답이 없으면
-  // 대화상자의 취소 버튼으로 거절하고 예상 밖 대화상자로 기록한다(앱 종료 때 RC 오류가 된다). 기본 승인은 없다.
-  dialog.showMessageBox = async (a, b) => {
-    const o = b === undefined ? a : b;
-    const queued = globalThis.__rcAnswers.length > 0;
-    const next = queued ? globalThis.__rcAnswers.shift() : { action: "reject" };
-    if (!queued) globalThis.__rcUnexpected.push(String(o.title));
-    if (next.mutate) fs.writeFileSync(next.mutate.file, next.mutate.text);
-    globalThis.__rcDialogs.push({ title: o.title, message: o.message, detail: o.detail, buttons: o.buttons, action: next.action, mutated: Boolean(next.mutate), unexpected: !queued });
-    return { response: next.action === "approve" ? 1 : typeof o.cancelId === "number" ? o.cancelId : 0, checkboxChecked: false };
-  };
+  // 승인은 하네스가 그 단계 직전에 명시적으로 넣은 응답(app.approve·app.answers)으로만 한다(scripts/rc/dialog-answer.mjs,
+  // 같은 소스를 그대로 주입한다). 넣어 둔 응답이 없으면 취소 버튼으로 거절하고 예상 밖으로 기록한다. 취소 버튼이 없으면
+  // 응답하지 않고 실패한다(앱 호출이 실패하고 아무것도 승인되지 않는다). 기본 승인은 없다.
+  const answerDialog = ${answerDialog.toString()};
+  const installDialogAnswers = ${installDialogAnswers.toString()};
+  installDialogAnswers(dialog, fs, globalThis);
   return { userData: app.getPath("userData"), home: process.mainModule.require("node:os").homedir(), systemLanguages: [...app.getPreferredSystemLanguages(), app.getSystemLocale()], appVersion: app.getVersion() };
 })()`;
 
@@ -686,11 +679,7 @@ async function run() {
     if (app) await app.quit();
     // 승인 감사(앱 실행마다): 예상 밖 대화상자나 남은 응답이 있으면 RC 실패.
     results.dialogAudit = ctx.dialogAudit;
-    for (const [i, a] of ctx.dialogAudit.entries()) {
-      if (a.unexpected.length > 0) results.errors.push("dialog audit (launch " + (i + 1) + "): " + a.unexpected.length + " dialog(s) without an explicit test answer were rejected: " + a.unexpected.join(" | "));
-      if (a.leftover > 0) results.errors.push("dialog audit (launch " + (i + 1) + "): " + a.leftover + " queued test answer(s) were not used");
-      if (a.error !== undefined) results.errors.push("dialog audit (launch " + (i + 1) + "): could not read: " + a.error);
-    }
+    results.errors.push(...dialogAuditErrors(ctx.dialogAudit));
     for (const c of ctx.children) if (c.exitCode === null && c.signalCode === null) killTree(c);
     api.close();
     results.finishedAt = new Date().toISOString();
