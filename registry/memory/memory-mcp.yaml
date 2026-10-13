@@ -13,7 +13,7 @@ requirements:
 install:
   preferredAdapter: npx
   options:
-    command: "npx -y @modelcontextprotocol/server-memory"
+    command: "npx -y @modelcontextprotocol/server-memory@1.0.0"
   fallback:
     - adapter: npm
       package: "@modelcontextprotocol/server-memory"
