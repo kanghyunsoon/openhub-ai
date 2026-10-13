@@ -172,12 +172,17 @@ const PATCH_DIALOG = String.raw`(async () => {
   await app.whenReady();
   globalThis.__rcDialogs = globalThis.__rcDialogs || [];
   globalThis.__rcAnswers = globalThis.__rcAnswers || [];
+  globalThis.__rcUnexpected = globalThis.__rcUnexpected || [];
+  // 승인은 하네스가 그 단계 직전에 명시적으로 넣은 응답(app.approve·app.answers)으로만 한다. 넣어 둔 응답이 없으면
+  // 대화상자의 취소 버튼으로 거절하고 예상 밖 대화상자로 기록한다(앱 종료 때 RC 오류가 된다). 기본 승인은 없다.
   dialog.showMessageBox = async (a, b) => {
     const o = b === undefined ? a : b;
-    const next = globalThis.__rcAnswers.length > 0 ? globalThis.__rcAnswers.shift() : { action: "approve" };
+    const queued = globalThis.__rcAnswers.length > 0;
+    const next = queued ? globalThis.__rcAnswers.shift() : { action: "reject" };
+    if (!queued) globalThis.__rcUnexpected.push(String(o.title));
     if (next.mutate) fs.writeFileSync(next.mutate.file, next.mutate.text);
-    globalThis.__rcDialogs.push({ title: o.title, message: o.message, detail: o.detail, buttons: o.buttons, action: next.action, mutated: Boolean(next.mutate) });
-    return { response: next.action === "approve" ? 1 : 0, checkboxChecked: false };
+    globalThis.__rcDialogs.push({ title: o.title, message: o.message, detail: o.detail, buttons: o.buttons, action: next.action, mutated: Boolean(next.mutate), unexpected: !queued });
+    return { response: next.action === "approve" ? 1 : typeof o.cancelId === "number" ? o.cancelId : 0, checkboxChecked: false };
   };
   return { userData: app.getPath("userData"), home: process.mainModule.require("node:os").homedir(), systemLanguages: [...app.getPreferredSystemLanguages(), app.getSystemLocale()], appVersion: app.getVersion() };
 })()`;
@@ -220,6 +225,13 @@ async function launch(ctx, extraEnv = {}) {
     throw error;
   }
   const quit = async () => {
+    // 승인 감사: 넣어 두지 않은 응답이 필요했던 대화상자(거절됨)와 쓰이지 않고 남은 응답은 모두 RC 오류다.
+    try {
+      const audit = await main.evaluate("({ unexpected: globalThis.__rcUnexpected.splice(0), leftover: globalThis.__rcAnswers.splice(0).length })", 5000);
+      ctx.dialogAudit.push(audit);
+    } catch (error) {
+      ctx.dialogAudit.push({ unexpected: [], leftover: 0, error: String(error) });
+    }
     try {
       await main.evaluate('process.mainModule.require("electron").app.quit(), true', 5000);
     } catch {
@@ -232,9 +244,11 @@ async function launch(ctx, extraEnv = {}) {
     ctx.logs.push(log.slice(-4000));
   };
   const answers = (list) => main.evaluate("globalThis.__rcAnswers.push(..." + JSON.stringify(list) + "), true");
+  /** 다음 승인 대화상자 n개를 승인한다. 이 단계가 사람의 승인을 받는 장면이라는 표시다. */
+  const approve = (n = 1) => answers(Array.from({ length: n }, () => ({ action: "approve" })));
   const dialogs = () => main.evaluate("globalThis.__rcDialogs.splice(0)");
   const reloadReady = () => settled(() => page.evaluate("new Promise((r) => { const f = () => (document.readyState === 'complete' && window.__openhubReady !== undefined ? r(true) : setTimeout(f, 200)); f(); })"));
-  return { page, main, info, tools, quit, answers, dialogs, reloadReady };
+  return { page, main, info, tools, quit, answers, approve, dialogs, reloadReady };
 }
 
 /** 앱 프로세스를 끝낸다. Windows는 Electron 하위 프로세스(renderer·GPU 등)까지 트리째 끝낸다(남으면 다음 실행의 디버깅 포트를 막는다). */
@@ -360,6 +374,7 @@ async function run() {
     logs: [],
     extraArgs: opts("arg"),
     children: [],
+    dialogAudit: [],
     userDataDir: path.join(work, "user-data"),
     inspectPort: 9339,
     cdpPort: 9333,
@@ -416,6 +431,7 @@ async function run() {
     // ---- 5·6·7 설치 승인(Claude Code 프로젝트), 기존 항목 보존
     progress("reject/stale checks done");
     await ev(app, "window.__openhubRecommend()");
+    await app.approve();
     const memInstall = await ev(app, "window.__openhubInstall('memory-mcp', ['claude-code'])", 900000);
     const mcpDoc = JSON.parse((await read(p(".mcp.json"))) ?? "{}");
     const installDialogs = await app.dialogs();
@@ -427,6 +443,7 @@ async function run() {
     // 사람처럼 프로젝트를 다시 분석해야 추천이 새 설치를 반영한다(분석 결과는 [프로젝트 선택] 때만 바뀐다).
     await ev(app, "window.__openhubScanProject()");
     await ev(app, "window.__openhubRecommend()");
+    await app.approve();
     const addUser = await ev(app, "window.__openhubInstall('memory-mcp', ['cursor'], null, 'user')", 900000);
     const cursorUser = JSON.parse((await read(path.join(home, ".cursor", "mcp.json"))) ?? "{}");
     const codexUserAfter = await read(path.join(home, ".codex", "config.toml"));
@@ -436,6 +453,7 @@ async function run() {
     // ---- Kubernetes(Codex 프로젝트), Client 검증 수준
     progress("steps 6/7 " + results.steps[6].status + "/" + results.steps[7].status);
     await ev(app, "window.__openhubRecommend()");
+    await app.approve();
     const k8s = await ev(app, "window.__openhubInstall('kubernetes-mcp-server', ['codex'])", 1200000);
     const choices = Object.fromEntries((k8s.choices ?? []).map((c) => [c.client, c.verification]));
     const toolConfigs = walk(path.join(home, ".openhub", "tool-config")).filter((f) => f.endsWith("config.toml"));
@@ -445,13 +463,16 @@ async function run() {
     await ev(app, "window.__openhubRecommend()");
     const again = await ev(app, "window.__openhubInstall('kubernetes-mcp-server', ['codex'])", 600000);
     // Codex 사용자 범위 추가(Kubernetes)
+    await app.approve();
     const addCodexUser = await ev(app, "window.__openhubInstall('kubernetes-mcp-server', ['codex'], null, 'user')", 1200000);
     step(14, addUser.status === "succeeded" && again.status === "no-op" && addCodexUser.status === "succeeded" ? "PASS" : "FAIL", { addCursorUser: addUser.status, sameTarget: again.status, addCodexUser: addCodexUser.status, codexUserStillStartsWithOriginal: String(await read(path.join(home, ".codex", "config.toml"))).startsWith(CODEX_USER) });
 
     // ---- 8 실제 MCP Health
     progress("steps 5/14 " + results.steps[5].status + "/" + results.steps[14].status);
     await ev(app, "window.__openhubUserScopeOff('memory-mcp')");
+    await app.approve();
     const memHealth = await ev(app, "window.__openhubLifecycleRun('memory-mcp', 'health')", 600000);
+    await app.approve();
     const k8sHealth = await ev(app, "window.__openhubLifecycleRun('kubernetes-mcp-server', 'health')", 600000);
     const codexToml = (await read(p(".codex/config.toml"))) ?? "";
     const entry = codexEntry(codexToml, "kubernetes");
@@ -503,9 +524,11 @@ async function run() {
     await app.dialogs();
     const exactStep = async (version) => {
       const spec = MEMORY_PKG + "@" + version;
+      await app.approve();
       const r = await ev(app, "window.__openhubLifecycleUpdateTo('memory-mcp', " + JSON.stringify(version) + ")", 1200000);
       const detail = String((await app.dialogs()).at(-1)?.detail ?? "");
       const doc = JSON.parse((await read(p(".mcp.json"))) ?? "{}");
+      await app.approve();
       const health = await ev(app, "window.__openhubLifecycleRun('memory-mcp', 'health')", 600000);
       await app.dialogs();
       const out = {
@@ -531,10 +554,12 @@ async function run() {
     const v2 = await exactStep(MEMORY_V2);
     const othersKept9 = JSON.stringify(await otherConfigs()) === JSON.stringify(others0);
     step(9, v1.ok && v2.ok && v2.plan?.from === MEMORY_PKG + "@" + MEMORY_V1 && v2.state?.previous === MEMORY_PKG + "@" + MEMORY_V1 && othersKept9 ? "PASS" : "FAIL", { v1, v2, otherConfigsKept: othersKept9 });
+    await app.approve();
     const rb = await ev(app, "window.__openhubLifecycleRun('memory-mcp', 'rollback')", 1200000);
     const rbDetail = String((await app.dialogs()).at(-1)?.detail ?? "");
     const memRolled = JSON.parse((await read(p(".mcp.json"))) ?? "{}").mcpServers?.memory;
     const rbState = await memState();
+    await app.approve();
     const rbHealth = await ev(app, "window.__openhubLifecycleRun('memory-mcp', 'health')", 600000);
     await app.dialogs();
     const othersKept10 = JSON.stringify(await otherConfigs()) === JSON.stringify(others0);
@@ -559,6 +584,7 @@ async function run() {
     if (projectToolConfig) {
       const original = readFileSync(projectToolConfig, "utf8");
       await unlink(projectToolConfig);
+      await app.approve();
       repair = await ev(app, "window.__openhubRepair('kubernetes-mcp-server')", 1200000);
       repair.restored = (await read(projectToolConfig)) === original;
     }
@@ -573,6 +599,7 @@ async function run() {
     const ko = await ev(app, "window.__openhubI18n()");
     await ev(app, "window.__openhubScanProject()");
     await app.dialogs();
+    await app.approve();
     const koHealth = await ev(app, "window.__openhubLifecycleRun('memory-mcp', 'health')", 600000);
     const koDialogs = await app.dialogs();
     const koDialogKorean = koDialogs.some((d) => /[\uac00-\ud7a3]/u.test(String(d.title) + String(d.message)));
@@ -612,6 +639,7 @@ async function run() {
     app = await launch(ctx, { NPM_CONFIG_USERCONFIG: injectNpmrc });
     await ev(app, "window.__openhubScanProject()");
     const beforeFail = [await read(p(".mcp.json")), await read(lifecycleFile), ...(await otherConfigs())];
+    await app.approve();
     const failed = await ev(app, "window.__openhubLifecycleUpdateTo('memory-mcp', " + JSON.stringify(MEMORY_V2) + ")", 1200000);
     const afterFail = [await read(p(".mcp.json")), await read(lifecycleFile), ...(await otherConfigs())];
     const injected = ((await read(injectMark)) ?? "").split("\n").filter(Boolean).length;
@@ -656,6 +684,13 @@ async function run() {
     results.errors.push(String(error instanceof Error ? error.stack ?? error.message : error));
   } finally {
     if (app) await app.quit();
+    // 승인 감사(앱 실행마다): 예상 밖 대화상자나 남은 응답이 있으면 RC 실패.
+    results.dialogAudit = ctx.dialogAudit;
+    for (const [i, a] of ctx.dialogAudit.entries()) {
+      if (a.unexpected.length > 0) results.errors.push("dialog audit (launch " + (i + 1) + "): " + a.unexpected.length + " dialog(s) without an explicit test answer were rejected: " + a.unexpected.join(" | "));
+      if (a.leftover > 0) results.errors.push("dialog audit (launch " + (i + 1) + "): " + a.leftover + " queued test answer(s) were not used");
+      if (a.error !== undefined) results.errors.push("dialog audit (launch " + (i + 1) + "): could not read: " + a.error);
+    }
     for (const c of ctx.children) if (c.exitCode === null && c.signalCode === null) killTree(c);
     api.close();
     results.finishedAt = new Date().toISOString();
