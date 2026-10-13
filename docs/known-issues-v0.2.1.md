@@ -10,6 +10,7 @@ v0.2.1 is **not released yet**. This page describes the limits of the code on ma
 | Postgres MCP Pro: first Health on Windows is close to the time limit | Not fixed; measured about 15 s of 20 s | Run Health again |
 | Recovery of interrupted operations is CLI only | By design in v0.2.1 | Run the command the Installed view shows |
 | Environment limits during Health and benchmark are not a sandbox | Known limit | See below |
+| npm configuration (`node-options` in `.npmrc`) can still add Node.js options | Known limit; tracked in #63 | Check `npm config get node-options` |
 | Index or registry URL with credentials in the environment | Health and benchmark refuse to start the server | Move it to `uv.toml` or `.npmrc` |
 | Tools that relied on undeclared environment variables during Health | Health may now fail | Declare the variable in the Manifest, or rely on your client |
 | Custom Registries: some uvx command forms are refused | By design in v0.2.1 | Write options with a space |
@@ -42,6 +43,7 @@ Health checks and benchmarks pass only an allowlisted environment to the MCP ser
 - It is **not a sandbox**: the server runs as your user and can read your files, including configuration files that contain secrets, and use the network.
 - The package source used when a tool was prepared is not permanently linked to later Health checks.
 - The contents of `uv.toml` and `.npmrc` are not part of the approved plan.
+- npm's own `node-options` setting (in your user or global `.npmrc`, or `npm_config_node_options` during npx Prepare) is applied by npm to the processes it starts. The rule "variables that change which code runs are never passed" is about environment variables and does not cover this. Only someone who can already change your `.npmrc` or environment can use it. If you did not set it yourself, `npm config get node-options` should print `null`. Tracked in [#63](https://github.com/kanghyunsoon/openhub-ai/issues/63).
 - Credentials hidden in a URL path cannot be told apart from an ordinary path and are not detected.
 - When your client (Claude Code, Codex, Cursor) starts the server, the client decides the environment, not OpenHub.
 

@@ -76,6 +76,7 @@ describe("v0.2.1 Release Notes", () => {
       "is not permanently linked to later Health checks",
       "are not part of the approved plan",
       "credentials hidden in a URL path cannot be detected",
+      "npm's own `node-options` setting",
       "the client decides the environment, not OpenHub",
       // 복구는 CLI만
       "**Recovery is in the CLI only.**",
