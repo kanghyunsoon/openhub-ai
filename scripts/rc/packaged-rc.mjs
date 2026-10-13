@@ -17,6 +17,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { checkRcResult, formatVerdict } from "./check-rc-result.mjs";
 import http from "node:http";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -29,6 +30,20 @@ const opt = (name) => {
 const opts = (name) => argv.flatMap((a, i) => (a === "--" + name && argv[i + 1] !== undefined ? [argv[i + 1]] : []));
 const sha = (b) => "sha256:" + createHash("sha256").update(b).digest("hex");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** 127.0.0.1:port에 잠깐 listen해 보고 성공하면 바로 닫는다. timeoutMs 안에 열리지 않으면 false. */
+async function waitPortFree(port, timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    const ok = await new Promise((resolve) => {
+      const srv = net.createServer();
+      srv.once("error", () => resolve(false));
+      srv.listen(port, "127.0.0.1", () => srv.close(() => resolve(true)));
+    });
+    if (ok) return true;
+    await sleep(500);
+  }
+  return false;
+}
 
 // ---------------------------------------------------------------- 합성 데이터
 const TOKEN = ["openhub", "rc", "fake", "bearer", "4417"].join("-");
@@ -69,13 +84,17 @@ const PROJECT_MCP = JSON.stringify({ mcpServers: { notes: NOTES } }, null, 2) + 
 const MEMORY_PKG = "@modelcontextprotocol/server-memory";
 const MEMORY_V1 = "2026.7.4";
 const MEMORY_V2 = "2026.8.31";
-// Health 실패 보상(격리 환경의 합성 실패): 앱을 npm_config_node_options=--require=<이 파일>로 다시 띄운다. npm(npx)은 이 설정을
-// 자기가 실행하는 명령(npx -y <spec>이면 MCP 서버)의 NODE_OPTIONS로 넘긴다(npm 자신과 Electron에는 적용되지 않는다. 패키징된
-// Electron은 NODE_OPTIONS 대부분을 허용하지 않아 그 경로는 쓸 수 없다). Health는 앱 환경을 상속한다. npx Prepare도 npm_config_*를
-// 받지만 실행 명령이 "node --version"이라 이 파일이 아무것도 하지 않는다. 이 파일은 memory 서버 프로세스만 즉시 끝내고 표시를 남긴다.
+// Health 실패 보상(격리 환경의 합성 실패): 앱을 NPM_CONFIG_USERCONFIG=<작업 폴더의 .npmrc>로 다시 띄운다. 그 .npmrc에는
+// node-options=--require=<이 파일>만 있다. npm(npx)은 이 설정을 자기가 실행하는 명령(npx -y <spec>이면 MCP 서버)의 NODE_OPTIONS로
+// 넘긴다(npm 자신과 Electron에는 적용되지 않는다).
+// v0.2.1(#46)부터 Health는 허용 목록 환경으로 MCP 서버를 띄운다. 예전 방식(npm_config_node_options 환경변수)과 표시 파일 위치
+// 환경변수(OPENHUB_RC_INJECT_MARK)는 허용 목록에 없어 서버에 전달되지 않으므로 주입이 일어나지 않았다(RC run 38332486940:
+// injectedLaunchesKilled 0). NPM_CONFIG_USERCONFIG는 npx backend 설정으로 허용되므로 같은 주입이 Health까지 전달된다.
+// 표시 파일은 이 파일 옆(__dirname)에 쓴다. npx Prepare도 같은 .npmrc를 읽지만 실행 명령이 "--package=… node --version"이라
+// 이 파일이 아무것도 하지 않는다. 이 파일은 memory 서버 프로세스만 즉시 끝내고 표시를 남긴다.
 const HEALTH_FAIL_INJECTOR = String.raw`const argv = process.argv.slice(1).join(" ");
 if (argv.includes("server-memory") && !argv.includes("--package=") && !argv.includes("config get")) {
-  try { require("node:fs").appendFileSync(process.env.OPENHUB_RC_INJECT_MARK, "health-launch-killed\n"); } catch {}
+  try { require("node:fs").appendFileSync(require("node:path").join(__dirname, "rc-health-fail.log"), "health-launch-killed\n"); } catch {}
   process.stderr.write("openhub-rc: injected Health failure\n");
   process.exit(1);
 }
@@ -164,6 +183,12 @@ const PATCH_DIALOG = String.raw`(async () => {
 })()`;
 
 async function launch(ctx, extraEnv = {}) {
+  // 직전 실행이 끝난 직후에는 디버깅 port가 아직 풀리지 않을 수 있다(실측: Windows에서 DevTools bind() 0x2740로
+  // "Cannot start http server for devtools", 그러면 page target이 없다). 두 port가 다시 열릴 때까지 기다린다(최대 60초).
+  for (const port of [ctx.cdpPort, ctx.inspectPort]) {
+    const free = await waitPortFree(port, 60000);
+    if (!free) throw new Error("debug port " + port + " is still in use after 60 s");
+  }
   const env = { ...process.env, ...ctx.env, ...extraEnv };
   delete env.OPENHUB_REGISTRY;
   delete env.OPENHUB_METADATA;
@@ -575,9 +600,13 @@ async function run() {
     progress("step 13 " + results.steps[13].status + "; launch with injected Health failure");
     const injector = path.join(work, "rc-health-fail.cjs");
     const injectMark = path.join(work, "rc-health-fail.log");
+    const injectNpmrc = path.join(work, "rc-health-fail.npmrc");
     await writeFile(injector, HEALTH_FAIL_INJECTOR);
+    // .npmrc 값은 따옴표 없이 쓴다(작업 폴더 경로에 공백이 없어야 한다). Windows도 NODE_OPTIONS의 --require는 / 경로를 받는다.
+    if (/\s/u.test(injector)) throw new Error("injector path must not contain spaces: " + injector);
+    await writeFile(injectNpmrc, "node-options=--require=" + injector.replace(/\\/gu, "/") + "\n");
     await rm(injectMark, { force: true });
-    app = await launch(ctx, { npm_config_node_options: "--require=" + JSON.stringify(injector), OPENHUB_RC_INJECT_MARK: injectMark });
+    app = await launch(ctx, { NPM_CONFIG_USERCONFIG: injectNpmrc });
     await ev(app, "window.__openhubScanProject()");
     const beforeFail = [await read(p(".mcp.json")), await read(lifecycleFile), ...(await otherConfigs())];
     const failed = await ev(app, "window.__openhubLifecycleUpdateTo('memory-mcp', " + JSON.stringify(MEMORY_V2) + ")", 1200000);
