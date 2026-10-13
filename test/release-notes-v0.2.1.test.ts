@@ -77,6 +77,9 @@ describe("v0.2.1 Release Notes", () => {
       "are not part of the approved plan",
       "credentials hidden in a URL path cannot be detected",
       "npm's own `node-options` setting",
+      // 버전 미고정 npx 도구의 첫 Health 다운로드(#70)와 Memory MCP 저장 위치(#69)
+      "Unpinned npx tools download during their first Health.",
+      "Memory MCP stores memories inside the npx cache by default.",
       "the client decides the environment, not OpenHub",
       // 복구는 CLI만
       "**Recovery is in the CLI only.**",

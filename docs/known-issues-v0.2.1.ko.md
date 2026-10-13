@@ -8,6 +8,8 @@ v0.2.1은 **아직 릴리스되지 않았습니다**. 이 문서는 v0.2.1에 �
 | --- | --- | --- |
 | Serena 신규 설치 불가 | v0.2.1 정책, 재지원은 #59 | 기존 항목은 유지하거나 직접 제거. 복구는 가능 |
 | Windows에서 Postgres MCP Pro 첫 Health가 시간 제한에 가까움 | 미수정, 20초 중 약 15초 측정 | Health 다시 실행 |
+| 버전이 고정되지 않은 npx 도구는 첫 Health에서 패키지를 받음(Memory MCP, Context7, Chrome DevTools MCP, Playwright MCP) | 알려진 제한, Windows에서 20초 중 최대 약 10초 측정, #70에서 추적 | Health 다시 실행 |
+| Memory MCP는 기본적으로 npx cache 안에 기억을 저장함 | 알려진 제한, 버전이 바뀌면 기억이 보이지 않거나 지워질 수 있음, #69에서 추적 | `MEMORY_FILE_PATH`를 npm cache 밖의 절대 경로로 지정 |
 | 중단된 작업 복구는 CLI만 | v0.2.1 정책 | INSTALLED에 보이는 명령 실행 |
 | Health·Benchmark 환경 제한은 sandbox가 아님 | 알려진 제한 | 아래 참고 |
 | npm 설정(`.npmrc`의 `node-options`)으로 Node.js 옵션이 더해질 수 있음 | 알려진 제한, #63에서 추적 | `npm config get node-options` 확인 |
@@ -31,6 +33,21 @@ v0.2.1은 **아직 릴리스되지 않았습니다**. 이 문서는 v0.2.1에 �
 - **할 수 있는 일:** Health를 다시 실행하세요(INSTALLED → Health Check 또는 `openhub lifecycle health postgres-mcp`). 패키지는 설정을 쓰기 전에 준비돼 있어서 다음 실행은 더 빠릅니다(같은 측정에서 약 6.5초).
 - **업데이트·롤백:** 다른 버전은 시작 시간이 따로 있습니다. 시험한 이전 버전(0.2.1)은 Windows에서 약 31초가 걸려 Health가 실패했고, OpenHub가 이전 설정과 Version State를 되돌렸습니다. 의도된 안전 동작이며 데이터 손실이 아닙니다.
 - **상태:** 미수정. 20초 제한을 늘려서 감추지 않습니다.
+
+## 버전이 고정되지 않은 npx 도구: 첫 Health에서 패키지를 받음
+
+- **해당 도구:** Memory MCP(`@modelcontextprotocol/server-memory`), Context7(`@upstash/context7-mcp`), Chrome DevTools MCP(`chrome-devtools-mcp@latest`), Playwright MCP(`@playwright/mcp@latest`). Registry 명령에 정확한 버전이 없어서 OpenHub는 설치할 때 패키지를 받지 않습니다(계획에 "launch-on-demand"와 `floating-artifact`가 표시됨). Memory MCP 버전 고정은 검토 중이며 이번 릴리스에 포함되지 않습니다.
+- **내용:** 첫 Health(Client의 첫 실행과 같음)에서 npx가 최신 버전을 찾아 의존성과 함께 npx cache에 받은 뒤 서버를 시작합니다. 이 시간이 모두 20초 시작 제한에 들어갑니다. 측정에서 빈 npm cache 기준 Memory MCP는 Windows 8.4~10.4초, Linux 3.5~3.9초가 걸렸고, 패키징된 Windows 테스트 4회 중 1회는 첫 Health가 `startup-timeout`으로 멈췄습니다. 느린 네트워크·디스크·백신 검사에서 더 잘 일어납니다. 나머지 세 도구는 측정하지 않았습니다.
+- **할 수 있는 일:** Health를 다시 실행하세요. 단독 Health가 실패하면 설정은 바뀌지 않고, 업데이트 중 Health가 실패하면 이전 설정과 Version State를 되돌립니다. 이후 실행은 받아 둔 패키지를 쓰지만, 고정되지 않은 도구는 새 버전이 나오면 다시 받을 수 있습니다.
+- **상태:** 이 도구들을 미리 준비하거나 고정하는 방식은 [#70](https://github.com/kanghyunsoon/openhub-ai/issues/70)에서 추적합니다. 20초 제한은 늘리지 않습니다.
+
+## Memory MCP: 기억이 저장되는 위치
+
+- **기본 위치:** Memory MCP는 지식 그래프를 자기 패키지 폴더 안의 `memory.jsonl`에 저장합니다. npx로 실행하면 그 폴더가 npm cache 안에 있고, 명령 형태(버전 미고정, 특정 버전)마다 폴더가 따로 있습니다.
+- **재현한 내용**(합성 데이터, Windows·Linux): 새 버전이 나온 뒤 버전 미고정 명령을 다시 실행하면 패키지 폴더가 교체되면서 그 안의 `memory.jsonl`이 **지워집니다**. 다른 버전으로 업데이트·롤백하면 서버가 다른 폴더에서 시작해 이전에 저장한 기억이 **보이지 않습니다**. 롤백하면 이전 폴더가 남아 있을 때만 다시 보입니다. npm cache를 지우면(`npm cache clean --force`) 함께 사라집니다. OpenHub가 이 파일을 직접 지우지는 않으며, 업데이트 계획에 이 경고는 없습니다.
+- **할 수 있는 일:** 다음 실행 전에 `memory.jsonl`을 npm cache 밖의 폴더로 복사하고, 이 서버의 `MEMORY_FILE_PATH`를 그 **절대 경로**로 지정하세요. 2026.x와 1.0.0은 절대 경로의 같은 파일을 함께 읽고 씁니다. `~`(1.0.0 이전 버전은 펼치지 않음)나 상대 경로(패키지 폴더 기준으로 해석됨)는 쓰지 마세요.
+- **제한:** Client 설정 파일의 서버 항목에 `MEMORY_FILE_PATH`를 넣으면 OpenHub는 그 항목을 `config-drift`로 보고 업데이트·롤백을 거부합니다(사용자 설정을 덮어쓰지 않음).
+- **상태:** [#69](https://github.com/kanghyunsoon/openhub-ai/issues/69)에서 추적합니다.
 
 ## 복구는 CLI만
 
