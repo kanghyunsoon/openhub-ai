@@ -40,7 +40,7 @@ You also need at least one AI client: Claude Code, Codex or Cursor. If a require
 
 ## Install
 
-**Windows.** Run `OpenHub-AI-Setup-<version>-x64.exe`. The installer is **unsigned**, so Windows SmartScreen or Smart App Control may warn before it runs ("Windows protected your PC"). An unsigned installer cannot prove who published it. Run it only if you downloaded it yourself from this repository's release page and the SHA256 matches; if you are unsure, do not run it (you can use the CLI package or build from source instead). Windows offers *More info* → *Run anyway*; whether to use it is your decision, and organisations may block it. Start OpenHub AI from the Start menu.
+**Windows.** Run `OpenHub-AI-Setup-<version>-x64.exe`. The installer is **unsigned**, so Windows SmartScreen or Smart App Control may warn before it runs ("Windows protected your PC"). If the file was downloaded with a browser, Windows may instead or also show "Open File - Security Warning" with *Publisher: Unknown Publisher*. An unsigned installer cannot prove who published it. Run it only if you downloaded it yourself from this repository's release page and the SHA256 matches; if you are unsure, do not run it (you can use the CLI package or build from source instead). Windows offers *More info* → *Run anyway* (SmartScreen) or *Run* (security warning); whether to use it is your decision, and organisations may block it. Start OpenHub AI from the Start menu.
 
 **Linux.** Make the AppImage executable and run it:
 
@@ -66,7 +66,7 @@ Tools that need a secret (for example `GITHUB_PERSONAL_ACCESS_TOKEN` or `DATABAS
 
 | File | When |
 | --- | --- |
-| `.mcp.json` (Claude Code), `.cursor/mcp.json`, `.codex/config.toml` in your project | Project-scope install, update, rollback, repair. Only the one server entry; other entries are kept as they are. |
+| `.mcp.json` (Claude Code), `.cursor/mcp.json`, `.codex/config.toml` in your project | Project-scope install, update, rollback, repair. Only the one server entry; other entries are kept as they are. JSON files are written back with indentation, so a file that was on one line becomes several lines; the content of the other entries does not change. |
 | `~/.cursor/mcp.json`, `~/.codex/config.toml` | Only for user-scope installs you approve. `~/.claude.json` is never written. |
 | `~/.openhub/state/` | OpenHub's own records: Version State, operation records, locks. |
 | `~/.openhub/tool-config/` | Only for tools with an OpenHub-managed config (Kubernetes MCP Server). |
@@ -97,7 +97,7 @@ There is no remove command yet. To stop using a tool OpenHub installed:
 
 This procedure was checked against the current code: the other entries stay byte-for-byte the same, the removed tool shows `missing-config`, and a later install returns it to `state-consistent`.
 
-To remove the app: on Windows use *Settings → Apps → OpenHub AI → Uninstall*; on Linux delete the AppImage file. Your client configuration files are not changed by uninstalling. OpenHub's records stay in `~/.openhub`; delete that folder if you want to remove them too.
+To remove the app: on Windows use *Settings → Apps → OpenHub AI → Uninstall*; on Linux delete the AppImage file. Your client configuration files are not changed by uninstalling. OpenHub's records stay in `~/.openhub`; delete that folder if you want to remove them too. The app's own data (browser cache and the language you chose) also stays, in `%APPDATA%\@openhub\desktop` on Windows and `~/.config/@openhub/desktop` on Linux (`$XDG_CONFIG_HOME/@openhub/desktop` if you set `XDG_CONFIG_HOME`); delete that folder too if you want. Close OpenHub AI before deleting either folder.
 
 ## Supported Clients and Verification
 

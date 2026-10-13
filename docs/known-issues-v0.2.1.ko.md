@@ -10,6 +10,7 @@ v0.2.1은 **아직 릴리스되지 않았습니다**. 이 문서는 v0.2.1에 �
 | Windows에서 Postgres MCP Pro 첫 Health가 시간 제한에 가까움 | 미수정, 20초 중 약 15초 측정 | Health 다시 실행 |
 | 중단된 작업 복구는 CLI만 | v0.2.1 정책 | INSTALLED에 보이는 명령 실행 |
 | Health·Benchmark 환경 제한은 sandbox가 아님 | 알려진 제한 | 아래 참고 |
+| npm 설정(`.npmrc`의 `node-options`)으로 Node.js 옵션이 더해질 수 있음 | 알려진 제한, #63에서 추적 | `npm config get node-options` 확인 |
 | 환경변수의 index·registry URL에 인증 정보 | Health·Benchmark가 서버를 시작하지 않음 | `uv.toml`이나 `.npmrc`로 옮기기 |
 | 선언하지 않은 환경변수에 기대던 도구 | Health가 실패할 수 있음 | Manifest에 선언하거나 Client 실행에 맡기기 |
 | 사용자 Registry: 일부 uvx 명령 형식 거부 | v0.2.1 정책 | 옵션을 띄어 쓰기 |
@@ -42,6 +43,7 @@ Health와 Benchmark는 허용 목록에 있는 환경변수만 MCP 서버에 넘
 - **sandbox가 아닙니다.** 서버는 사용자 계정으로 실행되어 파일(비밀 값이 든 설정 파일 포함)을 읽고 네트워크를 쓸 수 있습니다.
 - 도구를 준비할 때 쓴 패키지 출처가 이후 Health와 영구적으로 연결되지는 않습니다.
 - `uv.toml`과 `.npmrc`의 내용은 승인한 계획에 포함되지 않습니다.
+- npm 자체 설정인 `node-options`(사용자·전역 `.npmrc`, 또는 npx Prepare 때의 `npm_config_node_options`)는 npm이 자기가 시작하는 프로세스에 적용합니다. "실행 코드를 바꾸는 변수는 넘기지 않는다"는 규칙은 환경변수에 대한 것이라 이 경로는 막지 않습니다. 이미 사용자의 `.npmrc`나 환경을 바꿀 수 있는 사람만 쓸 수 있는 경로입니다. 직접 설정한 적이 없다면 `npm config get node-options`의 결과는 `null`이어야 합니다. [#63](https://github.com/kanghyunsoon/openhub-ai/issues/63)에서 추적합니다.
 - URL 경로에 숨긴 인증 정보는 일반 경로와 구별할 수 없어 탐지하지 못합니다.
 - Client(Claude Code, Codex, Cursor)가 서버를 실행할 때의 환경은 OpenHub가 아니라 Client가 정합니다.
 

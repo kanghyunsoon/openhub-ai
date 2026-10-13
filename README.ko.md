@@ -40,7 +40,7 @@ AI Client(Claude Code·Codex·Cursor) 중 하나도 있어야 합니다. 필요�
 
 ## 설치
 
-**Windows.** `OpenHub-AI-Setup-<버전>-x64.exe`를 실행합니다. 설치 파일은 **서명되지 않아** Windows SmartScreen·Smart App Control 경고("Windows의 PC 보호")가 나올 수 있습니다. 서명이 없으면 게시자를 증명할 수 없습니다. 이 저장소의 release 페이지에서 직접 받았고 SHA256이 일치할 때만 실행하세요. 확신이 없으면 실행하지 마세요(CLI 패키지나 소스 빌드를 쓸 수 있습니다). Windows는 *추가 정보* → *실행*을 제공하지만 이를 쓸지는 사용자 판단이며, 조직에서 막혀 있을 수 있습니다. 시작 메뉴에서 OpenHub AI를 엽니다.
+**Windows.** `OpenHub-AI-Setup-<버전>-x64.exe`를 실행합니다. 설치 파일은 **서명되지 않아** Windows SmartScreen·Smart App Control 경고("Windows의 PC 보호")가 나올 수 있습니다. 브라우저로 받은 파일이면 그 대신 또는 그와 함께 "파일 열기 - 보안 경고"(*게시자: 알 수 없는 게시자*)가 나올 수 있습니다. 서명이 없으면 게시자를 증명할 수 없습니다. 이 저장소의 release 페이지에서 직접 받았고 SHA256이 일치할 때만 실행하세요. 확신이 없으면 실행하지 마세요(CLI 패키지나 소스 빌드를 쓸 수 있습니다). Windows는 *추가 정보* → *실행*(SmartScreen) 또는 *실행*(보안 경고)을 제공하지만 이를 쓸지는 사용자 판단이며, 조직에서 막혀 있을 수 있습니다. 시작 메뉴에서 OpenHub AI를 엽니다.
 
 **Linux.** AppImage에 실행 권한을 주고 실행합니다.
 
@@ -66,7 +66,7 @@ chmod +x OpenHub-AI-<버전>-x86_64.AppImage
 
 | 파일 | 언제 |
 | --- | --- |
-| 프로젝트의 `.mcp.json`(Claude Code), `.cursor/mcp.json`, `.codex/config.toml` | Project 범위 설치·업데이트·롤백·복구. 해당 서버 항목 하나만 바꾸고 다른 항목은 그대로 둡니다. |
+| 프로젝트의 `.mcp.json`(Claude Code), `.cursor/mcp.json`, `.codex/config.toml` | Project 범위 설치·업데이트·롤백·복구. 해당 서버 항목 하나만 바꾸고 다른 항목은 그대로 둡니다. JSON 파일은 들여쓰기로 다시 쓰므로 한 줄이던 파일이 여러 줄이 됩니다. 다른 항목의 내용은 바뀌지 않습니다. |
 | `~/.cursor/mcp.json`, `~/.codex/config.toml` | 승인한 User 범위 설치만. `~/.claude.json`은 쓰지 않습니다. |
 | `~/.openhub/state/` | OpenHub 자체 기록: Version State, 작업 기록, 잠금. |
 | `~/.openhub/tool-config/` | OpenHub 관리 설정을 쓰는 도구(Kubernetes MCP Server)만. |
@@ -97,7 +97,7 @@ CLI의 `openhub doctor`로 어떤 프로그램을 찾았는지 볼 수 있습니
 
 이 절차는 현재 코드로 확인했습니다: 다른 항목은 바이트 단위로 그대로이고, 지운 도구는 `missing-config`로 보이며, 다시 설치하면 `state-consistent`가 됩니다.
 
-앱 제거: Windows는 *설정 → 앱 → OpenHub AI → 제거*, Linux는 AppImage 파일을 지웁니다. 앱을 제거해도 Client 설정 파일은 바뀌지 않습니다. OpenHub 기록은 `~/.openhub`에 남으며, 지우려면 그 폴더를 삭제하세요.
+앱 제거: Windows는 *설정 → 앱 → OpenHub AI → 제거*, Linux는 AppImage 파일을 지웁니다. 앱을 제거해도 Client 설정 파일은 바뀌지 않습니다. OpenHub 기록은 `~/.openhub`에 남으며, 지우려면 그 폴더를 삭제하세요. 앱 자체 데이터(브라우저 캐시와 선택한 언어)도 Windows는 `%APPDATA%\@openhub\desktop`, Linux는 `~/.config/@openhub/desktop`(`XDG_CONFIG_HOME`을 설정했다면 `$XDG_CONFIG_HOME/@openhub/desktop`)에 남습니다. 원하면 이 폴더도 지우세요. 두 폴더 모두 OpenHub AI를 닫은 뒤 지우세요.
 
 ## 지원 Client와 검증 범위
 
