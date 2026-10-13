@@ -13,6 +13,7 @@ v0.2.1 is **not released yet**. This page describes the limits of the code on ma
 | Index or registry URL with credentials in the environment | Health and benchmark refuse to start the server | Move it to `uv.toml` or `.npmrc` |
 | Tools that relied on undeclared environment variables during Health | Health may now fail | Declare the variable in the Manifest, or rely on your client |
 | Custom Registries: some uvx command forms are refused | By design in v0.2.1 | Write options with a space |
+| Custom Registries: unpinned uvx tools may build from source | Known limit; only pinned tools are prepared | Pin the package and every `--with` dependency to exact versions |
 | Carried over from v0.2.0 | Cursor and macOS not verified, Kubernetes 0.0.67 only, unsigned installer, AppImage via FUSE not tested | See the release notes |
 
 ## Serena: no new installs
@@ -58,8 +59,15 @@ See the [security model](security-model.md).
 
 ## Custom Registries: uvx command forms
 
-- **Symptom:** a custom Registry Manifest whose uvx command uses forms such as `--from=package`, `-wpackage`, comma-separated `--with` lists, `--`, URLs, paths, `--with-editable` or `--with-requirements` is refused with `MANIFEST_COMMAND_REJECTED`. OpenHub would not be able to identify the package.
-- **What you can do:** write options with a space, for example `uvx --from package==1.2.3 --with dependency==4.5.6 command`. Only the options listed by `uvx --help` in uv 0.12.3 are accepted; options added by later uv versions are refused until they are reviewed.
+- **Symptom:** a custom Registry Manifest's uvx command is refused with `MANIFEST_COMMAND_REJECTED`. There are two different reasons:
+  - **The package cannot be identified** from the Manifest: URLs, paths, VCS sources, wheel or archive files, `--with-editable` and `--with-requirements`. Options that `uvx --help` in uv 0.12.3 does not list are refused for the same reason, because OpenHub cannot tell whether they take a value. Options added by later uv versions are refused until they are reviewed.
+  - **The package can be identified, but the form is outside OpenHub's Prepare and update handling:** `--from=package`, `--with=package`, `-wpackage`, `-w=package`, combined short flags such as `-qw`, comma-separated `--with` lists and `--`. uvx itself accepts these, and OpenHub reads the packages in them (a withdrawn tool written this way is still recognized and refused as withdrawn). OpenHub's Prepare, update and version checks only work on options written with a space, so these forms are refused rather than handled partly.
+- **What you can do:** write options with a space, for example `uvx --from package==1.2.3 --with dependency==4.5.6 command`, and use package names, not URLs, paths or files.
+
+## Custom Registries: unpinned uvx tools
+
+- **What happens:** only uvx tools pinned to exact versions (`--from package==X.Y.Z` and every `--with dependency==A.B.C`) are prepared with wheels only and started with `--no-build`. An unpinned uvx tool is not prepared: it is downloaded when it first starts, and neither the client configuration nor Health and benchmark add `--no-build`, so uv may build a package from source that OpenHub did not review. The install plan marks it as a floating artifact and asks for that approval.
+- **What you can do:** pin the package and every `--with` dependency to exact versions. In the Verified Registry the only uvx tool, Postgres MCP Pro, is pinned.
 
 ## Carried over from v0.2.0
 

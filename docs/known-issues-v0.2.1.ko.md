@@ -13,6 +13,7 @@ v0.2.1은 **아직 릴리스되지 않았습니다**. 이 문서는 v0.2.1에 �
 | 환경변수의 index·registry URL에 인증 정보 | Health·Benchmark가 서버를 시작하지 않음 | `uv.toml`이나 `.npmrc`로 옮기기 |
 | 선언하지 않은 환경변수에 기대던 도구 | Health가 실패할 수 있음 | Manifest에 선언하거나 Client 실행에 맡기기 |
 | 사용자 Registry: 일부 uvx 명령 형식 거부 | v0.2.1 정책 | 옵션을 띄어 쓰기 |
+| 사용자 Registry: 고정되지 않은 uvx 도구는 소스 빌드 가능 | 알려진 제한. 고정된 도구만 준비 | 패키지와 모든 `--with` 의존성을 정확한 버전으로 고정 |
 | v0.2.0에서 이어지는 제한 | Cursor·macOS 미검증, Kubernetes 0.0.67만, 설치 파일 미서명, FUSE로 직접 AppImage 실행 미검증 | 릴리스 노트 참고 |
 
 ## Serena 신규 설치 불가
@@ -58,8 +59,15 @@ Health와 Benchmark는 허용 목록에 있는 환경변수만 MCP 서버에 넘
 
 ## 사용자 Registry의 uvx 명령 형식
 
-- **증상:** 사용자 Registry Manifest의 uvx 명령이 `--from=패키지`, `-w패키지`, 쉼표로 이은 `--with` 목록, `--`, URL, 경로, `--with-editable`, `--with-requirements`를 쓰면 `MANIFEST_COMMAND_REJECTED`로 거부합니다. OpenHub가 패키지를 식별할 수 없기 때문입니다.
-- **할 수 있는 일:** 옵션을 띄어 쓰세요. 예: `uvx --from package==1.2.3 --with dependency==4.5.6 command`. uv 0.12.3의 `uvx --help`에 있는 옵션만 받으며, 이후 uv 버전에서 추가된 옵션은 검토 전까지 거부합니다.
+- **증상:** 사용자 Registry Manifest의 uvx 명령이 `MANIFEST_COMMAND_REJECTED`로 거부됩니다. 이유는 두 가지로 다릅니다.
+  - **Manifest만으로 패키지를 식별할 수 없음:** URL, 경로, VCS, wheel·압축 파일, `--with-editable`, `--with-requirements`. uv 0.12.3의 `uvx --help`에 없는 옵션도 값을 받는지 알 수 없어 같은 이유로 거부하며, 이후 uv 버전에서 추가된 옵션은 검토 전까지 거부합니다.
+  - **패키지는 식별되지만 OpenHub의 Prepare·update 처리 범위 밖인 형식:** `--from=패키지`, `--with=패키지`, `-w패키지`, `-w=패키지`, `-qw` 같은 짧은 플래그 묶음, 쉼표로 이은 `--with` 목록, `--`. uvx는 이 형식을 받고 OpenHub도 그 안의 패키지를 읽습니다(지원 중단 도구를 이렇게 써도 지원 중단으로 알아보고 거부합니다). 다만 Prepare·update·버전 확인은 띄어 쓴 옵션만 다루므로, 일부만 처리하지 않고 거부합니다.
+- **할 수 있는 일:** 옵션을 띄어 쓰고 URL·경로·파일 대신 패키지 이름을 쓰세요. 예: `uvx --from package==1.2.3 --with dependency==4.5.6 command`.
+
+## 사용자 Registry: 고정되지 않은 uvx 도구
+
+- **내용:** 정확한 버전으로 고정된 uvx 도구(`--from package==X.Y.Z`와 모든 `--with dependency==A.B.C`)만 wheel만으로 준비하고 `--no-build`로 실행합니다. 고정되지 않은 uvx 도구는 준비하지 않고 처음 실행할 때 내려받으며, Client 설정·Health·Benchmark 모두 `--no-build`를 붙이지 않습니다. 그래서 uv가 OpenHub가 검토하지 않은 패키지를 소스에서 빌드할 수 있습니다. 설치 계획은 이를 floating artifact로 표시하고 그 승인을 따로 받습니다.
+- **할 수 있는 일:** 패키지와 모든 `--with` 의존성을 정확한 버전으로 고정하세요. Verified Registry의 uvx 도구(Postgres MCP Pro)는 고정돼 있습니다.
 
 ## v0.2.0에서 이어지는 제한
 
