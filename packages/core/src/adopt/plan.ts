@@ -33,6 +33,7 @@ import {
 } from "../installer/plan";
 import { RECOMMEND_PLATFORMS, TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, type RecommendPlatform } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
+import { resolveRegistryTool } from "../registry/withdrawn";
 import { CLIENT_COMMANDS, PROJECT_KEY_PATTERN, artifactIdentitySchema, entryKeyOf } from "../lifecycle/state";
 import { configEntryDigest, identityFromPinnedArtifact, standardEntries, tomlBlockDigest } from "../lifecycle/status";
 import { projectKeyFor, readLifecycleState, type StateErrorCode } from "../lifecycle/store";
@@ -163,6 +164,7 @@ export interface AdoptPlanOptions {
 
 export type AdoptPlanErrorCode =
   | "TOOL_NOT_FOUND"
+  | "TOOL_WITHDRAWN"
   | "ADOPT_TARGET_NOT_FOUND"
   | "ADOPT_TARGET_AMBIGUOUS"
   | "ADOPT_INVALID_SERVER_NAME"
@@ -253,8 +255,9 @@ export async function planAdopt(options: AdoptPlanOptions): Promise<AdoptPlanRes
   const fs = options.fs ?? nodeConfigFs;
   // Registry entry 모양(manifest.name·repository)이 아닌 값(예: Discovery Candidate)은 입력에서 거부한다(D-035).
   const registry = options.entries.filter((e): e is RegistryEntry => isRecord(e) && isRecord(e.manifest) && typeof e.manifest.name === "string" && isRecord(e.manifest.repository));
-  const entry = registry.find((e) => e.manifest.name === options.toolId);
-  if (entry === undefined) return { ok: false, code: "TOOL_NOT_FOUND", message: "Registry에 없는 Tool입니다" };
+  const found = resolveRegistryTool(registry, options.toolId);
+  if (!found.ok) return found;
+  const entry = found.entry;
   const manifest = entry.manifest;
   const canonicalAlias = manifest.recommendation?.identity?.mcpServerNames?.[0] ?? null;
   const read = await readLifecycleState({ homeDir: options.homeDir, fs });

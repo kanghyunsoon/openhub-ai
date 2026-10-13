@@ -98,7 +98,9 @@ describe("v0.2.0 C3 추천 진단: 추천이 있어도 보이는 정보", () => 
   it("규칙이 없는 기술(jest)과 스택 불일치(mongodb)·이미 설치된 도구(context7·playwright) 제외를 보이고, 추천 목록·점수는 그대로다", async () => {
     setDesktopLocale("en");
     const jest = viewOf(await fixtureProfile("jest-app"));
-    expect(jest.view.diagnosis).toMatchObject({ empty: null, unmappedTechs: ["jest"] });
+    // v0.2.1 #39: jest-app의 코드 탐색 추천(serena)이 지원 중단으로 빠져 추천이 비고, 그 이유(empty)를 함께 보인다.
+    expect(jest.view.diagnosis).toMatchObject({ unmappedTechs: ["jest"] });
+    expect(jest.view.diagnosis?.empty).not.toBeNull();
     const py = viewOf(await fixtureProfile("python-fastapi"));
     expect(py.view.diagnosis?.excluded.map((x) => [x.toolId, x.codes])).toEqual([["mongodb-mcp-server", ["stack-mismatch"]]]);
     const mcp = viewOf(await fixtureProfile("claude-mcp"));

@@ -12,16 +12,18 @@ import {
   type Manifest,
   type RegistryEntry,
 } from "../../src/index";
-import { REPO_ROOT, registryManifestCount, seedEntries } from "../recommendation/helpers";
+import { REPO_ROOT, legacySerenaEntry, registryManifestCount, seedEntries } from "../recommendation/helpers";
 import { pinokioManifest } from "../pinokio/helpers";
 
 /** TASK-054 Registry CI: fast validation(network 0)·remote validation(§4 상한)·workflow 계약. 실제 네트워크 없이 가짜 fetch만 쓴다. */
 const seed = await seedEntries();
+// Serena는 v0.2.1부터 Registry에 없다(지원 중단). PyPI·uvx --from·git 출처 예시로는 테스트 전용 v0.2.0 Manifest를 쓴다.
+const legacySerena = await legacySerenaEntry();
 const scratch = await mkdtemp(path.join(tmpdir(), "openhub-registry-ci-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 afterEach(() => vi.restoreAllMocks());
 const NOW = () => new Date("2026-10-07T00:00:00.000Z");
-const manifestOf = (name: string): Manifest => structuredClone(seed.find((e) => e.manifest.name === name)!.manifest);
+const manifestOf = (name: string): Manifest => structuredClone((seed.find((e) => e.manifest.name === name) ?? (name === "serena" ? legacySerena : undefined))!.manifest);
 const entryOf = (manifest: Manifest): RegistryEntry => ({ file: manifest.category[0] + "/" + manifest.name + ".yaml", directory: manifest.category[0]!, manifest });
 const paths = (m: Manifest) => fastManifestIssues(m).map((i) => i.path);
 let n = 0;

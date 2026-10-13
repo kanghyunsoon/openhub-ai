@@ -109,8 +109,9 @@ describe("v0.2.1 B [A] 설치와 Version State 기록은 하나의 작업 잠금
     for (const operation of ["health", "update"] as const) {
       const req: LifecycleRequest = { operation, toolId: "postgres-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, platform: "linux", includeUser: false, targets: [{ client: "claude-code", scope: "project" }] };
       const built = await planLifecycleRequest(req, env);
-      if (!built.ok) {
-        expect(operation).toBe("update"); // 이 seed의 postgres-mcp는 새 버전이 없어 update 계획이 막힐 수 있다(그 경우 쓰기 0).
+      // 이 seed의 postgres-mcp는 Manifest 버전(0.3.0)으로 고정돼 update가 up-to-date이거나 막힐 수 있다(그 경우 실행·쓰기 0).
+      if (!built.ok || built.planned.plan.status !== "ready") {
+        expect(operation).toBe("update");
         continue;
       }
       const outcome = await requestLifecycleApproval(built.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });

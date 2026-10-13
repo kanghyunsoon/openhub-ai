@@ -18,6 +18,7 @@ import { nodeConfigFs, type ConfigFs } from "../installer/config-writer";
 import { CONFIG_SCOPES, INSTALL_CLIENTS, canonicalize, type ConfigScope, type InstallClient } from "../installer/plan";
 import type { Manifest } from "../manifest/index";
 import { TOKEN_PATTERN, URL_CREDENTIAL_PATTERN } from "../recommendation/index";
+import { withdrawnManifestError } from "../registry/withdrawn";
 import { PINOKIO_SCRIPT_NAMES, compilePinokioScripts, parseScriptArgs, pinokioAppId, pinokioRef, readPinokioTemplate, validateScriptPath, type PinokioScriptArg, type PinokioScriptName, type PinokioTemplateSpec } from "./compiler";
 import { loopbackGet } from "./http";
 import { PINOKIO_BASE_URL, PTERM_SUPPORTED_VERSION, isSupportedPinokioVersion, probePinokio, type PinokioProbeEnv, type PinokioVersions, type PtermEntry } from "./probe";
@@ -237,7 +238,8 @@ export type PinokioPlanErrorCode =
   | "PINOKIO_NOT_INSTALLED"
   | "PINOKIO_NO_PREVIOUS"
   | "PINOKIO_CONFIG_UNSUPPORTED"
-  | "PINOKIO_STATE_INVALID";
+  | "PINOKIO_STATE_INVALID"
+  | "TOOL_WITHDRAWN";
 export type PinokioPlanResult = { ok: true; planned: PlannedPinokio } | { ok: false; code: PinokioPlanErrorCode; message: string };
 
 const RUN_SCRIPT: Readonly<Record<PinokioOperation, PinokioScriptName>> = { install: "openhub-install.js", update: "openhub-update.js", rollback: "openhub-update.js", health: "openhub-start.js" };
@@ -251,6 +253,9 @@ interface Prechecked {
 
 /** 입력 경계만 검사한다(I/O 없음). 실패하면 이후 probe·파일 읽기·Plan 생성이 없다. */
 export function precheckPinokioRequest(request: PinokioPlanRequest): { ok: true; value: Prechecked } | { ok: false; code: PinokioPlanErrorCode; message: string } {
+  // 지원 중단 도구(v0.2.1 #39): 직접 넘긴 Manifest라도 identity가 같으면 install·update·rollback·health 계획을 만들지 않는다.
+  const withdrawn = withdrawnManifestError(request.manifest);
+  if (withdrawn !== undefined) return withdrawn;
   const app = pinokioAppId(request.manifest.name);
   if (!app.ok) return { ok: false, code: app.code, message: app.reason };
   const ref = pinokioRef(request.manifest.name);

@@ -33,7 +33,7 @@ sha256sum -c SHA256SUMS --ignore-missing
 | 설치할 도구 | 필요한 프로그램 | 확인 방법 |
 | --- | --- | --- |
 | Memory MCP, Context7, Playwright MCP, Chrome DevTools MCP, MongoDB MCP Server, Kubernetes MCP Server | [Node.js](https://nodejs.org/)(npm·npx 포함) | `npx --version` |
-| Postgres MCP Pro, Serena | [uv](https://docs.astral.sh/uv/)(uvx 포함) | `uvx --version` |
+| Postgres MCP Pro(Serena는 v0.2.0만, 아래 참고) | [uv](https://docs.astral.sh/uv/)(uvx 포함) | `uvx --version` |
 | GitHub MCP Server(uv가 없을 때 Postgres MCP Pro) | [Docker](https://docs.docker.com/get-docker/), 실행 중 | `docker info` |
 
 AI Client(Claude Code·Codex·Cursor) 중 하나도 있어야 합니다. 필요한 프로그램이 없으면 설치 계획이 어떤 backend를 찾지 못했는지 알려 주고 아무것도 바꾸지 않습니다.
@@ -122,8 +122,9 @@ Pinokio 지원은 pterm 0.0.25 기준입니다. 기본 테스트는 가짜 pinok
 | 중단된 업데이트·롤백·복구 | 항목을 직접 고침(알려진 문제 참고) | `openhub lifecycle recover <toolId>`(CLI), 승인 후 복구 |
 | 중단된 작업의 Desktop 안내 | 중단으로 인식하지 못함(config-drift로 보임) | 정확한 명령·CLI 받는 방법·확인 방법 |
 | OpenHub 창·터미널 두 개가 동시에 도구 변경 | 기록이 사라질 수 있음 | 한 번에 하나(`OPERATION_IN_PROGRESS`) |
-| Health·Benchmark가 MCP 서버에 넘기는 환경 | 내 환경 전체 | 예정: OS 변수와 도구가 선언한 변수만(리뷰 중) |
-| Windows에서 uvx 도구(Postgres MCP Pro, Serena) 첫 실행 | Health 시간 제한에 걸릴 수 있음 | 예정: Health 전에 패키지 준비(리뷰 중) |
+| Health·Benchmark가 MCP 서버에 넘기는 환경 | 내 환경 전체 | OS·경로 변수, 프록시·CA, backend 자체 설정, 도구가 선언한 변수만. 환경변수의 패키지 index·registry 설정을 그대로 넘길 수 없으면(예: 인증 정보가 든 URL) Health·Benchmark를 실행하지 않습니다. 그런 설정은 `uv.toml`·`.npmrc`에 두세요([보안 모델](docs/security-model.md)) |
+| Windows에서 Postgres MCP Pro 첫 실행 | Health 시간 제한에 걸릴 수 있음 | 정확한 버전(`postgres-mcp==0.3.0`, `mcp==1.30.0`, wheel만)을 설정 쓰기 전에 준비하고, Client도 `--no-build`로 실행합니다 |
+| Serena | 설치 가능. Client가 첫 실행 때 의존성(`proxy-tools`)을 소스에서 빌드 | **새 설치·업데이트·롤백·Health·repair·편입(adopt)·Benchmark를 하지 않습니다**: 그 빌드를 검증할 수 없습니다. 기존 Serena 항목과 Version State는 그대로 두고 지원 중단으로 표시하며, 중단된 작업은 복구할 수 있습니다. 원하면 [수동 제거 절차](#도구와-openhub-제거)로 지우세요. 재지원: [#59](https://github.com/kanghyunsoon/openhub-ai/issues/59) |
 
 ## 데모
 

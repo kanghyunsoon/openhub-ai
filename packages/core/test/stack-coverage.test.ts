@@ -121,23 +121,25 @@ describe("A. 스택 인식: 파일·의존성 근거로만 판정한다", () => 
 });
 
 describe("B·C·D. Need·Registry·추천: 인식한 기술이 추천까지 이어지고 없는 도구를 만들지 않는다", () => {
-  it("Go: 코드 탐색 need가 생기고 Serena만 추천한다(이전: 인식 0·추천 0)", async () => {
-    const { report } = await analyze("go-service");
+  // v0.2.1 #39: 코드 탐색·편집 도구였던 serena는 지원 중단으로 Registry에서 빠졌다. need는 그대로 생기고, 검증된 도구가 없다는 이유를 남긴다.
+  it("Go: 코드 탐색 need가 생기지만 Verified Registry에 도구가 없어(serena 지원 중단) 추천하지 않고 이유를 남긴다", async () => {
+    const { profile, report } = await analyze("go-service");
     expect(needs(report)).toEqual(["code-editing:low", "semantic-code-navigation:medium"]);
     expect(needOf(report, "semantic-code-navigation")?.sources.map((s) => s.itemId)).toEqual(["go"]);
-    expect(recs(report)).toEqual(["serena"]);
+    expect(recs(report)).toEqual([]);
+    expect(diagnoseRecommendation(profile, report)).toMatchObject({ emptyReason: "no-verified-tool", needsWithoutVerifiedTool: ["code-editing", "semantic-code-navigation"] });
   });
 
-  it("Express: PostgreSQL·라이브러리 문서·코드 탐색을 추천하고 브라우저·E2E 도구는 추천하지 않는다", async () => {
+  it("Express: PostgreSQL·라이브러리 문서를 추천하고 브라우저·E2E 도구는 추천하지 않는다(코드 탐색은 검증된 도구 없음)", async () => {
     const { report } = await analyze("express-postgres-ts");
     expect(needOf(report, "library-docs")?.sources.map((s) => s.itemId)).toEqual(["express"]);
-    expect(recs(report)).toEqual(["context7", "postgres-mcp", "serena"]);
+    expect(recs(report)).toEqual(["context7", "postgres-mcp"]);
   });
 
-  it("NestJS: 라이브러리 문서와 코드 탐색을 추천한다", async () => {
+  it("NestJS: 라이브러리 문서를 추천한다(코드 탐색은 검증된 도구 없음)", async () => {
     const { report } = await analyze("nestjs-app");
     expect(needOf(report, "library-docs")?.sources.map((s) => s.itemId)).toEqual(["nestjs"]);
-    expect(recs(report)).toEqual(["context7", "serena"]);
+    expect(recs(report)).toEqual(["context7"]);
   });
 
   it("Unity·Unreal: 게임 엔진 에디터 연동 need는 생기지만 Verified Registry에 도구가 없어 추천을 만들지 않고 이유를 남긴다", async () => {
@@ -147,7 +149,7 @@ describe("B·C·D. Need·Registry·추천: 인식한 기술이 추천까지 이�
       expect(need?.priority, name).toBe("high");
       expect(need?.candidates, name).toEqual([]);
       expect(need?.reasons.map((r) => r.code), name).toContain("no-candidate");
-      expect(recs(report), name).toEqual(["serena"]);
+      expect(recs(report), name).toEqual([]);
       expect(diagnoseRecommendation(profile, report).needsWithoutVerifiedTool, name).toContain("game-engine-editor");
     }
   });
@@ -179,12 +181,12 @@ describe("B·C·D. Need·Registry·추천: 인식한 기술이 추천까지 이�
     const py = await analyze("pytest-app");
     expect(diagnoseRecommendation(py.profile, py.report).unmappedTechs).toEqual(["pytest"]);
     const full = await analyze("express-postgres-ts");
-    expect(diagnoseRecommendation(full.profile, full.report)).toMatchObject({ emptyReason: null, unmappedTechs: ["jest"], needsWithoutVerifiedTool: [] });
+    expect(diagnoseRecommendation(full.profile, full.report)).toMatchObject({ emptyReason: null, unmappedTechs: ["jest"], needsWithoutVerifiedTool: ["code-editing", "semantic-code-navigation"] });
   });
 
-  it("기존 React + Spring 모노레포의 추천은 바뀌지 않는다", async () => {
+  it("기존 React + Spring 모노레포의 추천은 serena(지원 중단)만 빠지고 나머지는 그대로다", async () => {
     const { report } = await analyze("react-spring-monorepo");
-    expect(recs(report)).toEqual(["chrome-devtools-mcp", "context7", "github-mcp-server", "playwright-mcp", "serena"]);
+    expect(recs(report)).toEqual(["chrome-devtools-mcp", "context7", "github-mcp-server", "playwright-mcp"]);
   });
 });
 

@@ -4,6 +4,7 @@ import {
   REVIEWED_TOOL_CONFIGS,
   installTargetChange,
   toolConfigVerificationGaps,
+  withdrawnToolOf,
   type ApprovalRequirement,
   type InstallPlanV1,
   type InstallResultV1,
@@ -112,6 +113,9 @@ const BLOCKER_EN: Readonly<Record<string, string>> = {
   PLAN_NOT_EXECUTABLE: "This plan cannot be executed.",
   PLAN_STALE: "The plan changed after approval.",
   TOOL_NOT_FOUND: "This tool is not in the Registry.",
+  // v0.2.1 #39: 지원 중단 도구. 도구별 사유·Issue는 한국어 Core 문장과 README·Known Issues에 있다.
+  TOOL_WITHDRAWN:
+    "This tool is no longer supported for new installs, updates, rollback, Health, repair, adopt or Benchmark (for example Serena since v0.2.1, which needs an unreviewed source build). Your client configuration and Version State were not changed. An interrupted operation can still be recovered with openhub lifecycle recover; to remove the tool, follow the manual removal steps in the README.",
   USER_SCOPE_NOT_APPROVED: "The user-scope configuration change (user-scope-config) was not approved.",
   CONFIG_WRITE_FAILED: "The configuration file could not be changed. The original file was kept.",
   CONFIG_RESTORE_FAILED: "The original configuration could not be fully restored. Check the configuration file before trying again.",
@@ -464,6 +468,8 @@ const LAUNCHER_REASON_EN: Readonly<Record<string, string>> = {};
 export function statusItemEn(item: LifecycleToolStatus, formatTime: (iso: string) => string): string[] {
   const head = item.serverName + " · " + clientName(item.client) + " · " + item.scope + " (" + item.file + ")";
   const lines = [head, "  Tool       " + (item.toolId ?? "(not identified)"), "  State      " + STATE_EN[item.state]];
+  const withdrawn = item.toolId === null ? undefined : withdrawnToolOf(item.toolId);
+  if (withdrawn !== undefined) lines.push("  Withdrawn  no new installs, updates or Health since v" + withdrawn.since + ". Configuration and State are kept; an interrupted operation can still be recovered with recover (" + withdrawn.issue + ")");
   if (item.diagnostics !== undefined) lines.push("  Also found " + item.diagnostics.slice(1).join(", "));
   if (item.launcher !== undefined) lines.push("  Launch path invalid: " + (LAUNCHER_REASON_EN[item.launcher.reason] ?? "the recorded node.exe or npx-cli.js could not be verified") + " (not fixed automatically)");
   if (item.artifact !== null) {

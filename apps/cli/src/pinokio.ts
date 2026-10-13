@@ -10,6 +10,7 @@ import {
   formatRegistryIssue,
   loadRegistry,
   planPinokio,
+  resolveRegistryTool,
   requestPinokioApproval,
   resolveGitHubToken,
   serializePinokioPlan,
@@ -128,11 +129,12 @@ export async function runPinokioInstall(argv: readonly string[], io: PinokioComm
   }
   const { entries, issues } = await loadRegistry(registryDirOf(io));
   for (const issue of issues) io.err("경고: " + formatRegistryIssue(issue));
-  const manifest = entries.find((e) => e.manifest.name === toolId)?.manifest;
-  if (manifest === undefined) {
-    io.err("Registry에 없는 Tool입니다. openhub registry list로 Tool ID를 확인하세요.");
+  const found = resolveRegistryTool(entries, toolId);
+  if (!found.ok) {
+    io.err(found.code === "TOOL_WITHDRAWN" ? found.message : "Registry에 없는 Tool입니다. openhub registry list로 Tool ID를 확인하세요.");
     return 2;
   }
+  const manifest = found.entry.manifest;
   const homeDir = io.homeDir ?? os.homedir();
   const projectRoot = path.resolve(io.cwd, v.project ?? ".");
   const probe: PinokioProbeEnv = {

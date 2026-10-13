@@ -205,14 +205,20 @@ describe("REQ-031 REQ-033 Process Executor와 npx·uvx·docker Adapter", () => {
     expect(src).not.toMatch(/\benv\s*:/u);
   });
 
-  it("AC-031-06 준비 단계는 npx·uvx 0개(launch-on-demand), docker는 docker pull 1개이고 npm·cache add·cmd.exe가 0건이다", async () => {
+  it("AC-031-06 준비 단계는 floating npx 0개(launch-on-demand), 정확한 버전 uvx는 uvx Prepare 1개(v0.2.1), docker는 docker pull 1개이고 npm·cache add·cmd.exe가 0건이다", async () => {
     const spawner = fakeSpawner();
-    for (const toolId of ["memory-mcp", "context7", "postgres-mcp", "serena"]) {
+    for (const toolId of ["memory-mcp", "context7"]) {
       const verified = await verifiedOf(toolId);
       expect(verified.plan.artifact?.preparation, toolId).toBe("launch-on-demand");
       expect(await executeVerifiedPlan(verified, { projectRoot: scratch, spawner, isolatedDir: isolated })).toMatchObject({ ok: true, prepared: true });
     }
     expect(spawner.calls).toEqual([]);
+    // v0.2.1: postgres-mcp는 정확한 버전으로 고정돼 uvx Prepare 단계 하나만 있다(패키지 매니저 명령·persistent install 없음).
+    for (const toolId of ["postgres-mcp"]) {
+      const verified = await verifiedOf(toolId);
+      expect(verified.plan.artifact?.preparation, toolId).toBe("uv-cache");
+      expect(verified.plan.steps.filter((s) => s.kind === "run").map((s) => (s.kind === "run" ? s.executable : "")), toolId).toEqual(["uvx"]);
+    }
     const docker = await verifiedOf("github-mcp-server");
     expect(docker.plan.artifact?.preparation).toBe("pull");
     await executeVerifiedPlan(docker, { projectRoot: scratch, spawner, isolatedDir: isolated });

@@ -17,7 +17,7 @@ import {
   type RegistryEntry,
 } from "../../src/index";
 import { approveAll, createHarness, plannedOf } from "../installer/harness";
-import { seedEntries } from "../recommendation/helpers";
+import { legacySerenaEntry, seedEntries } from "../recommendation/helpers";
 
 /**
  * v0.2.1 uvx Prepare 실제 E2E(OPENHUB_E2E=1 그리고 OPENHUB_UVX_E2E=1에서만). 실제 uv·PyPI·네트워크를 쓰고 uv cache는 매번 새 임시
@@ -29,7 +29,8 @@ const DB = process.env["OPENHUB_UVX_E2E_DATABASE_URI"];
 const platform = process.platform === "win32" ? ("windows" as const) : ("linux" as const);
 const CLAUDE = [{ client: "claude-code" as const, scope: "project" as const }];
 const SOURCE = { build: "source-build-reviewed", sourceBuild: [{ package: "proxy-tools", version: "0.1.0", source: "pypi-sdist", sha256: "ccb3751f529c047e2d8a58440d86b205303cf0fe8146f784d1cbcd94f0a28010" }] };
-const seed = skip ? [] : await seedEntries();
+// v0.2.1 #39: serena는 Registry에서 빠졌다(지원 중단). 소스 빌드 차단을 실제 uv로 재현하는 테스트는 테스트 전용 v0.2.0 Serena Manifest를 쓴다.
+const seed = skip ? [] : [...(await seedEntries()), await legacySerenaEntry()];
 const override = (name: string, options: Record<string, unknown>): RegistryEntry[] =>
   seed.map((e) => (e.manifest.name === name ? { ...e, manifest: { ...e.manifest, install: { ...e.manifest.install, options } } } : e));
 

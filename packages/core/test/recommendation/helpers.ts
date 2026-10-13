@@ -97,6 +97,17 @@ export async function seedEntries(): Promise<RegistryEntry[]> {
 }
 
 /**
+ * v0.2.0 Registry의 Serena Manifest(테스트 전용 fixture, v0.2.1 #39). 실제 registry/에는 없다(지원 중단 도구).
+ * uvx --from 식별·Registry 검사 예시와 "예전에 설치된 Serena" 호환 테스트에만 쓴다.
+ */
+export async function legacySerenaEntry(): Promise<RegistryEntry> {
+  const { entries, issues } = await loadRegistry(path.join(REPO_ROOT, "packages", "core", "test", "fixtures", "registry-legacy"));
+  const serena = entries.find((e) => e.manifest.name === "serena");
+  if (issues.length > 0 || serena === undefined) throw new Error("legacy serena fixture 검증 실패");
+  return serena;
+}
+
+/**
  * registry/<category>/<name>.yaml Manifest 파일 수. v0.2.0 P0-2부터 Registry가 묶음 단위로 늘어나므로
  * 테스트는 "7개" 같은 숫자 대신 디스크의 Manifest 수와 비교한다(loader 결과와 독립된 기준).
  */

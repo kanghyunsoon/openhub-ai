@@ -82,8 +82,8 @@ verification: community
 describe("REQ-060 Catalog Metadata v1과 Trend Score", () => {
   it("AC-061-01 catalog는 Manifest와 1:1이며 누락 entry와 orphan entry는 각각 fast validation 오류다", async () => {
     expect(await catalogIssues(await registryCopy())).toEqual([]);
-    const missing = await registryCopy((r) => setCatalog(r, nullLines(TOOLS.filter((t) => t !== "serena"))));
-    expect((await catalogIssues(missing)).map((i) => i.path)).toEqual(["tools.serena"]);
+    const missing = await registryCopy((r) => setCatalog(r, nullLines(TOOLS.filter((t) => t !== "postgres-mcp"))));
+    expect((await catalogIssues(missing)).map((i) => i.path)).toEqual(["tools.postgres-mcp"]);
     const orphan = await registryCopy((r) => setCatalog(r, nullLines([...TOOLS, "ghost-mcp"])));
     const o = await catalogIssues(orphan);
     expect(o.map((i) => i.path)).toEqual(["tools.ghost-mcp"]);
@@ -94,7 +94,7 @@ describe("REQ-060 Catalog Metadata v1과 Trend Score", () => {
     const out: string[] = [];
     const io = { out: (l: string) => out.push(l), err: (l: string) => out.push(l), cwd: REPO_ROOT, version: "test", now: () => ASOF };
     expect(await runCli(["registry", "validate", "--dir", missing], io)).toBe(1);
-    expect(out.join("\n")).toContain("catalog.yaml: tools.serena");
+    expect(out.join("\n")).toContain("catalog.yaml: tools.postgres-mcp");
     expect(await runCli(["registry", "validate", "--dir", path.join(REPO_ROOT, "registry")], { ...io, out: () => {}, err: () => {} })).toBe(0);
   });
 
@@ -137,9 +137,9 @@ describe("REQ-060 Catalog Metadata v1과 Trend Score", () => {
   });
 
   it("AC-061-06 archived는 빠지고 metadata가 없으면 score null로 목록 끝에 metadata unavailable로 표시된다", () => {
-    const items = trendingTools(seed, snapshotOf({ [repoOf("context7")]: meta(5000, { archived: true }), [repoOf("serena")]: meta(10) }));
+    const items = trendingTools(seed, snapshotOf({ [repoOf("context7")]: meta(5000, { archived: true }), [repoOf("postgres-mcp")]: meta(10) }));
     expect(items.map((i) => i.toolId)).not.toContain("context7");
-    expect(items[0]!.toolId).toBe("serena");
+    expect(items[0]!.toolId).toBe("postgres-mcp");
     expect(items.slice(1).every((i) => i.score === null && i.status === "metadata-unavailable")).toBe(true);
     expect(formatTrendItem(items[1]!, 2)).toContain("metadata unavailable");
   });
@@ -154,12 +154,12 @@ describe("REQ-060 Catalog Metadata v1과 Trend Score", () => {
   it("AC-061-08 정렬은 score → stars → toolId이고 입력 순서를 바꿔도 같은 byte다", () => {
     const snap = snapshotOf({
       [repoOf("context7")]: meta(999, { pushedAt: daysAgo(1) }),
-      [repoOf("serena")]: meta(999, { pushedAt: daysAgo(1) }),
+      [repoOf("postgres-mcp")]: meta(999, { pushedAt: daysAgo(1) }),
       [repoOf("chrome-devtools-mcp")]: meta(1000, { pushedAt: daysAgo(1) }),
       [repoOf("playwright-mcp")]: meta(99999, { releaseAt: daysAgo(3), pushedAt: daysAgo(1) }),
     });
     const a = trendingTools(seed, snap);
-    expect(a.slice(0, 4).map((i) => [i.toolId, i.score])).toEqual([["playwright-mcp", 100], ["chrome-devtools-mcp", 55], ["context7", 55], ["serena", 55]]);
+    expect(a.slice(0, 4).map((i) => [i.toolId, i.score])).toEqual([["playwright-mcp", 100], ["chrome-devtools-mcp", 55], ["context7", 55], ["postgres-mcp", 55]]);
     expect(JSON.stringify(trendingTools([...seed].reverse(), snap))).toBe(JSON.stringify(a));
   });
 
@@ -182,9 +182,9 @@ describe("REQ-060 Catalog Metadata v1과 Trend Score", () => {
   });
 
   it("AC-061-11 같은 toolId가 catalog에 두 번 있으면 fast validation 오류다", async () => {
-    const dup = parseCatalogText("schemaVersion: 1\nkind: openhub-registry-catalog\ntools:\n  serena: { addedAt: null }\n  serena: { addedAt: \"2026-01-01\" }\n");
+    const dup = parseCatalogText("schemaVersion: 1\nkind: openhub-registry-catalog\ntools:\n  postgres-mcp: { addedAt: null }\n  postgres-mcp: { addedAt: \"2026-01-01\" }\n");
     expect(dup.ok).toBe(false);
-    const root = await registryCopy((r) => setCatalog(r, nullLines(TOOLS) + "  serena: { addedAt: null }\n"));
+    const root = await registryCopy((r) => setCatalog(r, nullLines(TOOLS) + "  postgres-mcp: { addedAt: null }\n"));
     const issues = await catalogIssues(root);
     expect(issues.length).toBe(1);
     expect(issues[0]!.message).toContain("두 번");

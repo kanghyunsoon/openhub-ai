@@ -6,6 +6,7 @@ import { INSTALL_BACKENDS, type InstallBackend } from "../installer/plan";
 import type { InstallStep, Manifest } from "../manifest/index";
 import { readPinokioTemplate } from "../pinokio/compiler";
 import { loadRegistry, type RegistryEntry, type RegistryIssue } from "../registry/load";
+import { withdrawnToolOf } from "../registry/withdrawn";
 import { toolConfigIssues } from "../tool-config/index";
 
 /**
@@ -107,6 +108,10 @@ export async function validateRegistry(root: string, options: ValidateRegistryOp
   const loaded = await loadRegistry(root);
   const checked = checkRegistryConsistency(loaded.entries);
   const issues = [...loaded.issues, ...checked.issues];
+  // 지원 중단 도구(v0.2.1 #39)의 Manifest가 다시 들어오면 오류다. 재지원은 목록에서 빼는 리뷰(Issue)로만 한다.
+  for (const e of loaded.entries) {
+    if (withdrawnToolOf(e.manifest.name) !== undefined) issues.push({ file: e.file, path: "name", message: e.manifest.name + "는 지원 중단 도구입니다(WITHDRAWN_TOOLS). Registry에 다시 넣으려면 지원 중단 목록을 먼저 검토·변경하세요" });
+  }
   if (options.catalog !== undefined) {
     const catalog = await loadCatalog(root);
     // 1:1 비교는 schema를 통과한 Manifest 전체 기준이다(fast 정합성 실패로 빠진 Manifest도 catalog entry가 있어야 한다).

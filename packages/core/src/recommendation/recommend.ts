@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { PROFILE_CATEGORIES, type ProjectProfile } from "../analyzer/index";
 import type { RegistryEntry } from "../registry/index";
+import { withdrawnManifestOf } from "../registry/withdrawn";
 import { matchCandidates, type ToolEvaluation } from "./candidates";
 import type { RecommendContext } from "./compatibility";
 import { explainNeed, explainRecommendation } from "./explain";
@@ -78,7 +79,8 @@ export function recommend(profile: ProjectProfile, entries: readonly RegistryEnt
   const hints = options.identityHints ?? [];
   const installed = resolveInstalledTools(profile, entries, hints);
   const gaps = classifyGaps(profile, deriveNeeds(profile), installed);
-  const match = matchCandidates(profile, gaps, installed, entries, context);
+  // 지원 중단 도구(v0.2.1 #39)는 사용자 Registry에 있어도 추천 후보가 아니다(설치할 수 있는 것처럼 보이지 않게). 설치된 항목 식별은 그대로다.
+  const match = matchCandidates(profile, gaps, installed, entries.filter((e) => withdrawnManifestOf(e.manifest) === undefined), context);
 
   const ranked = rankRecommendations(
     match.tools.map((evaluation) => {

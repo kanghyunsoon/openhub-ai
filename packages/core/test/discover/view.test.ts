@@ -135,9 +135,10 @@ describe("REQ-060 DiscoverView와 New for your project", () => {
   });
 
   it("AC-062-07 Verified Registry는 draft를 빼고 addedAt null Tool을 포함한다", () => {
-    const draftEntries = seed.map((e) => (e.manifest.name === "serena" ? { ...e, manifest: { ...e.manifest, verification: "draft" as const } } : e));
+    // draft로 바꿀 도구는 임의의 Registry 도구다(v0.2.1 #39: serena는 Registry에서 빠졌다).
+    const draftEntries = seed.map((e) => (e.manifest.name === "context7" ? { ...e, manifest: { ...e.manifest, verification: "draft" as const } } : e));
     const v = buildDiscoverView(input({ entries: draftEntries }));
-    expect(v.sections.verified.map((i) => i.toolId)).not.toContain("serena");
+    expect(v.sections.verified.map((i) => i.toolId)).not.toContain("context7");
     expect(v.sections.verified.length).toBe(seed.length - 1);
     expect(v.sections.verified.every((i) => i.addedAt === null)).toBe(true);
   });

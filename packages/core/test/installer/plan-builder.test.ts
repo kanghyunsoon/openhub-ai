@@ -124,7 +124,7 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     expect(tokenizeManifestCommand("npx ~/evil", "npx")).toMatchObject({ ok: false });
   });
 
-  it("AC-030-05 seed Registry의 launch spec이 golden과 같다(npx 6, uvx 2, docker 1, linux·windows)", async () => {
+  it("AC-030-05 seed Registry의 launch spec이 golden과 같다(npx 6, uvx 1, docker 1, linux·windows)", async () => {
     // D-016 반영으로 launch에 platform·clientSpec(Client config에 실제 기록될 command/args)이 추가돼 golden을 두 플랫폼으로 갱신했다.
     const specsFor = (platform: "linux" | "windows") =>
       Object.fromEntries(
@@ -137,7 +137,8 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     const counts = Object.values(linux).reduce<Record<string, number>>((acc, s) => ((acc[s.backend ?? "none"] = (acc[s.backend ?? "none"] ?? 0) + 1), acc), {});
     // v0.2.0 P0-2: mongodb-mcp-server(npx, 정확한 버전) 추가. 기존 7개 항목은 그대로다.
     // v0.2.0 P0-3: kubernetes-mcp-server(npx, 정확한 버전 + 검토된 toolConfig) 추가. 기존 8개 항목은 그대로다.
-    expect(counts).toEqual({ npx: 6, uvx: 2, docker: 1 });
+    // v0.2.1 #39: serena(uvx)는 지원 중단 도구라 Registry에서 빠졌다.
+    expect(counts).toEqual({ npx: 6, uvx: 1, docker: 1 });
     await expectInstallerGolden("seed-launch-specs.json", json({ linux, windows: specsFor("windows") }));
   });
 
@@ -162,7 +163,8 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     const uvx = planned(buildInstallPlan({ toolId: "postgres-mcp", entries: seed, report: reportFor(postgresProfile(), seed), probes: ALL_AVAILABLE, targets: [target("claude-code"), target("codex")], platform: "linux" })).plan;
     const docker = planned(build("github-mcp-server", { targets: [target("cursor")] })).plan;
     expect(npx.steps.map((s) => s.kind)).toEqual(["config-patch"]);
-    expect(uvx.steps.map((s) => s.kind)).toEqual(["config-patch", "config-patch"]);
+    // v0.2.1: postgres-mcp는 정확한 버전이라 uvx Prepare(run) 뒤에 설정을 쓴다.
+    expect(uvx.steps.map((s) => s.kind)).toEqual(["run", "config-patch", "config-patch"]);
     expect(docker.steps.map((s) => s.kind)).toEqual(["run", "config-patch"]);
     await expectInstallerGolden("representative-steps.json", json({ npx: npx.steps, uvx: uvx.steps, docker: docker.steps }));
   });
@@ -204,8 +206,9 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     expect(Object.values(seedArtifacts).every((a) => a !== null)).toBe(true);
     // v0.2.0 P0-2: mongodb-mcp-server는 npx pkg@X.Y.Z로 고정한 첫 seed다(npx Prepare 대상). 나머지 7개는 그대로 floating이다.
     // v0.2.0 P0-3: kubernetes-mcp-server도 kubernetes-mcp-server@0.0.67로 고정한다(검토된 toolConfig 버전).
+    // v0.2.1: postgres-mcp(0.3.0 + mcp 1.30.0)를 검토된 정확한 버전으로 고정한다(uvx Prepare 대상). serena는 지원 중단으로 Registry에서 빠졌다.
     const pinnedIds = SEED_IDS.filter((id) => seedArtifacts[id]!.pinned);
-    expect(pinnedIds).toEqual(["kubernetes-mcp-server", "mongodb-mcp-server"]);
+    expect(pinnedIds).toEqual(["kubernetes-mcp-server", "mongodb-mcp-server", "postgres-mcp"]);
     for (const id of SEED_IDS) {
       const requirements = planned(build(id)).plan.approvalRequirements;
       if (pinnedIds.includes(id)) expect(requirements, id).not.toContain("floating-artifact");
@@ -227,7 +230,7 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
       for (const row of configValues(platform)) expect(row.slice(1)).toEqual(["npx", "-y", "@modelcontextprotocol/server-memory"]);
     }
     // uvx·docker는 Windows에서도 바뀌지 않는다.
-    expect(configValues("windows", "serena").map((r) => r[1])).toEqual(["uvx", "uvx", "uvx"]);
+    expect(configValues("windows", "postgres-mcp").map((r) => r[1])).toEqual(["uvx", "uvx", "uvx"]);
     expect(configValues("windows", "github-mcp-server").map((r) => r[1])).toEqual(["docker", "docker", "docker"]);
     const win = planned(build("memory-mcp", { platform: "windows", targets })).plan;
     expect(win.launch).toMatchObject({ platform: "windows", executable: "npx", args: ["-y", "@modelcontextprotocol/server-memory"], clientSpec: { command: "cmd" } });

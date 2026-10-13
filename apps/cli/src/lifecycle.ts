@@ -16,6 +16,7 @@ import {
   loadRegistry,
   locateWindowsNpxLauncher,
   npmChildEnv,
+  resolveRegistryTool,
   uvChildEnv,
   planLifecycleRequest,
   probeBackends,
@@ -294,8 +295,10 @@ export async function runLifecycleOperation(operation: LifecycleOperation, argv:
     return 3;
   }
   const entries = await registryOf(io);
-  if (!entries.some((e) => e.manifest.name === toolId)) {
-    io.err("Registry에 없는 Tool입니다. openhub registry list로 Tool ID를 확인하세요.");
+  // v0.2.1 #39 리뷰: 지원 중단 도구(update·rollback·health·repair)는 Core 판정의 사유(TOOL_WITHDRAWN)를 그대로 보여 준다.
+  const found = resolveRegistryTool(entries, toolId);
+  if (!found.ok) {
+    io.err(found.code === "TOOL_WITHDRAWN" ? found.message : "Registry에 없는 Tool입니다. openhub registry list로 Tool ID를 확인하세요.");
     return 2;
   }
   const platform = toRecommendPlatform(io.platform ?? process.platform);
@@ -321,8 +324,9 @@ export async function runLifecycleOperation(operation: LifecycleOperation, argv:
     else if (built.code === "NOT_MANAGED") io.err("Version State에 이 프로젝트의 " + toolId + " 기록이 없습니다. openhub install로 설치한 도구만 다룹니다.");
     else if (built.code === "NO_ROLLBACK_TARGET") io.err("되돌릴 직전 버전이 없습니다(update를 한 번 이상 성공한 뒤에만 롤백할 수 있습니다).");
     else if (RESOLVER_CODES.has(built.code)) io.err("registry에서 버전을 확인하지 못했습니다 (" + built.code + "). " + built.message);
+    else if (built.code === "TOOL_WITHDRAWN") io.err(built.message);
     else io.err("계획을 만들지 못했습니다 (" + built.code + "). " + built.message);
-    return built.code === "HEALTH_SKIP_NOT_ALLOWED" || built.code === "INVALID_TARGET_VERSION" || built.code === "TOOL_NOT_FOUND" ? 2 : 1;
+    return built.code === "HEALTH_SKIP_NOT_ALLOWED" || built.code === "INVALID_TARGET_VERSION" || built.code === "TOOL_NOT_FOUND" || built.code === "TOOL_WITHDRAWN" ? 2 : 1;
   }
   const planned = built.planned;
   if (values.json) {

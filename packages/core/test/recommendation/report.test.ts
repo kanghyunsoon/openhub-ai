@@ -178,6 +178,8 @@ describe("REQ-022 Recommendation Ranker와 Report 계약", () => {
     const a = recommend(p, seed, undefined).recommendations.map((r) => [r.toolId, r.primaryCapability]);
     const b = recommend(shuffleProfile(p), shuffled(seed), undefined).recommendations.map((r) => [r.toolId, r.primaryCapability]);
     expect(b).toEqual(a);
-    expect(Object.fromEntries(a)).toMatchObject({ "playwright-mcp": "browser-automation", "chrome-devtools-mcp": "browser-automation", serena: "semantic-code-navigation" });
+    // v0.2.1 #39: serena(semantic-code-navigation)는 지원 중단으로 Registry에서 빠져 추천되지 않는다.
+    expect(Object.fromEntries(a)).toMatchObject({ "playwright-mcp": "browser-automation", "chrome-devtools-mcp": "browser-automation" });
+    expect(Object.keys(Object.fromEntries(a))).not.toContain("serena");
   });
 });

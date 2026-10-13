@@ -17,7 +17,12 @@ env:
 install:
   preferredAdapter: uvx
   options:
-    command: "uvx postgres-mcp --access-mode=restricted"
+    # v0.2.1: postgres-mcp는 mcp[cli]>=1.5.0(상한 없음)이라 빈 uv 캐시에서는 mcp 2.x가 설치되어
+    # "No module named 'mcp.server.fastmcp'"로 시작하지 못한다(Windows·Linux 실측). 검토한 정확한 버전으로 고정한다:
+    # postgres-mcp 0.3.0 + mcp 1.30.0. 모두 정확한 버전이라 uvx Prepare(설정 쓰기 전 uv cache 준비, wheel만)가 켜진다
+    # (docs/specs/uvx-prepare.md D1·D2). artifact는 --from 값이고 update는 그 token만 바꾼다(--to로 정확한 버전 지정).
+    # 뒤의 postgres-mcp는 실행할 명령 이름이다.
+    command: "uvx --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted"
   fallback:
     - adapter: docker
       image: crystaldba/postgres-mcp

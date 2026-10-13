@@ -68,14 +68,7 @@ OpenHub Recommendations — demo-project
     - DB 스키마 조회 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)
     - PostgreSQL 전용 도구와 프로젝트 스택이 일치
     … 이유 8개 더 (--json)
- 4. Serena (serena)  [likely-gap · medium · 의미 기반 코드 탐색]
-    Project Fit 0.79 · OpenScore 0.96
-    Capability  코드 편집, 의미 기반 코드 탐색
-    - Java이(가) pom.xml의 매니페스트(pom.xml)에서 탐지됨 → 의미 기반 코드 탐색 필요
-    - 의미 기반 코드 탐색 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)
-    - Claude Code에서 사용 가능
-    … 이유 6개 더 (--json)
- 5. Context7 (context7)  [likely-gap · medium · 라이브러리 문서 조회]
+ 4. Context7 (context7)  [likely-gap · medium · 라이브러리 문서 조회]
     Project Fit 0.75 · OpenScore 0.96
     Capability  라이브러리 문서 조회
     - React이(가) package.json의 의존성(react)에서 탐지됨 → 라이브러리 문서 조회 필요
@@ -85,6 +78,10 @@ OpenHub Recommendations — demo-project
 
 충족된 Capability
   - 지식 그래프 메모리: memory (프로젝트)
+
+후보 없는 Gap
+  - 코드 편집 [likely-gap]: 등록된 도구 없음: 코드 편집을(를) 제공하는 호환 도구가 Registry에 없음
+  - 의미 기반 코드 탐색 [likely-gap]: 등록된 도구 없음: 의미 기반 코드 탐색을(를) 제공하는 호환 도구가 Registry에 없음
 
 OpenScore는 저장소 유지관리·활동성·커뮤니티 신호이며 보안·코드 품질 평가가 아닙니다
 (exit 0)
@@ -252,11 +249,10 @@ TRENDING — OpenHub Trend Score (historical star growth가 아니라 현재 pop
   2. chrome-devtools-mcp — Trend 96 (popularity 46 · release 25 · activity 25; stars 40000, release 2025-12-12, push 2025-12-29)
   3. playwright-mcp — Trend 94 (popularity 44 · release 25 · activity 25; stars 30000, release 2025-12-26, push 2025-12-26)
   4. github-mcp-server — Trend 93 (popularity 43 · release 25 · activity 25; stars 25000, release 2025-12-20, push 2025-12-31)
-  5. serena — Trend 79 (popularity 43 · release 18 · activity 18; stars 20000, release 2025-10-23, push 2025-12-22)
-  6. memory-mcp — Trend 67 (popularity 24 · release 18 · activity 25; stars 80000, release 2025-11-02, push 2025-12-28, shared-repository)
-  7. postgres-mcp — Trend 43 (popularity 33 · release 0 · activity 10; stars 2500, release 2024-11-27, push 2025-11-17)
-  8. kubernetes-mcp-server — metadata unavailable
-  9. mongodb-mcp-server — metadata unavailable
+  5. memory-mcp — Trend 67 (popularity 24 · release 18 · activity 25; stars 80000, release 2025-11-02, push 2025-12-28, shared-repository)
+  6. postgres-mcp — Trend 43 (popularity 33 · release 0 · activity 10; stars 2500, release 2024-11-27, push 2025-11-17)
+  7. kubernetes-mcp-server — metadata unavailable
+  8. mongodb-mcp-server — metadata unavailable
 (exit 0)
 
 == 10. Benchmark preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)

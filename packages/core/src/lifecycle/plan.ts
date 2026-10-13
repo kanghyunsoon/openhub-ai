@@ -66,6 +66,7 @@ import { PLAN_CHANGE_KINDS } from "../installer/stale";
 import type { Manifest } from "../manifest/index";
 import { TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, type RecommendPlatform } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
+import { resolveRegistryTool } from "../registry/withdrawn";
 import { resolveArtifact, type ResolverErrorCode } from "./resolver";
 import { CLIENT_COMMANDS, artifactIdentitySchema, entryKeyOf, type ArtifactIdentity, type ToolState } from "./state";
 import { configEntryDigest, standardEntries } from "./status";
@@ -470,6 +471,7 @@ export interface LifecyclePlanOptions {
 
 export type LifecyclePlanErrorCode =
   | "TOOL_NOT_FOUND"
+  | "TOOL_WITHDRAWN"
   | "REPAIR_UNSUPPORTED"
   | "NOT_MANAGED"
   | "NO_ROLLBACK_TARGET"
@@ -527,8 +529,11 @@ const stateDigestOf = (states: readonly ToolState[]) =>
  */
 export async function planLifecycle(options: LifecyclePlanOptions): Promise<LifecyclePlanResult> {
   const fs = options.fs ?? nodeConfigFs;
-  const entry = options.entries.find((e) => e.manifest.name === options.toolId);
-  if (entry === undefined) return { ok: false, code: "TOOL_NOT_FOUND", message: "Registry에 없는 Tool입니다" };
+  // 지원 중단 도구(v0.2.1 #39): Registry에 Manifest가 있어도 update·rollback·health·repair를 계획하지 않고 사유를 안내한다.
+  // 상태 조회·Journal Recovery는 이 판정을 거치지 않는다(기존 사용자 보존).
+  const found = resolveRegistryTool(options.entries, options.toolId);
+  if (!found.ok) return found;
+  const entry = found.entry;
   const manifest = entry.manifest;
   const requiredNames = manifest.env.filter((e) => e.required).map((e) => e.name);
   if (options.skipHealth === true && (options.operation === "health" || requiredNames.length === 0)) {
