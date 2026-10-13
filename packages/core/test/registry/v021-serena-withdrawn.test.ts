@@ -270,6 +270,59 @@ describe("v0.2.1 #39 리뷰: 사용자 Registry·직접 넘긴 Manifest의 Seren
     expect(seed.filter((e) => withdrawnManifestOf(e.manifest) !== undefined)).toEqual([]);
   });
 
+  // #39 2차 리뷰: 이름·저장소·MCP alias를 모두 바꾸고 PyPI 패키지만 Serena로 남긴 Manifest. uvx가 실제로 받는 인자 형식(uvx 0.12.3 실측) 전부.
+  it("PyPI 패키지만 Serena인 Manifest를 uvx가 받는 모든 인자 형식(--from=·--with=·-w·-wX·-w=X·-qw·쉼표 목록·위치 인자·--)에서 막는다", async () => {
+    const forms = [
+      "uvx --from=serena-agent==1.7.0 serena start-mcp-server",
+      "uvx --from serena-agent==1.7.0 serena start-mcp-server",
+      "uvx --from=Serena.Agent[extra]==1.7.0 serena start-mcp-server",
+      "uvx --from=serena-agent@1.7.0 serena start-mcp-server",
+      "uvx --with=serena-agent==1.7.0 code-nav",
+      "uvx -w serena-agent==1.7.0 code-nav",
+      "uvx -wserena-agent==1.7.0 code-nav",
+      "uvx -w=serena-agent code-nav",
+      "uvx -qw serena-agent code-nav",
+      "uvx -qwserena-agent code-nav",
+      "uvx --with mcp==1.30.0,serena-agent==1.7.0 code-nav",
+      "uvx serena-agent@1.7.0",
+      "uvx -- serena-agent",
+    ];
+    for (const command of forms) {
+      const entry = renamed("pkg-only", { command });
+      expect(entry.manifest.repository.github, command).toBe("someone/code-nav");
+      expect(entry.manifest.recommendation?.identity?.mcpServerNames, command).toEqual(["pkg-only"]);
+      expect(withdrawnManifestOf(entry.manifest)?.toolId, command).toBe("serena");
+      const h = await createHarness(scratch, { entries: [...seed, entry] });
+      const built = await planInstall(h.request("pkg-only", CURSOR), h.env);
+      expect(built.result, command).toMatchObject({ ok: false, code: "TOOL_WITHDRAWN" });
+      expect(h.writes, command).toEqual([]);
+      expect(precheckPinokioRequest({ operation: "install", manifest: entry.manifest }), command).toMatchObject({ ok: false, code: "TOOL_WITHDRAWN" });
+    }
+  });
+
+  it("정상적인 다른 패키지는 과도하게 막지 않는다(비슷한 이름, 명령 뒤 인자, 실제 Registry). 붙여 쓴 형식은 지원 중단이 아니라 형식 거부다", async () => {
+    const allowed = [
+      "uvx --from serena-agentx==1.0.0 serena start-mcp-server",
+      "uvx --from code-nav==1.0.0 --with serena-agent-tools==1.0.0 code-nav",
+      "uvx --from code-nav==1.0.0 code-nav --model serena",
+      "uvx --from code-nav==1.0.0 code-nav --model serena-agent",
+      "uvx --from my-serena-agent==1.0.0 serena",
+    ];
+    for (const command of allowed) {
+      const entry = renamed("code-nav-ok", { command });
+      expect(withdrawnManifestOf(entry.manifest), command).toBeUndefined();
+      const h = await createHarness(scratch, { entries: [...seed, entry] });
+      expect((await planInstall(h.request("code-nav-ok", CURSOR), h.env)).result, command).toMatchObject({ ok: true });
+    }
+    // uvx는 받지만 OpenHub가 Prepare·update·artifact 판정에서 다루지 않는 형식: 지원 중단이 아니고 MANIFEST_COMMAND_REJECTED로 실행 0
+    const attached = renamed("code-nav-attached", { command: "uvx --from=code-nav==1.0.0 code-nav" });
+    expect(withdrawnManifestOf(attached.manifest)).toBeUndefined();
+    const h = await createHarness(scratch, { entries: [...seed, attached] });
+    expect((await planInstall(h.request("code-nav-attached", CURSOR), h.env)).result).toMatchObject({ ok: false, code: "MANIFEST_COMMAND_REJECTED" });
+    expect(h.writes).toEqual([]);
+    expect(seed.filter((e) => withdrawnManifestOf(e.manifest) !== undefined)).toEqual([]);
+  });
+
   it("직접 넘긴 Serena Manifest로 Pinokio install·update·rollback·health 계획을 만들지 않는다(probe 전에 막는다)", () => {
     for (const operation of ["install", "update", "rollback", "health"] as const) {
       const r = precheckPinokioRequest({ operation, manifest: serenaEntry.manifest });

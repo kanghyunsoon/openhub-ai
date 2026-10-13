@@ -2,6 +2,7 @@ import type { InstallStep, Manifest } from "../manifest/index";
 import type { RecommendPlatform } from "../recommendation/index";
 import type { HealthResult, InstallContext, InstallPlan, InstallResult, InstallTarget, InstallerAdapter, Operation, UpdateResult, ValidationResult } from "./adapter";
 import { isPinnedArtifact, isPinnedPythonSpec, isValidDockerImage, npxArtifact, tokenizeManifestCommand, uvxArtifact } from "./command";
+import { parseUvxArgs } from "../process/uvx-args";
 import type { InstallBackend, InstallPlanV1, RunStep } from "./plan";
 import { NPX_PREPARE_STEP_ID, NPX_PREPARE_TIMEOUT_MS, npxPrepareArgs } from "../process/npx-prepare";
 import { UVX_PREPARE_STEP_ID, UVX_PREPARE_TIMEOUT_MS, normalizePyName, uvxClientLaunchArgs, uvxPrepareArgs, uvxPrepareTarget, type UvxBuildPolicy, type UvxSourceBuildEntry } from "../process/uvx-prepare";
@@ -108,6 +109,14 @@ function planLaunchOnDemand(manifest: Manifest, step: InstallStep, backend: "npx
     const tokens = tokenizeManifestCommand(backend + " " + spec, backend, tokenizeOptions);
     if (!tokens.ok) return { ok: false, kind: "rejected", reason: tokens.reason };
     args = backend === "npx" ? ["-y", spec] : [spec];
+  }
+  // v0.2.1 #39 리뷰: uvx가 받는 모든 인자 형식에서 패키지를 식별할 수 있어야 실행한다. 식별할 수 없는 형식(URL·경로·VCS·파일, --with-editable,
+  // --with-requirements, 알 수 없는 옵션)과 OpenHub가 Prepare·update·artifact 판정에서 다루지 않는 형식(=로 붙여 쓰기, 쉼표 목록, 짧은 옵션
+  // 붙여 쓰기·플래그 묶음, --)은 거부한다. 실행 가능한데 식별만 놓치는 경우를 남기지 않는다.
+  if (backend === "uvx") {
+    const parsed = parseUvxArgs(args);
+    if (!parsed.ok) return { ok: false, kind: "rejected", reason: parsed.reason };
+    if (!parsed.canonical) return { ok: false, kind: "rejected", reason: "uvx 인자는 --from 패키지, --with 의존성처럼 띄어 써야 합니다(=로 붙여 쓰기·쉼표 목록·짧은 옵션 붙여 쓰기·플래그 묶음·--는 지원하지 않습니다)" };
   }
   const ref = backend === "npx" ? npxArtifact(args) : uvxArtifact(args);
   if (ref === null) return { ok: false, kind: "missing", reason: "패키지 token을 찾지 못했습니다" };

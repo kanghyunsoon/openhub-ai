@@ -1,4 +1,5 @@
 import type { Manifest } from "../manifest/index";
+import { parseUvxArgs, pythonRequirementName } from "../process/uvx-args";
 
 /**
  * 지원 중단 도구(v0.2.1 #39, D1). Registry에서 신규 설치 대상을 뺀 도구의 식별 정보만 둔다.
@@ -48,8 +49,8 @@ export function withdrawnToolOf(toolId: string): WithdrawnTool | undefined {
 
 const pep503 = (name: string) => name.toLowerCase().replace(/[-_.]+/gu, "-");
 
-/** 설치 정보의 문자열(명령·패키지·image·옵션 값)을 공백으로 나눈 token. Manifest 형식을 해석하거나 실행하지 않는다. */
-function installTokens(manifest: Manifest): string[] {
+/** 설치 정보의 문자열(명령·패키지·image·옵션 값). Manifest 형식을 해석하거나 실행하지 않는다. */
+function installStrings(manifest: Manifest): string[] {
   const strings: string[] = [];
   const collect = (value: unknown) => {
     if (typeof value === "string") strings.push(value);
@@ -58,11 +59,47 @@ function installTokens(manifest: Manifest): string[] {
   };
   collect(manifest.install.options);
   for (const step of manifest.install.fallback) collect([step.command, step.package, step.image, step.options]);
-  return strings.flatMap((s) => s.split(/\s+/u)).filter((t) => t !== "");
+  return strings;
 }
+
+const tokensOf = (s: string) => s.split(/\s+/u).filter((t) => t !== "");
 
 /** PEP 508 요구사항 앞부분의 패키지 이름("serena-agent==1.7.0", "serena_agent[x]>=1")만 꺼낸다. */
 const requirementName = (token: string) => /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?(?:[=<>!~@;].*)?$/u.exec(token)?.[1];
+
+/** 짧은 플래그 묶음 뒤 값을 받는 uvx 짧은 옵션(`-wX`·`-w=X`·`-qwX`)의 값. */
+const SHORT_ATTACHED = /^-[UnqvVh]*[wcbifPCp]=?(.+)$/u;
+
+/**
+ * 설치 정보에서 패키지 이름 후보를 모은다(v0.2.1 #39 리뷰).
+ * 1) uvx 명령은 설치기와 같은 해석기(parseUvxArgs, uvx clap 규칙: `--from=X`·`-wX`·`-w=X`·쉼표 목록·`--`)로 실제 패키지를 꺼낸다.
+ *    해석에 성공한 명령은 그 패키지만 본다(명령 뒤 인자는 패키지가 아니다).
+ * 2) 해석기가 거부한 명령과 그 밖의 문자열(fallback package 등)은 token을 옵션=값·짧은 옵션 붙여 쓰기·쉼표로 나눠 이름을 본다.
+ *    해석기가 거부한 형식은 설치기도 실행하지 않으므로, 이 검사는 사유 안내를 정확히 하기 위한 보조다.
+ */
+function installPackageNames(manifest: Manifest): string[] {
+  const names: string[] = [];
+  for (const s of installStrings(manifest)) {
+    const tokens = tokensOf(s);
+    if (tokens[0] === "uvx") {
+      const parsed = parseUvxArgs(tokens.slice(1));
+      if (parsed.ok) {
+        for (const spec of parsed.packages) names.push(pythonRequirementName(spec) ?? spec);
+        continue;
+      }
+    }
+    for (const token of tokens) {
+      let value = token;
+      if (token.startsWith("--")) value = token.includes("=") ? token.slice(token.indexOf("=") + 1) : "";
+      else if (token.startsWith("-")) value = SHORT_ATTACHED.exec(token)?.[1]?.replace(/^=/u, "") ?? "";
+      for (const piece of value.split(",")) {
+        const name = requirementName(piece);
+        if (name !== undefined) names.push(name);
+      }
+    }
+  }
+  return names;
+}
 
 /**
  * 이 Manifest가 지원 중단 도구인가. name, GitHub 저장소, canonical MCP alias, 설치 정보의 PyPI 패키지·git 저장소 중 하나라도 같으면 그렇다.
@@ -71,19 +108,16 @@ const requirementName = (token: string) => /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^
 export function withdrawnManifestOf(manifest: Manifest): WithdrawnTool | undefined {
   const repo = manifest.repository.github?.toLowerCase();
   const aliases = manifest.recommendation?.identity?.mcpServerNames ?? [];
-  const tokens = installTokens(manifest);
+  const tokens = installStrings(manifest).flatMap(tokensOf);
+  const names = installPackageNames(manifest).map(pep503);
   return WITHDRAWN_TOOLS.find((t) => {
     if (t.toolId === manifest.name) return true;
     const repos = t.identity.repositories.map((r) => r.toLowerCase());
     if (repo !== undefined && repos.includes(repo)) return true;
     if (aliases.some((a) => t.identity.mcpServerNames.includes(a))) return true;
     const pkgs = t.identity.pypiPackages.map(pep503);
-    return tokens.some((token) => {
-      const lower = token.toLowerCase();
-      if (repos.some((r) => lower.includes("github.com/" + r))) return true;
-      const name = requirementName(token);
-      return name !== undefined && pkgs.includes(pep503(name));
-    });
+    if (tokens.some((token) => repos.some((r) => token.toLowerCase().includes("github.com/" + r)))) return true;
+    return names.some((n) => pkgs.includes(n));
   });
 }
 
