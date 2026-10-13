@@ -6,7 +6,7 @@
 
 ## 요약
 
-아래 문제는 모두 공개된 v0.2.0에 있습니다. 상태는 main `5be23af`(2026-10-11) 기준이며, 아직 어떤 릴리스에도 수정이 포함되지 않았습니다.
+아래 문제는 모두 공개된 v0.2.0에 있습니다. 상태는 main `3599e80`(2026-10-13) 기준입니다. 수정은 모두 병합됐고 v0.2.1에 들어갈 예정이며, v0.2.1은 **아직 릴리스되지 않았습니다**. v0.2.1에도 남는 제한은 [v0.2.1 알려진 문제](known-issues-v0.2.1.ko.md)에 있습니다.
 
 | 문제 | 상태 | v0.2.0 우회 방법 |
 | --- | --- | --- |
@@ -15,10 +15,10 @@
 | 검토되지 않은 옵션이 있는 항목 Adopt | main에서 수정됨(#37) | 있음(직접 확인) |
 | 업데이트 중 Health 오류 시 새 설정이 남음 | main에서 수정됨(#36) | 일부(파일 확인) |
 | 손상된 `lifecycle.json`에서도 설치가 씀 | main에서 수정됨(#36) | 있음(`.bak` 복원) |
-| 업데이트 중단 후 앱 안 복구 없음 | 수정 검토 중(#40), Desktop 복구 화면은 아직 없음 | 있음(직접 수정) |
-| 동시 설치·업데이트 시 기록 유실 | 수정 검토 중(#38) | 있음(하나씩 실행, Adopt) |
-| 새 환경에서 Postgres MCP Pro 시작 실패 | 수정 검토 중(#39) | 있음(인자 직접 수정) |
-| Windows uvx 도구 첫 실행 느림 | 미수정, uvx Prepare 설계 승인(#41)·구현 대기 | 있음(Health 재실행) |
+| 업데이트 중단 후 앱 안 복구 없음 | main에서 수정됨(#40, #47): CLI 복구. Desktop은 명령을 보여 주지만 직접 복구하지 않음 | 있음(직접 수정) |
+| 동시 설치·업데이트 시 기록 유실 | main에서 수정됨(#38) | 있음(하나씩 실행, Adopt) |
+| 새 환경에서 Postgres MCP Pro 시작 실패 | main에서 수정됨(#39) | 있음(인자 직접 수정) |
+| Windows uvx 도구 첫 실행 느림 | postgres-mcp는 main에서 수정됨(#45, #39: 설정 전에 준비). Serena는 v0.2.1에서 신규 설치 중단 | 있음(Health 재실행) |
 
 ## 프로젝트를 바꾸는 중 설치(Desktop)
 
@@ -36,26 +36,26 @@
 
 - **증상:** 업데이트·롤백·복구가 중간에 끝나면 `config-drift`로 보입니다. Update·Health는 막히고, 첫 업데이트라면 Rollback 대상이 없으며, Repair는 OpenHub tool config를 쓰는 도구에만 쓸 수 있습니다.
 - **우회:** `openhub lifecycle status`에 나온 설정 파일을 열어 해당 서버 항목을 그 도구의 Registry Manifest(이 저장소의 `registry/<분류>/<도구>.yaml`, `install.options.command`) 명령으로 직접 되돌리거나, 항목을 지우고 다시 설치하세요. OpenHub가 파일을 대신 바꾸지는 않습니다.
-- **상태:** 수정 검토 중(#40). 작업 기록(Journal)과 `openhub lifecycle recover <도구>`를 추가합니다. 중단된 작업을 보여 주고, 승인한 경우에만, 그리고 파일이 OpenHub가 쓰던 내용과 그대로 같을 때만 이전 항목으로 되돌립니다.
-- **Desktop:** Desktop 앱에는 아직 복구 화면이 없습니다. #40이 배포된 뒤에도 Desktop 사용자는 터미널에서 복구합니다. `openhub lifecycle status`로 도구가 `interrupted-update`인지 확인하고, `openhub lifecycle recover <도구>`를 실행해 계획을 읽은 뒤 승인하세요. 그 전까지는 위의 직접 수정 방법을 쓰세요.
+- **상태:** main에 반영(#40), v0.2.1 예정. 작업 기록(Journal)과 `openhub lifecycle recover <도구>`를 추가합니다. 중단된 작업을 보여 주고, 승인한 경우에만, 그리고 파일이 OpenHub가 쓰던 내용과 그대로 같을 때만 이전 항목으로 되돌립니다.
+- **Desktop:** Desktop 앱에는 복구 화면이 없습니다. v0.2.1부터 INSTALLED에 정확한 명령이 표시되며(#47), Desktop 사용자는 터미널에서 복구합니다. `openhub lifecycle status`로 도구가 `interrupted-update`인지 확인하고, `openhub lifecycle recover <도구>`를 실행해 계획을 읽은 뒤 승인하세요. v0.2.0에서는 위의 직접 수정 방법을 쓰세요.
 
 ## 설치·업데이트 동시 실행
 
 - **증상:** CLI와 Desktop(또는 터미널 두 개)에서 동시에 도구를 바꾸면 Version State 기록 하나가 사라질 수 있습니다. 그 도구는 미관리(untracked)로 보입니다.
 - **우회:** 설치·업데이트·롤백·복구·Health는 한 번에 하나만 실행하세요. 이후 미관리로 보이면 Adopt(Desktop INSTALLED 또는 `openhub adopt`)로 다시 등록하세요.
-- **상태:** 수정 검토 중(#38). 한 번에 하나의 작업만 실행하고, 나머지는 `OPERATION_IN_PROGRESS`로 아무것도 바꾸지 않고 멈춥니다.
+- **상태:** main에 반영(#38), v0.2.1 예정. 한 번에 하나의 작업만 실행하고, 나머지는 `OPERATION_IN_PROGRESS`로 아무것도 바꾸지 않고 멈춥니다.
 
 ## 새 환경에서 Postgres MCP Pro가 시작하지 않음
 
 - **증상:** uv 캐시에 이 도구가 없는 컴퓨터에서는 `postgres-mcp`가 `No module named 'mcp.server.fastmcp'` 오류로 종료합니다. Health가 실패하고 Client도 서버를 띄우지 못합니다. 패키지가 MCP SDK 2.x를 허용하는데, 2.x에서 해당 모듈 이름이 바뀌었기 때문입니다.
 - **우회:** Client 설정에서 이 서버의 인자를 `--from postgres-mcp --with mcp==1.30.0 postgres-mcp --access-mode=restricted`(명령 `uvx`)로 바꾸세요. Windows에서는 그 뒤 첫 Health가 uv 설치 때문에 시간 초과될 수 있으니(아래 참고) Health를 한 번 더 실행하세요.
-- **상태:** 수정 검토 중(#39).
+- **상태:** main에 반영(#39), v0.2.1 예정. Registry가 `postgres-mcp==0.3.0`과 `mcp==1.30.0`으로 고정하고, 설정을 쓰기 전에 준비하며, Client는 `--no-build`로 실행합니다.
 
 ## Windows에서 uvx 도구 첫 실행이 느림(serena, postgres-mcp)
 
 - **증상:** Windows에서 serena나 postgres-mcp를 설치한 직후 첫 Health가 `startup-timeout`으로 멈출 수 있습니다. uv가 20초 제한 안에서 Python 패키지를 내려받아 설치하기 때문입니다. 이후 실행은 더 빠릅니다(측정: serena 약 6초, postgres-mcp 약 10초).
 - **우회:** Health를 다시 실행하거나(`openhub lifecycle health <도구>` 또는 Desktop 버튼), Client를 한 번 시작해 서버가 뜰 때까지 기다리세요.
-- **상태:** 미수정. uvx Prepare 설계 승인(#41), 구현 대기. 측정에서 Linux는 제한 안이었습니다.
+- **상태:** postgres-mcp는 main에 반영(#45, #39), v0.2.1 예정. 정확한 버전을 설정 전에 준비합니다. Windows 설치 직후 첫 Health 측정은 20초 제한 중 약 15초여서 느린 PC에서는 Health를 한 번 더 실행해야 할 수 있습니다([v0.2.1 알려진 문제](known-issues-v0.2.1.ko.md)). Serena는 v0.2.1에서 신규 설치를 중단했습니다(#59). 측정에서 Linux는 제한 안이었습니다.
 
 ## 추가 옵션이 있는 항목을 Adopt한 경우
 
