@@ -1,4 +1,4 @@
-import { loadRegistry, readMetadataCache, formatRegistryIssue } from "@openhub/core";
+import { loadRegistry, readMetadataCache, formatRegistryIssue, OPENHUB_CORE_VERSION } from "@openhub/core";
 
 /** Desktop 화면이 받는 Tool 한 줄. Core의 Manifest·메타데이터를 화면용으로 줄인 것이다. */
 export interface ToolView {
@@ -17,6 +17,8 @@ export interface RegistryView {
   tools: ToolView[];
   issues: string[];
   metadataCollectedAt: string | null;
+  /** 화면 머리글에 보이는 OpenHub 버전(v0.2.1 RC에서 앱 안에 버전이 보이지 않던 문제). release 계약상 Desktop package 버전과 같다. */
+  appVersion: string;
 }
 
 /**
@@ -40,5 +42,5 @@ export async function buildRegistryView(registryDir: string, metadataFile: strin
     };
   });
   tools.sort((a, b) => (b.stars ?? -1) - (a.stars ?? -1) || a.name.localeCompare(b.name));
-  return { tools, issues: issues.map(formatRegistryIssue), metadataCollectedAt: cache?.collectedAt ?? null };
+  return { tools, issues: issues.map(formatRegistryIssue), metadataCollectedAt: cache?.collectedAt ?? null, appVersion: OPENHUB_CORE_VERSION };
 }

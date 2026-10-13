@@ -39,6 +39,7 @@ async function render() {
     ? i18nRenderer.t("registry.metadataAt", { date: i18nRenderer.formatDateTime(view.metadataCollectedAt) })
     : i18nRenderer.t("registry.metadataMissing");
   document.getElementById("status").textContent = i18nRenderer.t("registry.status", { count: view.tools.length, metadata: collected });
+  document.getElementById("app-version").textContent = i18nRenderer.t("app.version", { version: view.appVersion });
   return view.tools.length;
 }
 

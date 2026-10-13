@@ -3,6 +3,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { OPENHUB_CORE_VERSION } from "@openhub/core";
 import { buildRegistryView } from "../src/registry-view";
 
 const root = path.resolve(import.meta.dirname, "../../..");
@@ -33,6 +34,17 @@ describe("REQ-005 Desktop Shell", () => {
     const view = await buildRegistryView(path.join(root, "registry"), path.join(tmpdir(), "openhub-no-such-cache.json"));
     expect(view.tools.length).toBeGreaterThanOrEqual(5);
     expect(view.metadataCollectedAt).toBeNull();
+  });
+
+  it("v0.2.1 화면 데이터는 머리글에 보일 OpenHub 버전을 담고, 그 값은 Desktop package 버전과 같다", async () => {
+    const view = await buildRegistryView(path.join(root, "registry"), path.join(tmpdir(), "openhub-no-such-cache.json"));
+    const pkg = JSON.parse(await readFile(path.resolve(import.meta.dirname, "../package.json"), "utf8")) as { version: string };
+    expect(view.appVersion).toBe(OPENHUB_CORE_VERSION);
+    expect(view.appVersion).toBe(pkg.version);
+    const html = await readFile(path.resolve(import.meta.dirname, "../renderer/index.html"), "utf8");
+    const renderer = await readFile(path.resolve(import.meta.dirname, "../renderer/renderer.js"), "utf8");
+    expect(html).toContain('id="app-version"');
+    expect(renderer).toContain('getElementById("app-version").textContent = i18nRenderer.t("app.version", { version: view.appVersion })');
   });
 
   it("AC-007-02 Desktop은 Core를 import하고 Manifest 파싱·검증 로직을 복제하지 않는다", async () => {

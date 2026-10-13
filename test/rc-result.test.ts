@@ -59,7 +59,7 @@ describe("checkRcResult", () => {
     const windows = pass("windows");
     windows.checks["first-start-follows-os-korean"] = { status: "PASS" };
     expect(checkRcResult(windows, { os: "windows" }).failures).toEqual(["check first-start-follows-os-korean: unknown check id"]);
-    expect(REQUIRED_CHECKS.windows).toEqual(["reject-writes-nothing", "plan-stale-blocks-and-keeps-external-change", "kubernetes-secret-denied-configmap-read-no-token", "kubernetes-reviewed-tool-config", "kubernetes-only-0.0.67", "health-failure-compensation"]);
+    expect(REQUIRED_CHECKS.windows).toEqual(["reject-writes-nothing", "plan-stale-blocks-and-keeps-external-change", "kubernetes-secret-denied-configmap-read-no-token", "kubernetes-reviewed-tool-config", "kubernetes-only-0.0.67", "health-failure-compensation", "app-version-shown"]);
     expect(REQUIRED_CHECKS.linux).toEqual([...REQUIRED_CHECKS.windows, "first-start-follows-os-korean"]);
   });
 

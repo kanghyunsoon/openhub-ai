@@ -179,7 +179,7 @@ const PATCH_DIALOG = String.raw`(async () => {
     globalThis.__rcDialogs.push({ title: o.title, message: o.message, detail: o.detail, buttons: o.buttons, action: next.action, mutated: Boolean(next.mutate) });
     return { response: next.action === "approve" ? 1 : 0, checkboxChecked: false };
   };
-  return { userData: app.getPath("userData"), home: process.mainModule.require("node:os").homedir(), systemLanguages: [...app.getPreferredSystemLanguages(), app.getSystemLocale()] };
+  return { userData: app.getPath("userData"), home: process.mainModule.require("node:os").homedir(), systemLanguages: [...app.getPreferredSystemLanguages(), app.getSystemLocale()], appVersion: app.getVersion() };
 })()`;
 
 async function launch(ctx, extraEnv = {}) {
@@ -388,6 +388,9 @@ async function run() {
     // 첫 언어는 OS 언어를 따른다(첫 번째 선호 언어가 ko 계열이면 한국어, 그 밖에는 English).
     const expectedLocale = /^ko([-_]|$)/iu.test(String(app.info.systemLanguages[0] ?? "")) ? "ko" : "en";
     step(3, app.tools > 0 && onboarding.visible && i18n0.locale === expectedLocale && i18n0.missingKeys.length === 0 && results.environment.homeIsolated ? "PASS" : "FAIL", { tools: app.tools, onboarding, locale: i18n0.locale, expectedLocale, systemLanguage: app.info.systemLanguages[0], missingKeys: i18n0.missingKeys.length, environment: results.environment });
+    // v0.2.1 RC: 앱 안에 버전이 보이지 않았다. 머리글 문구에 패키징된 앱의 버전(app.getVersion())이 그대로 보여야 한다.
+    const shownVersion = String(i18n0.texts?.["app-version"] ?? "");
+    check("app-version-shown", typeof app.info.appVersion === "string" && app.info.appVersion.length > 0 && shownVersion.endsWith(" " + app.info.appVersion), { appVersion: app.info.appVersion, shown: shownVersion });
 
     // ---- 4 분석·추천
     progress("step 3 " + results.steps[3].status);
