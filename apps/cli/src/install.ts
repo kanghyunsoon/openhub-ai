@@ -114,13 +114,16 @@ export function cliApprovalPrompter(toolId: string, prompter: InstallPrompter, i
 }
 
 const VERIFICATION_LABEL = { "launch-on-demand": "launch-on-demand(Client 첫 실행 때 받음)", pulled: "pulled", cached: "cached(npx cache에 미리 받음)", failed: "failed" } as const;
+/** cached는 backend마다 cache가 다르다(v0.2.1 uvx Prepare는 uv cache). Desktop의 install.prepared.cachedUv와 같은 뜻이다. */
+const preparedLabel = (prepared: keyof typeof VERIFICATION_LABEL, backend: InstallResultV1["backend"]): string =>
+  prepared === "cached" && backend === "uvx" ? "cached(uv cache에 미리 설치하고 네트워크 없이 확인함)" : VERIFICATION_LABEL[prepared];
 
 export function formatInstallResult(result: InstallResultV1): string[] {
   const lines = ["", "결과  " + result.status + (result.code === undefined ? "" : " (" + result.code + ")")];
   if (result.changed !== undefined) lines.push("  바뀐 항목: " + result.changed.join(", "));
   if (result.verification !== null) {
     const v = result.verification;
-    lines.push("  Prepared    " + VERIFICATION_LABEL[v.prepared]);
+    lines.push("  Prepared    " + preparedLabel(v.prepared, result.backend));
     lines.push("  Configured  " + (v.configured ? "예" : "아니오"));
     lines.push("  Detected    " + (v.detected === "skipped" ? "확인 안 함" : v.detected ? "예" : "아니오"));
     lines.push("  (Prepared·Configured·Detected는 서버가 실행 중이거나 정상임을 뜻하지 않습니다)");

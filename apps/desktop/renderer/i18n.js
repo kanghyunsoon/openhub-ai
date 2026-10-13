@@ -26,7 +26,7 @@
   window.__openhubI18n = () => {
     const keys = [...document.querySelectorAll("[data-i18n]")].map((n) => n.dataset.i18n);
     const texts = {};
-    for (const id of ["project-select", "for-you-status", "lifecycle-status", "status"]) texts[id] = (document.getElementById(id) || {}).textContent || "";
+    for (const id of ["project-select", "for-you-status", "lifecycle-status", "status", "app-version"]) texts[id] = (document.getElementById(id) || {}).textContent || "";
     const onboarding = document.querySelector("#onboarding-steps li strong");
     texts["onboarding-step1"] = onboarding ? onboarding.textContent : "";
     const visible = [...document.querySelectorAll("[data-i18n]")].map((n) => n.textContent).join("\n");

@@ -24,6 +24,8 @@ const electronBin = (() => {
 })();
 const scratch = path.join(tmpdir(), "openhub-desktop-i18n-e2e-" + process.pid);
 const HANGUL = /[\uac00-\ud7a3]/u;
+/** 머리글 버전 표시(v0.2.1 RC에서 앱 안에 버전이 보이지 않았다). Desktop package 버전과 같아야 한다. */
+const desktopVersion = (createRequire(path.join(DESKTOP, "package.json"))("./package.json") as { version: string }).version;
 
 type I18nSmoke = { locale: string; htmlLang: string; selectValue: string; texts: Record<string, string>; hangul: number; missingKeys: string[] };
 type AdoptSmoke = { status: string; preview: string; adoptResult: string; benchmarkResult: string; spawns: number; dialogs: { title: string; message: string; detail: string }[] };
@@ -53,9 +55,11 @@ function expectEnglish(s: I18nSmoke) {
   expect(s).toMatchObject({ locale: "en", htmlLang: "en", selectValue: "en", hangul: 0, missingKeys: [] });
   for (const [id, text] of Object.entries(s.texts)) expect(text, id).not.toMatch(HANGUL);
   expect(s.texts["project-select"]).toBe("Choose project");
+  expect(s.texts["app-version"]).toBe("Version " + desktopVersion);
 }
 function expectKorean(s: I18nSmoke) {
   expect(s).toMatchObject({ locale: "ko", htmlLang: "ko", selectValue: "ko", missingKeys: [] });
+  expect(s.texts["app-version"]).toBe("버전 " + desktopVersion);
   expect(s.hangul).toBeGreaterThan(100);
   expect(s.texts["project-select"]).toMatch(HANGUL);
 }
