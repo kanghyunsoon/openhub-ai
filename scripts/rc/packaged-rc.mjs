@@ -81,10 +81,12 @@ const NOTES = { command: "uvx", args: ["notes-mcp==1.0.0"] };
 const CURSOR_USER = '{\n  "theme": "dark",\n  "mcpServers": {\n    "notes": { "command": "uvx", "args": ["notes-mcp==1.0.0"] }\n  }\n}\n';
 const CODEX_USER = '# my codex settings\nmodel = "o4"\n\n[mcp_servers.notes]\ncommand = "uvx"\nargs = ["notes-mcp==1.0.0"]\n';
 const PROJECT_MCP = JSON.stringify({ mcpServers: { notes: NOTES } }, null, 2) + "\n";
-// 정확한 버전 Update(v0.2.0 RC): 실제 npm의 고정 안 된 npx 도구 두 버전. 번들 Registry(수정 없음)의 고정 안 된 Manifest에서 시작한다.
+// 정확한 버전 Update(v0.2.0 RC): 실제 npm의 npx 도구 두 버전. 번들 Registry(수정 없음)의 Manifest에서 시작한다.
 // v0.2.1(#69): Memory MCP는 지원 중단되어 Core가 계획 단계에서 거부하므로 Context7로 옮겼다. 자격증명 없이 시작하고
-// initialize·tools/list에 외부 서비스가 필요 없다. v0.2.0 산출물(PR 자체 점검)과 v0.2.1 산출물의 번들 Registry에 같은
-// Manifest(npx -y @upstash/context7-mcp)가 있다. 근거·검증 범위 대응표: docs/specs/v0.2.1-rc-lifecycle-tool.md
+// initialize·tools/list에 외부 서비스가 필요 없다.
+// v0.2.1(#70): 번들 Registry의 Context7 Manifest는 TOOL_V1로 고정됐다(npx -y @upstash/context7-mcp@4.1.0). 그래서 설치가 곧 V1이고
+// 승인 뒤 npx Prepare를 거친다(check install-prepared-exact-version). 이어서 V2 Update → Health → Rollback V1 → Health를 그대로 검사한다.
+// 근거·검증 범위 대응표: docs/specs/v0.2.1-rc-lifecycle-tool.md
 const TOOL_ID = "context7";
 const TOOL_ALIAS = "context7";
 const TOOL_PKG = "@upstash/context7-mcp";
@@ -436,6 +438,9 @@ async function run() {
     const installDialogs = await app.dialogs();
     results.dialogs.push(...installDialogs.map((d) => ({ title: d.title, action: d.action, mutated: d.mutated, lines: String(d.detail).split("\n").length })));
     const approvalOk = toolInstall.status === "succeeded" && mcpDoc.mcpServers?.[TOOL_ALIAS] !== undefined && JSON.stringify(mcpDoc.mcpServers?.notes) === JSON.stringify(NOTES);
+    // v0.2.1(#70): 고정된 Manifest의 설치는 승인 대화상자에 그 버전의 npx Prepare 명령을 보여 주고, Client 설정에 같은 spec을 쓴다(단계 9에서 판정).
+    const installEntry = mcpDoc.mcpServers?.[TOOL_ALIAS];
+    const installPrepareShown = installDialogs.some((d) => String(d.detail).includes("--package=" + TOOL_PKG + "@" + TOOL_V1));
     step(7, approvalOk && results.checks["reject-writes-nothing"].status === "PASS" ? "PASS" : "FAIL", { reject: rejected.status, stale: stale.status, install: toolInstall.status, configChanges: toolInstall.configChanges, dialogsSeen: installDialogs.length });
 
     // ---- 14·6 다른 Client·Scope 추가(이미 사용 중 → [다른 Client·범위에 추가]), 사용자 범위 승인
@@ -496,7 +501,7 @@ async function run() {
     check("kubernetes-reviewed-tool-config", toolConfigs.length >= 1 && toolConfigs.every((f) => readFileSync(f, "utf8").includes('kind = "Secret"')), { files: toolConfigs.length });
     step(8, healthOk && mcpOk ? "PASS" : "FAIL", { npxTool: { toolId: TOOL_ID, status: toolHealth.status, outcome: toolHealth.outcome, lines: toolHealth.lines }, kubernetes: { status: k8sHealth.status, outcome: k8sHealth.outcome, lines: k8sHealth.lines }, mcp });
 
-    // ---- 9·10 정확한 버전 Update(INSTALLED 목표 버전 입력): 고정 안 됨 → V1 → Health → V2 → Health → Rollback V1 → Health
+    // ---- 9·10 정확한 버전 Update(INSTALLED 목표 버전 입력): 설치된 V1(Prepare·Health 확인) → V2 → Health → Rollback V1 → Health
     // 실제 npm Prepare·실제 MCP Health. 단계마다 Client 설정·Version State·승인 대화상자·npm 캐시·다른 MCP 설정을 확인한다.
     progress("step 8 " + results.steps[8].status);
     const lifecycleFile = path.join(home, ".openhub", "state", "lifecycle.json");
@@ -548,7 +553,23 @@ async function run() {
         out.dialog.versionLine && out.dialog.prepareCommand && out.dialog.approvalIds.includes("health-execution") && out.health.status === "health-checked" && out.health.outcome === "succeeded";
       return out;
     };
-    const v1 = await exactStep(TOOL_V1);
+    // V1은 설치로 들어온다(고정 Manifest, v0.2.1 #70). 이전 RC의 "고정 안 됨 → V1" Update 대신, 설치가 정확한 V1을 Prepare했고
+    // Client 설정·Version State가 V1이며 준비된 V1의 첫 Health(단계 8)가 통과했는지 본다. V2 Update·Rollback 검사는 그대로다.
+    const v1Spec = TOOL_PKG + "@" + TOOL_V1;
+    const v1State = await toolState();
+    const v1 = {
+      version: TOOL_V1,
+      source: "install",
+      clientArgs: installEntry?.args ?? null,
+      state: v1State,
+      prepared: prepared(v1Spec),
+      dialog: { prepareCommand: installPrepareShown },
+      health: { status: toolHealth.status, outcome: toolHealth.outcome },
+    };
+    v1.ok =
+      toolInstall.status === "succeeded" && (v1.clientArgs ?? []).includes(v1Spec) && v1State?.requested === v1Spec && v1State?.resolved === v1Spec && v1.prepared && installPrepareShown &&
+      toolHealth.status === "health-checked" && toolHealth.outcome === "succeeded";
+    check("install-prepared-exact-version", v1.ok, v1);
     const toolV1 = JSON.parse((await read(p(".mcp.json"))) ?? "{}").mcpServers?.[TOOL_ALIAS];
     const v2 = await exactStep(TOOL_V2);
     const othersKept9 = JSON.stringify(await otherConfigs()) === JSON.stringify(others0);

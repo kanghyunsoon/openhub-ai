@@ -27,7 +27,7 @@ import { seedEntries } from "../recommendation/helpers";
  *   Install V1 → Prepare V1 → Health → Update V2 → Prepare V2 → Health → Rollback V1 → Health → Version State·설정 확인
  * - 대상: @upstash/context7-mcp(자격증명 없이 시작하고 initialize·tools/list에 외부 서비스가 필요 없다). 두 버전 모두 npm에 실제로 있는 정확한 버전이다.
  *   v0.2.0~v0.2.1 초안은 Memory MCP를 썼으나 v0.2.1에서 지원 중단(#69, Core가 계획 단계에서 거부)되어 Registry의 고정 안 된 npx 도구 Context7로 옮겼다.
- * - 실제 Registry 파일은 바꾸지 않는다: Registry의 context7 Manifest를 이 테스트 메모리 안에서만 복사해 V1로 고정한다.
+ * - v0.2.1(#70)부터 실제 Registry의 context7 Manifest가 V1(4.1.0)로 고정돼 있으므로 그대로 쓴다(메모리 안 고정 없음).
  * - npm cache는 임시 폴더(npm_config_cache)로 격리한다. 사용자 DB·클러스터·인증 정보를 쓰지 않는다. Health는 실제 MCP handshake·tools/list다.
  */
 const platform = process.platform === "win32" ? "windows" : "linux";
@@ -45,11 +45,9 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 실제 npx Lifecycle
       process.env["npm_config_cache"] = npmCache;
       const real = await seedEntries();
       const tool = real.find((e) => e.manifest.name === "context7")!;
-      expect(tool.manifest.install.options?.["command"]).toBe("npx -y " + PACKAGE);
-      // 테스트 메모리 안에서만 V1 고정(Registry 파일은 그대로).
-      const pinned = structuredClone(tool);
-      pinned.manifest.install.options = { ...pinned.manifest.install.options, command: "npx -y " + PACKAGE + "@" + V1 };
-      const entries: RegistryEntry[] = real.map((e) => (e === tool ? pinned : e));
+      // v0.2.1(#70): 실제 Registry Manifest가 V1로 고정돼 있다. 바꾸지 않고 그대로 쓴다.
+      expect(tool.manifest.install.options?.["command"]).toBe("npx -y " + PACKAGE + "@" + V1);
+      const entries: RegistryEntry[] = real;
       const h = await createHarness(scratch, { entries });
       await writeFile(path.join(h.projectRoot, ".mcp.json"), JSON.stringify({ mcpServers: { notes: NOTES } }, null, 2) + "\n");
       await mkdir(path.join(h.projectRoot, ".codex"), { recursive: true });

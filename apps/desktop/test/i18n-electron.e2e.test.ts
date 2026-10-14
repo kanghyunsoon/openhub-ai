@@ -118,7 +118,8 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || electronBin === null)("v0.
       await mk(project, { recursive: true });
       await mk(home, { recursive: true });
       await writeFile(path.join(project, "package.json"), '{ "name": "api", "dependencies": { "pg": "^8.13.0" } }\n');
-      await writeFile(path.join(project, ".mcp.json"), JSON.stringify({ mcpServers: { context7: { command: "npx", args: ["-y", "@upstash/context7-mcp@1.2.3"] } } }, null, 2) + "\n");
+      // v0.2.1(#70): Context7 Manifest가 4.1.0으로 고정돼 adopt는 검토된 실행 인자(같은 버전)만 받는다. 다른 버전 항목은 ADOPT_ENTRY_UNSUPPORTED다.
+      await writeFile(path.join(project, ".mcp.json"), JSON.stringify({ mcpServers: { context7: { command: "npx", args: ["-y", "@upstash/context7-mcp@4.1.0"] } } }, null, 2) + "\n");
       const r = await launch(path.join(base, "user-data"), locale, undefined, { OPENHUB_SMOKE_PROJECT: project, OPENHUB_SMOKE_ADOPT: "1", OPENHUB_SMOKE_HOME: home });
       expect(r.code, JSON.stringify(r.smoke.adopt)).toBe(0);
       return r.smoke.adopt!;

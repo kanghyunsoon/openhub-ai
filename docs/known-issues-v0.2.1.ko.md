@@ -9,7 +9,8 @@ v0.2.1은 **아직 릴리스되지 않았습니다**. 이 문서는 v0.2.1에 �
 | Serena 신규 설치 불가 | v0.2.1 정책, 재지원은 #59 | 기존 항목은 유지하거나 직접 제거. 복구는 가능 |
 | Memory MCP 신규 설치 불가 | v0.2.1 정책, 저장 경로 해결은 #69 | Client가 다시 시작하기 전에 `memory.jsonl` 백업, `MEMORY_FILE_PATH`에 절대 경로 지정. 복구는 가능 |
 | Windows에서 Postgres MCP Pro 첫 Health가 시간 제한에 가까움 | 미수정, 20초 중 약 15초 측정 | Health 다시 실행 |
-| 버전 고정 안 된 npx 도구(Context7, Chrome DevTools MCP, Playwright MCP)는 첫 Health에서 패키지를 내려받음 | 알려진 제한. Context7만 Windows PC 1대에서 20초 중 약 15.8초 측정, 나머지 둘은 미측정. #70에서 추적 | Health 다시 실행 |
+| 버전 고정 안 된 npx 도구(Chrome DevTools MCP, Playwright MCP)는 첫 Health에서 패키지를 내려받음 | 알려진 제한. 미측정. #70에서 추적 | Health 다시 실행 |
+| v0.2.1 이전에 설치한 Context7 항목은 업데이트하기 전까지 버전이 고정되지 않음 | 의도한 동작(자동 변경 없음) | 검토된 4.1.0으로 업데이트하거나 다른 정확한 버전 선택 |
 | 중단된 작업 복구는 CLI만 | v0.2.1 정책 | INSTALLED에 보이는 명령 실행 |
 | Health·Benchmark 환경 제한은 sandbox가 아님 | 알려진 제한 | 아래 참고 |
 | npm 설정(`.npmrc`의 `node-options`)으로 Node.js 옵션이 더해질 수 있음 | 알려진 제한, #63에서 추적 | `npm config get node-options` 확인 |
@@ -50,11 +51,12 @@ v0.2.1은 **아직 릴리스되지 않았습니다**. 이 문서는 v0.2.1에 �
 
 ## 버전 고정 안 된 npx 도구: 첫 Health가 패키지를 내려받음
 
-- **대상:** Context7(`@upstash/context7-mcp`), Chrome DevTools MCP(`chrome-devtools-mcp@latest`), Playwright MCP(`@playwright/mcp@latest`). Registry 명령에 정확한 버전이 없어 설치 때 내려받지 않습니다(계획에 "launch-on-demand"와 `floating-artifact`가 표시됨).
+- **대상:** Chrome DevTools MCP(`chrome-devtools-mcp@latest`), Playwright MCP(`@playwright/mcp@latest`). Registry 명령에 정확한 버전이 없어 설치 때 내려받지 않습니다(계획에 "launch-on-demand"와 `floating-artifact`가 표시됨).
 - **내용:** 첫 Health(Client의 첫 실행도 같음)에서 npx가 최신 버전을 찾고 의존성과 함께 npx cache에 받은 뒤 서버를 시작합니다. 이 시간이 모두 20초 시작 제한에 들어갑니다.
-- **측정:** Context7만 측정했습니다. 빈 npm cache에서 첫 시작이 Windows 개발 PC 1대에서 약 15.8초, Linux에서 6.4~8.2초였고, 이미 받은 뒤에는 Linux에서 약 0.7초였습니다. CI runner의 패키징 RC 실행에서는 플랫폼마다 1회 통과했지만, 얼마나 자주 실패할 수 있는지는 알 수 없습니다. Chrome DevTools MCP와 Playwright MCP는 **측정하지 않았습니다**. 느린 네트워크·디스크·백신 검사는 `startup-timeout` 가능성을 높입니다.
+- **측정:** Chrome DevTools MCP와 Playwright MCP는 **측정하지 않았습니다**. Context7도 v0.2.1에서 고정하기 전에는 같은 문제가 있었습니다. 빈 npm cache에서 첫 시작이 Windows 개발 PC 1대에서 약 15.8초, Linux에서 6.4~8.2초였고, 독립 테스트에서는 Windows 첫 Health 한 번이 약 29초 뒤 `startup-timeout`으로 멈췄습니다(재시도는 약 3초). 느린 네트워크·디스크·백신 검사는 `startup-timeout` 가능성을 높입니다.
+- **v0.2.1의 Context7:** `@upstash/context7-mcp@4.1.0`으로 고정하고, 승인 뒤 Client 파일을 쓰기 전에 준비(Prepare)합니다. 그래서 첫 Health는 준비된 패키지를 실행합니다. 이전 버전으로 설치한 항목은 업데이트하기 전까지 고정되지 않은 명령을 그대로 씁니다. 업데이트 계획은 4.1.0(또는 입력한 정확한 버전)을 준비하고 Health를 실행하며, 둘 중 하나라도 실패하면 설정을 그대로 둡니다. Adopt는 검토된 명령만 받습니다. 다른 버전이나 버전 없는 항목은 편입하지 않습니다.
 - **할 수 있는 일:** Health를 다시 실행하세요. 단독 Health 실패는 설정을 바꾸지 않고, 업데이트 중 Health 실패는 이전 설정과 Version State를 되돌립니다. 다음 시작부터는 받은 패키지를 쓰지만, 버전이 고정되지 않아 새 버전이 나오면 다시 받습니다.
-- **상태:** 준비·고정 전략은 [#70](https://github.com/kanghyunsoon/openhub-ai/issues/70)에서 다룹니다. 20초 제한은 늘리지 않습니다.
+- **상태:** 남은 고정 안 된 도구의 준비·고정 전략(계획 단계에서 정확한 버전 확정 → 승인 → Prepare → 그 버전으로 설정 기록)은 [#70](https://github.com/kanghyunsoon/openhub-ai/issues/70)에서 다룹니다. 20초 제한은 늘리지 않습니다.
 
 ## 복구는 CLI만
 

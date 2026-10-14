@@ -60,7 +60,8 @@ describe("checkRcResult", () => {
     const windows = pass("windows");
     windows.checks["first-start-follows-os-korean"] = { status: "PASS" };
     expect(checkRcResult(windows, { os: "windows" }).failures).toEqual(["check first-start-follows-os-korean: unknown check id"]);
-    expect(REQUIRED_CHECKS.windows).toEqual(["reject-writes-nothing", "plan-stale-blocks-and-keeps-external-change", "kubernetes-secret-denied-configmap-read-no-token", "kubernetes-reviewed-tool-config", "kubernetes-only-0.0.67", "health-failure-compensation", "app-version-shown"]);
+    // v0.2.1(#70): Context7 고정 뒤 설치 단계의 V1 Prepare·첫 Health를 별도 필수 check로 둔다(이전 "고정 안 됨 → V1" Update 검사를 대신한다).
+    expect(REQUIRED_CHECKS.windows).toEqual(["reject-writes-nothing", "plan-stale-blocks-and-keeps-external-change", "install-prepared-exact-version", "kubernetes-secret-denied-configmap-read-no-token", "kubernetes-reviewed-tool-config", "kubernetes-only-0.0.67", "health-failure-compensation", "app-version-shown"]);
     expect(REQUIRED_CHECKS.linux).toEqual([...REQUIRED_CHECKS.windows, "first-start-follows-os-korean"]);
   });
 
@@ -184,15 +185,17 @@ describe("RC workflow·하네스 배선", () => {
     expect(harness).toContain("delete env.OPENHUB_REGISTRY;");
   });
 
-  it("버전 Update·Rollback·Health·보상 검사의 대상은 실제 Registry의 고정 안 된 npx 도구이고 지원 중단 도구가 아니다(v0.2.1 #69)", async () => {
+  it("버전 Update·Rollback·Health·보상 검사의 대상은 실제 Registry의 npx 도구이고, 번들 Manifest가 TOOL_V1로 고정돼 설치가 곧 V1이며 지원 중단 도구가 아니다(v0.2.1 #69·#70)", async () => {
     const constant = (name: string) => harness.match(new RegExp("^const " + name + ' = "([^"]+)";$', "mu"))?.[1];
     const [id, alias, pkg, v1, v2] = ["TOOL_ID", "TOOL_ALIAS", "TOOL_PKG", "TOOL_V1", "TOOL_V2"].map(constant);
     const { entries, issues } = await loadRegistry(path.join(ROOT, "registry"));
     expect(issues).toEqual([]);
     const entry = entries.find((e) => e.manifest.name === id);
     expect(entry, "harness tool must be in the bundled Registry").toBeDefined();
-    // 정확한 버전 입력은 고정 안 된 npx Manifest에서만 열린다.
-    expect(entry!.manifest.install.options?.["command"]).toBe("npx -y " + pkg);
+    // v0.2.1(#70): 번들 Manifest는 TOOL_V1로 고정이다. 설치가 V1을 Prepare하고(install-prepared-exact-version), INSTALLED의 정확한 버전
+    // 입력(npx 항목이면 고정 여부와 상관없이 열린다)으로 V2 Update·Rollback V1을 검사한다.
+    expect(entry!.manifest.install.options?.["command"]).toBe("npx -y " + pkg + "@" + v1);
+    expect(harness).toContain('check("install-prepared-exact-version"');
     expect(entry!.manifest.recommendation?.identity?.mcpServerNames?.[0]).toBe(alias);
     for (const v of [v1, v2]) expect(v).toMatch(/^\d+\.\d+\.\d+$/u);
     expect(v1).not.toBe(v2);

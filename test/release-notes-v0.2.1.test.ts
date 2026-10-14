@@ -77,14 +77,15 @@ describe("v0.2.1 Release Notes", () => {
     for (const doc of [notes, knownEn, knownKo]) expect(doc).not.toMatch(/existing (Memory MCP )?users are (now )?safe|no action (is )?needed|자동으로 (보호|이전)합니다/u);
   });
 
-  it("버전 고정 안 된 npx 도구 목록과 측정 범위가 실제 Registry와 같다(#70): Context7만 측정, 나머지는 미측정", async () => {
+  it("버전 고정 안 된 npx 도구 목록과 측정 범위가 실제 Registry와 같다(#70): Context7은 4.1.0 고정·Prepare, 나머지 둘은 미측정", async () => {
     const { entries } = await loadRegistry(path.join(ROOT, "registry"));
     const unpinned = entries
       .filter((e) => e.manifest.install.preferredAdapter === "npx")
       .filter((e) => !isPinnedArtifact("npx", npxArtifact(String(e.manifest.install.options?.["command"] ?? "").split(/\s+/u).slice(1))))
       .map((e) => e.manifest.displayName)
       .sort();
-    expect(unpinned).toEqual(["Chrome DevTools MCP", "Context7", "Playwright MCP"]);
+    // v0.2.1(#70): Context7은 검토한 4.1.0으로 고정됐다. 고정 안 된 npx 도구는 둘이다.
+    expect(unpinned).toEqual(["Chrome DevTools MCP", "Playwright MCP"]);
     const bullet = notes.split("\n").find((l) => l.startsWith("- **Unpinned npx tools download during their first Health.**"))!;
     expect(bullet).toBeDefined();
     for (const name of unpinned) {
@@ -93,10 +94,18 @@ describe("v0.2.1 Release Notes", () => {
       expect(knownKo).toContain(name);
     }
     expect(bullet).not.toContain("Memory MCP");
-    expect(bullet).toContain("Only Context7 was measured: about 15.8 seconds on one Windows PC");
-    expect(bullet).toContain("Chrome DevTools MCP and Playwright MCP were not measured");
+    expect(bullet).toContain("Neither was measured");
+    // #70 전체가 해결됐다고 쓰지 않는다(남은 floating 도구 둘).
+    expect(bullet).toContain("this does not resolve #70 for the other two tools");
     expect(knownEn).toContain("Chrome DevTools MCP and Playwright MCP were **not measured**");
     expect(knownKo).toContain("Chrome DevTools MCP와 Playwright MCP는 **측정하지 않았습니다**");
+    // Context7: 고정 버전·Prepare·기존 항목 자동 변경 없음이 세 문서에 있다.
+    const context7 = entries.find((e) => e.manifest.name === "context7")!;
+    expect(context7.manifest.install.options?.["command"]).toBe("npx -y @upstash/context7-mcp@4.1.0");
+    expect(notes).toContain("**Context7 is pinned to 4.1.0 and prepared before configuration.**");
+    expect(notes).toContain("**Existing Context7 entries are not changed automatically.**");
+    expect(knownEn).toContain("**Context7 in v0.2.1:** pinned to `@upstash/context7-mcp@4.1.0`");
+    expect(knownKo).toContain("**v0.2.1의 Context7:** `@upstash/context7-mcp@4.1.0`으로 고정");
     // 오래된 main SHA로 현재 코드를 설명하지 않는다.
     for (const doc of [knownEn, knownKo]) expect(doc).not.toMatch(/main `[0-9a-f]{7}`/u);
   });

@@ -7,9 +7,9 @@
   },
   "context7": {
     "kind": "npm-package",
-    "pinned": false,
-    "preparation": "launch-on-demand",
-    "spec": "@upstash/context7-mcp"
+    "pinned": true,
+    "preparation": "npm-cache",
+    "spec": "@upstash/context7-mcp@4.1.0"
   },
   "github-mcp-server": {
     "kind": "container-image",
