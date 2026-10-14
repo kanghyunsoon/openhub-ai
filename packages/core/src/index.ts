@@ -14,6 +14,7 @@ export * from "./installer/plan";
 export * from "./installer/stale";
 export * from "./installer/approval-v1";
 export * from "./installer/command";
+export * from "./installer/npx-args";
 export * from "./installer/plan-builder";
 export * from "./installer/backends";
 export * from "./installer/config-writer";

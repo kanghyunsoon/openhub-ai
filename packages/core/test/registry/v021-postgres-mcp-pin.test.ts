@@ -38,7 +38,7 @@ describe("v0.2.1 postgres-mcp Manifest", () => {
       const optional = ["advice", "adviceEn"];
       expect(Object.keys(t).filter((k) => !optional.includes(k)).sort()).toEqual(required);
       for (const k of Object.keys(t)) expect([...required, ...optional], k).toContain(k);
-      expect(Object.keys(t.identity).sort()).toEqual(["mcpServerNames", "npmPackages", "pypiPackages", "repositories"]);
+      expect(Object.keys(t.identity).sort()).toEqual(["dockerImages", "mcpServerNames", "npmPackages", "pypiPackages", "repositories"]);
       expect(JSON.stringify(t)).not.toMatch(/"(command|args|image|options|install)"/u);
     }
   });

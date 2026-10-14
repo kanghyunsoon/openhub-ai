@@ -696,6 +696,11 @@ export async function planLifecycle(options: LifecyclePlanOptions): Promise<Life
 
   const current = { requested: head.artifact.requested, identity: head.artifact.resolved, clientSpec: { command: head.launch.clientSpec.command, args: [...head.launch.clientSpec.args] } };
   let target = { requested: current.requested, identity: current.identity, launchArgs: argsOfClientSpec(current.clientSpec) };
+  // v0.2.1(#69 리뷰 P0): health·repair는 Version State에 기록된 현재 실행 인자를 그대로 실행한다. 설치·update·rollback과 같은 명령 검증
+  // (npx는 npm Registry 이름만)을 다시 통과해야 계획을 만든다. update·rollback은 아래에서 목표 인자를 같은 규칙으로 검사한다.
+  if ((options.operation === "health" || options.operation === "repair") && (backend === "npx" || backend === "uvx") && !launchTokensOk(backend, target.launchArgs, options.platform)) {
+    return { ok: false, code: "MANIFEST_COMMAND_REJECTED", message: "Version State에 기록된 실행 인자가 현재 명령 검증을 통과하지 않아 실행하지 않습니다(npm Registry 이름이 아닌 패키지 지정 등)" };
+  }
 
   if (options.operation === "update") {
     const candidate = installCandidates(manifest).find((c) => c.step.adapter === backend);
