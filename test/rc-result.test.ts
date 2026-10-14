@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { ALLOWED_NOT_RUN, REQUIRED_CHECKS, REQUIRED_STEPS, checkRcResult } from "../scripts/rc/check-rc-result.mjs";
+import { loadRegistry, WITHDRAWN_TOOLS } from "../packages/core/src/index";
 
 /** v0.2.0 RC 결과 판정기(fail-closed). 예전 하네스는 FAIL이 있어도 종료 코드 0이었다. */
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -178,9 +179,27 @@ describe("RC workflow·하네스 배선", () => {
     expect(harness).not.toContain('id: "exact-version-v1-v2-v1"');
     expect(harness).not.toContain('id: "health-failure-compensation"');
     expect(harness).toContain('check(\n      "health-failure-compensation",');
-    expect(harness).toContain("window.__openhubLifecycleUpdateTo('memory-mcp', ");
+    expect(harness).toContain("window.__openhubLifecycleUpdateTo('context7', ");
     // 테스트 Registry를 쓰지 않는다(OPENHUB_REGISTRY는 실행 전에 지운다).
     expect(harness).toContain("delete env.OPENHUB_REGISTRY;");
+  });
+
+  it("버전 Update·Rollback·Health·보상 검사의 대상은 실제 Registry의 고정 안 된 npx 도구이고 지원 중단 도구가 아니다(v0.2.1 #69)", async () => {
+    const constant = (name: string) => harness.match(new RegExp("^const " + name + ' = "([^"]+)";$', "mu"))?.[1];
+    const [id, alias, pkg, v1, v2] = ["TOOL_ID", "TOOL_ALIAS", "TOOL_PKG", "TOOL_V1", "TOOL_V2"].map(constant);
+    const { entries, issues } = await loadRegistry(path.join(ROOT, "registry"));
+    expect(issues).toEqual([]);
+    const entry = entries.find((e) => e.manifest.name === id);
+    expect(entry, "harness tool must be in the bundled Registry").toBeDefined();
+    // 정확한 버전 입력은 고정 안 된 npx Manifest에서만 열린다.
+    expect(entry!.manifest.install.options?.["command"]).toBe("npx -y " + pkg);
+    expect(entry!.manifest.recommendation?.identity?.mcpServerNames?.[0]).toBe(alias);
+    for (const v of [v1, v2]) expect(v).toMatch(/^\d+\.\d+\.\d+$/u);
+    expect(v1).not.toBe(v2);
+    expect(WITHDRAWN_TOOLS.map((t) => t.toolId)).not.toContain(id);
+    expect(harness).not.toMatch(/memory-mcp|server-memory/u);
+    // 합성 Health 실패 주입은 같은 도구의 서버 프로세스만 끝낸다(npx Prepare의 --package=… 명령은 제외).
+    expect(harness).toContain('if (argv.includes("' + pkg!.split("/")[1] + '") && !argv.includes("--package=")');
   });
 
   it("Windows·Linux job 모두 독립 판정 단계(!cancelled)와 always 업로드가 있고 실패 주입 입력이 있다", () => {
