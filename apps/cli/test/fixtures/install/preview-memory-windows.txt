@@ -22,4 +22,4 @@ Warnings
   - [base] 위 설치 계획(실행 명령, 쓰는 설정 파일, 네트워크 사용)을 확인했고 이대로 실행하는 데 동의합니다.
   - [floating-artifact] 원격 패키지 버전이 고정되어 있지 않습니다. 나중에 실행하면 다른 artifact가 내려올 수 있습니다.
 
-Plan digest  sha256:ad029fe1f4098a639afa1dd55d5d6e684fa065e41d18f6ad420f3d37b55f9a31
+Plan digest  sha256:30840600368f6cea8c1e62d850d87ad57ff9743d65600e7277e4cb872a35710b

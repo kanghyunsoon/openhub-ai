@@ -22,12 +22,12 @@
       "launch": {
         "args": [
           "-y",
-          "@upstash/context7-mcp"
+          "@upstash/context7-mcp@4.1.0"
         ],
         "clientSpec": {
           "args": [
             "-y",
-            "@upstash/context7-mcp"
+            "@upstash/context7-mcp@4.1.0"
           ],
           "command": "npx"
         },
@@ -200,7 +200,7 @@
       "launch": {
         "args": [
           "-y",
-          "@upstash/context7-mcp"
+          "@upstash/context7-mcp@4.1.0"
         ],
         "clientSpec": {
           "args": [
@@ -208,7 +208,7 @@
             "/c",
             "npx",
             "-y",
-            "@upstash/context7-mcp"
+            "@upstash/context7-mcp@4.1.0"
           ],
           "command": "cmd"
         },

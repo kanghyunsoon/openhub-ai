@@ -27,7 +27,7 @@ const json = (doc: unknown) => new Response(JSON.stringify(doc), { status: 200, 
 const RELEASES = [
   { tag_name: "v4.4.1", name: "v4.4.1", body: "## What's Changed\n### Bug Fixes\n- Fixed library id resolution\n### Features\n- Added a token limit to get-library-docs", draft: false, prerelease: false, published_at: "2025-09-25T00:00:00Z", html_url: "https://github.com/upstash/context7/releases/tag/v4.4.1" },
   { tag_name: "v4.4.0", name: "v4.4.0", body: "- BREAKING: renamed resolve-library to resolve-library-id\n- See the migration guide", draft: false, prerelease: false, published_at: "2025-09-01T00:00:00Z", html_url: "https://github.com/upstash/context7/releases/tag/v4.4.0" },
-  { tag_name: "v4.3.0", name: "v4.3.0", body: "- old", draft: false, prerelease: false, published_at: "2025-08-04T00:00:00Z", html_url: "https://github.com/upstash/context7/releases/tag/v4.3.0" },
+  { tag_name: "v4.1.0", name: "v4.1.0", body: "- old", draft: false, prerelease: false, published_at: "2025-08-04T00:00:00Z", html_url: "https://github.com/upstash/context7/releases/tag/v4.1.0" },
 ];
 
 export interface DemoResult {
@@ -110,7 +110,9 @@ export async function runDemo(): Promise<DemoResult> {
     await step("5. Adopt — 기존 설정을 관리 대상으로 등록(데모가 임시 HOME에서 승인 질문에 답함, 설정 파일 변경 없음)", ["adopt", "context7", "--project", project], { approve: "context7" });
     await step("6. Releases — 고정 release fixture", ["releases", "context7", "--project", project, "--no-token"], null);
     await step("7. Impact — 업데이트 영향", ["impact", "context7", "--project", project, "--no-token"], null);
-    await step("8. Update preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)", ["update", "context7", "--project", project], { approve: null });
+    // v0.2.1(#70): Context7 Manifest는 검토한 4.1.0으로 고정됐다. 데모 프로젝트의 기존 항목도 4.1.0이어야 adopt할 수 있고(검토한 실행 인자만 편입),
+    // 다른 버전으로 가는 Update는 정확한 버전 입력(--to)으로 계획한다.
+    await step("8. Update preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)", ["update", "context7", "--project", project, "--to", "4.4.1"], { approve: null });
     await step("9. Discover — New for your project", ["discover", "--view", "new", "--project", project], null);
     await step("9. Discover — Trending", ["trending"], null);
     await step("10. Benchmark preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)", ["benchmark", "context7", "--project", project], { approve: null });

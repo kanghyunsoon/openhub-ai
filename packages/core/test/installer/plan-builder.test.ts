@@ -209,8 +209,9 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     // v0.2.0 P0-2: mongodb-mcp-server는 npx pkg@X.Y.Z로 고정한 첫 seed다(npx Prepare 대상). 나머지 7개는 그대로 floating이다.
     // v0.2.0 P0-3: kubernetes-mcp-server도 kubernetes-mcp-server@0.0.67로 고정한다(검토된 toolConfig 버전).
     // v0.2.1: postgres-mcp(0.3.0 + mcp 1.30.0)를 검토된 정확한 버전으로 고정한다(uvx Prepare 대상). serena는 지원 중단으로 Registry에서 빠졌다.
+    // v0.2.1(#70): context7을 검토한 정확한 버전(@upstash/context7-mcp@4.1.0)으로 고정한다(npx Prepare 대상). 고정 안 된 npx 도구는 Chrome DevTools MCP·Playwright MCP 둘이다.
     const pinnedIds = SEED_IDS.filter((id) => seedArtifacts[id]!.pinned);
-    expect(pinnedIds).toEqual(["kubernetes-mcp-server", "mongodb-mcp-server", "postgres-mcp"]);
+    expect(pinnedIds).toEqual(["context7", "kubernetes-mcp-server", "mongodb-mcp-server", "postgres-mcp"]);
     for (const id of SEED_IDS) {
       const requirements = planned(build(id)).plan.approvalRequirements;
       if (pinnedIds.includes(id)) expect(requirements, id).not.toContain("floating-artifact");

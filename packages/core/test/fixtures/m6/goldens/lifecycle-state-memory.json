@@ -1,7 +1,7 @@
 {
   "entries": {
     "project:<projectKey>:claude-code:fixture-npx": {
-      "appliedPlanDigest": "sha256:408ae07f2b51090be84630c487f36302908ac16fe0a5cbed653be6158c891f76",
+      "appliedPlanDigest": "sha256:efcff65eef2fdac47979a441dfcdcbaa44d0fec368e0449a94300a08d52cbbfe",
       "artifact": {
         "requested": "@openhub-fixture/npx-mcp",
         "resolved": null

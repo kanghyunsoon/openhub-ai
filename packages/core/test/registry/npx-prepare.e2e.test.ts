@@ -32,11 +32,12 @@ import { seedEntries } from "../recommendation/helpers";
  * v0.2.0 npx Prepare 실제 E2E(OPENHUB_E2E=1에서만). 실제 npm·npx·네트워크를 쓰고, npm cache는 매번 새 임시 디렉터리다
  * (npm_config_cache를 이 테스트 동안만 바꾼다. 사용자 cache는 쓰지 않는다). 자격증명·실제 서비스는 쓰지 않는다.
  * 대상 패키지는 OPENHUB_E2E_NPX_COMMAND로 바꿀 수 있다(예: 대형 패키지 재검증). 기본은 Context7의 고정 버전이다.
- * 이 테스트는 Registry Manifest를 바꾸지 않는다. context7 Manifest를 메모리에서만(v0.2.1부터: Memory MCP는 지원 중단 #69) 고정 버전 명령으로 바꿔 쓴다.
+ * 이 테스트는 Registry Manifest 파일을 바꾸지 않는다. OPENHUB_E2E_NPX_COMMAND를 주면 context7 Manifest를 메모리에서만 그 명령으로 바꿔 쓴다.
  */
 // v0.2.1(#46): 제품 경로처럼 같은 원본으로 계획의 패키지 출처 digest와 Health 실행 환경을 만든다(없으면 Health가 서버를 띄우지 않는다).
 const source = () => process.env;
-const COMMAND = process.env["OPENHUB_E2E_NPX_COMMAND"] ?? "npx -y @upstash/context7-mcp@4.1.1";
+// v0.2.1(#70): 기본은 실제 Registry의 context7 명령(검토한 고정 버전)이다. 다른 버전·패키지는 OPENHUB_E2E_NPX_COMMAND로 비교한다.
+const COMMAND = process.env["OPENHUB_E2E_NPX_COMMAND"] ?? String((await seedEntries()).find((e) => e.manifest.name === "context7")!.manifest.install.options?.["command"]);
 const INTERRUPT_MS = Number(process.env["OPENHUB_E2E_NPX_INTERRUPT_MS"] ?? "1500");
 const platform = process.platform === "win32" ? "windows" : "linux";
 const SPEC = COMMAND.split(" ").find((t, i) => i > 0 && !t.startsWith("-"))!;

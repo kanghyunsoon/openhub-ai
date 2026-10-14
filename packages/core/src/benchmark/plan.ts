@@ -24,6 +24,7 @@ import { configEntryDigest } from "../lifecycle/status";
 import { healthEnvNotice } from "../lifecycle/preview";
 import { mcpPackageSourceCheck, packageSourceCheckMessage, type McpSourceEnv } from "../process/mcp-env";
 import { wheelsOnlyUvxLaunchArgs } from "../installer/backends";
+import { tokenizeManifestCommand } from "../installer/command";
 import { projectKeyFor, readLifecycleState, type StateErrorCode } from "../lifecycle/store";
 
 /**
@@ -182,6 +183,12 @@ export async function planBenchmark(options: BenchmarkPlanOptions): Promise<Benc
       blockers.push({ code: "BENCHMARK_CONFIG_DRIFT", message: t.file + "의 " + t.serverName + " 항목이 Version State와 다릅니다(config-drift·missing-config)" });
     }
     const args = argsOfClientSpec(state.launch.clientSpec);
+    // v0.2.1(#69 리뷰 P0): 기록된 실행 인자도 설치 때와 같은 명령 검증(npx는 npm Registry 이름만)을 통과해야 실행한다.
+    // tool config placeholder는 위에서 이미 막았고, 여기서는 검토된 placeholder로 보고 검사한다(lifecycle launchTokensOk와 같음).
+    const checked = args.map((a) => (a === TOOL_CONFIG_PLACEHOLDER ? "openhub-tool-config-placeholder" : a));
+    if ((state.backend === "npx" || state.backend === "uvx") && checked.length > 0 && !tokenizeManifestCommand([state.backend, ...checked].join(" "), state.backend).ok) {
+      blockers.push({ code: "BENCHMARK_UNSUPPORTED", message: "Version State에 기록된 실행 인자가 현재 명령 검증을 통과하지 않습니다(npm Registry 이름이 아닌 패키지 지정 등). 실행하지 않습니다" });
+    }
     if (state.artifact.resolved !== null && !args.includes(state.artifact.resolved.spec)) {
       blockers.push({ code: "BENCHMARK_ARTIFACT_MISMATCH", message: "실행 인자에 Version State의 고정 artifact가 없습니다" });
     }

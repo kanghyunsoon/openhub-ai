@@ -145,7 +145,8 @@ Pinokio 지원은 pterm 0.0.25 기준입니다. 기본 테스트는 가짜 pinok
 | Windows에서 Postgres MCP Pro 첫 실행 | Health 시간 제한에 걸릴 수 있음 | 정확한 버전(`postgres-mcp==0.3.0`, `mcp==1.30.0`, wheel만)을 설정 쓰기 전에 준비하고, Client도 `--no-build`로 실행합니다 |
 | Serena | 설치 가능. Client가 첫 실행 때 의존성(`proxy-tools`)을 소스에서 빌드 | **새 설치·업데이트·롤백·Health·repair·편입(adopt)·Benchmark를 하지 않습니다**: 그 빌드를 검증할 수 없습니다. 기존 Serena 항목과 Version State는 그대로 두고 지원 중단으로 표시하며, 중단된 작업은 복구할 수 있습니다. 원하면 [수동 제거 절차](#도구와-openhub-제거)로 지우세요. 재지원: [#59](https://github.com/kanghyunsoon/openhub-ai/issues/59) |
 | Memory MCP | 설치 가능. 기본적으로 기억을 npx cache 안의 `memory.jsonl`에 저장 | **새 설치·업데이트·롤백·Health·repair·편입(adopt)·Benchmark를 하지 않습니다**: 새 버전이 나오면 그 파일이 지워지고, 다른 버전은 이전 기억 없이 시작합니다. 기존 항목, Version State, 기억 파일은 그대로 두고 지원 중단으로 표시하며, 중단된 작업은 복구할 수 있습니다. Client는 계속 실행할 수 있고 OpenHub가 파일을 보호해 주지 않으니, `memory.jsonl`을 백업하고 `MEMORY_FILE_PATH`에 npm cache 밖의 절대 경로를 지정하세요([알려진 문제](docs/known-issues-v0.2.1.ko.md)). 저장 경로 해결: [#69](https://github.com/kanghyunsoon/openhub-ai/issues/69) |
-| 버전 고정 안 된 npx 도구(Context7, Chrome DevTools MCP, Playwright MCP)의 첫 Health | 20초 시작 제한 안에서 패키지를 내려받음 | 변경 없음. Context7은 빈 npm cache에서 Windows PC 1대 기준 약 15.8초, 나머지 둘은 미측정. `startup-timeout`이면 Health를 다시 실행([알려진 문제](docs/known-issues-v0.2.1.ko.md), [#70](https://github.com/kanghyunsoon/openhub-ai/issues/70)) |
+| Context7 | 버전 고정 안 됨. 첫 Health가 20초 시작 제한 안에서 최신 버전을 내려받음(빈 npm cache, Windows PC 1대 기준 약 15.8초) | `@upstash/context7-mcp@4.1.0`으로 고정하고 승인 뒤 설정을 쓰기 전에 준비합니다. 기존 항목은 업데이트하기 전까지 명령이 그대로입니다([알려진 문제](docs/known-issues-v0.2.1.ko.md)) |
+| 버전 고정 안 된 npx 도구(Chrome DevTools MCP, Playwright MCP)의 첫 Health | 20초 시작 제한 안에서 패키지를 내려받음 | 변경 없음, 미측정. `startup-timeout`이면 Health를 다시 실행([알려진 문제](docs/known-issues-v0.2.1.ko.md), [#70](https://github.com/kanghyunsoon/openhub-ai/issues/70)) |
 
 ## 데모
 

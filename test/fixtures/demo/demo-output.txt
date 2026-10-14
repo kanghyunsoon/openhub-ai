@@ -32,8 +32,8 @@ Detectors  ai-environment:ok  databases:ok  frameworks:ok  infrastructure:ok  ku
 == 2. Existing tools — 이미 설정된 MCP 서버
 $ openhub lifecycle status --project examples/demo-project
 context7 · Claude Code · 프로젝트 (.mcp.json)
-  Tool       (식별 안 됨)
-  상태       untracked-foreign(OpenHub가 관리하지 않는 설정)
+  Tool       context7
+  상태       untracked-adoptable(표준 항목, Version State 없음)
   Health: Unknown (아직 확인하지 않음)
 
 사용자 범위 설정은 확인하지 않았습니다(--include-host로 켭니다).
@@ -119,8 +119,8 @@ Adopt 계획: context7 (ready)
   일치한 artifact: npm:@upstash/context7-mcp
   현재 서버 이름: context7
   Registry 이름: context7 (canonical alias context7)
-실행 방식(기존 설정 그대로): npx · npx -y @upstash/context7-mcp@4.3.0
-artifact: @upstash/context7-mcp@4.3.0 (설정에 고정된 spec을 기록합니다)
+실행 방식(기존 설정 그대로): npx · npx -y @upstash/context7-mcp@4.1.0
+artifact: @upstash/context7-mcp@4.1.0 (설정에 고정된 spec을 기록합니다)
 효과: Version State 기록 1회 · 설정 파일 변경 0 · 실행 0 · 네트워크 0
 Health: Not verified (adopt는 MCP 서버를 실행하지 않습니다)
 승인 요구:
@@ -137,7 +137,7 @@ $ openhub releases context7 --project examples/demo-project --no-token
 Context7 (context7) 릴리스
 
 버전 출처   npm · notes github-release
-현재        4.3.0
+현재        4.1.0
 최신        4.4.1 · 게시 2025-09-25
 포함 릴리스 4.4.1, 4.4.0
 
@@ -167,7 +167,7 @@ Release notes 4.4.1 (원문 일부, 해석하지 않음)
 $ openhub impact context7 --project examples/demo-project --no-token
 Context7 (context7) 업데이트 영향
 
-버전        4.3.0 → 4.4.1
+버전        4.1.0 → 4.4.1
 판정        HIGH (WARNING)
 이유
   - notes-breaking (high)
@@ -176,15 +176,15 @@ Context7 (context7) 업데이트 영향
 근거
   - release-note 4.4.0: line 1
   - release-note 4.4.0: line 2
-  - version npm: 4.3.0 -> 4.4.1
+  - version npm: 4.1.0 -> 4.4.1
 영향 파일   .mcp.json
 
 Impact는 판단 근거이며 승인이 아닙니다. 실행은 openhub update의 계획·승인을 거칩니다.
 (exit 0)
 
 == 8. Update preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)
-$ openhub update context7 --project examples/demo-project
-Update available: 4.3.0 → 4.4.1
+$ openhub update context7 --project examples/demo-project --to 4.4.1
+Update available: 4.1.0 → 4.4.1
 Impact: HIGH (WARNING)
 Reasons: notes-breaking, notes-migration, version-minor
 Summary: Breaking 1 · Security 0 · Compatibility 1 · Performance 0 · Fix 1 · Other 1
@@ -194,12 +194,12 @@ Context7 (context7) 업데이트 계획
 
 상태         ready
 Backend      npx
-현재 버전    @upstash/context7-mcp@4.3.0
+현재 버전    @upstash/context7-mcp@4.1.0
 목표 버전    @upstash/context7-mcp@4.4.1
-요청 spec    @upstash/context7-mcp
+요청 spec    @upstash/context7-mcp@4.4.1
 준비 단계    npx --yes --package=@upstash/context7-mcp@4.4.1 -- node --version — OpenHub가 설정을 바꾸기 전에 이 버전을 npx cache에 받습니다(MCP 서버는 실행하지 않음, 네트워크·다운로드·의존성 설치 스크립트)
 Client 실행 명령
-  현재  npx -y @upstash/context7-mcp@4.3.0
+  현재  npx -y @upstash/context7-mcp@4.1.0
   변경  npx -y @upstash/context7-mcp@4.4.1
 
 대상
@@ -252,8 +252,8 @@ TRENDING — OpenHub Trend Score (historical star growth가 아니라 현재 pop
 $ openhub benchmark context7 --project examples/demo-project
 Benchmark 계획: context7 (ready)
 대상: claude-code · project · .mcp.json · 서버 context7
-artifact(고정): @upstash/context7-mcp@4.3.0
-실행: npx -y @upstash/context7-mcp@4.3.0 (격리 임시 디렉터리, shell 없음)
+artifact(고정): @upstash/context7-mcp@4.1.0
+실행: npx -y @upstash/context7-mcp@4.1.0 (격리 임시 디렉터리, shell 없음)
 횟수: 준비 1 + 측정 5 · 제한: 시작 20초 · handshake 10초 · 회당 45초 · 전체 300초
 MCP 서버를 6번(준비 1 + 측정 5) 실행해 initialize·tools/list 응답 시간만 잽니다. MCP tool은 호출하지 않습니다(tools/call 0).
 MCP 서버 process에는 OS 실행에 필요한 변수(PATH·HOME·TEMP 등)만 넘깁니다(Manifest가 선언한 환경변수 없음). 그 밖의 API 키·token·자격증명 환경변수는 넘기지 않습니다
@@ -268,4 +268,4 @@ Benchmark를 취소했습니다. 아무것도 실행하지 않았습니다.
 (exit 1)
 
 == 요약
-가짜 fetch 응답 7회(실제 네트워크 0) · 프로세스 실행 0회
+가짜 fetch 응답 6회(실제 네트워크 0) · 프로세스 실행 0회

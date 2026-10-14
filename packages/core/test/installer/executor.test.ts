@@ -207,7 +207,10 @@ describe("REQ-031 REQ-033 Process Executor와 npx·uvx·docker Adapter", () => {
 
   it("AC-031-06 준비 단계는 floating npx 0개(launch-on-demand), 정확한 버전 uvx는 uvx Prepare 1개(v0.2.1), docker는 docker pull 1개이고 npm·cache add·cmd.exe가 0건이다", async () => {
     const spawner = fakeSpawner();
-    for (const toolId of ["fixture-npx-mcp", "context7"]) {
+    // v0.2.1(#70): Context7은 정확한 버전으로 고정돼 npx Prepare 대상이다. 고정 안 된 실제 Registry npx 도구는 Playwright MCP로 본다.
+    const context7 = await verifiedOf("context7");
+    expect(context7.plan.artifact).toMatchObject({ spec: "@upstash/context7-mcp@4.1.0", pinned: true, preparation: "npm-cache" });
+    for (const toolId of ["fixture-npx-mcp", "playwright-mcp"]) {
       const verified = await verifiedOf(toolId);
       expect(verified.plan.artifact?.preparation, toolId).toBe("launch-on-demand");
       expect(await executeVerifiedPlan(verified, { projectRoot: scratch, spawner, isolatedDir: isolated })).toMatchObject({ ok: true, prepared: true });
