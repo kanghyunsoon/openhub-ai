@@ -26,8 +26,9 @@ type InstallSmoke = { status: string; stages: string[]; choices: { client: strin
 
 async function launch(locale: string, clients?: string, raceFirst?: string): Promise<{ code: number | null; install: InstallSmoke }> {
   const out = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
-    // v0.2.1 #39: Serena는 신규 설치가 중단돼 추천에 없다. demo-project에 같은 자리(likely-gap, 버전 고정 없는 launch-on-demand)로 남는 Context7을 쓴다.
-    const env: Record<string, string> = { ...(process.env as Record<string, string>), OPENHUB_SMOKE_USER_DATA: path.join(scratch, "ud-" + locale + "-" + (clients ?? "default")), OPENHUB_SMOKE_SYSTEM_LOCALE: locale, OPENHUB_SMOKE_PROJECT: path.join(ROOT, "examples", "demo-project"), OPENHUB_SMOKE_INSTALL: "context7" };
+    // v0.2.1 #39: Serena는 신규 설치가 중단돼 추천에 없다. #69: demo-project에는 이제 Context7이 이미 설정되어 있으므로(Memory MCP 지원 중단),
+    // 같은 자리(likely-gap, 버전 고정 없는 launch-on-demand)로 남는 Chrome DevTools MCP를 쓴다.
+    const env: Record<string, string> = { ...(process.env as Record<string, string>), OPENHUB_SMOKE_USER_DATA: path.join(scratch, "ud-" + locale + "-" + (clients ?? "default")), OPENHUB_SMOKE_SYSTEM_LOCALE: locale, OPENHUB_SMOKE_PROJECT: path.join(ROOT, "examples", "demo-project"), OPENHUB_SMOKE_INSTALL: "chrome-devtools-mcp" };
     for (const k of ["ELECTRON_RUN_AS_NODE", "OPENHUB_SMOKE_UPDATE", "OPENHUB_SMOKE_REPAIR", "OPENHUB_SMOKE_RELEASE", "OPENHUB_SMOKE_ADOPT", "OPENHUB_SMOKE_HOME", "OPENHUB_SMOKE_I18N_SWITCH", "OPENHUB_SCREENSHOT", "OPENHUB_SMOKE_INSTALL_CLIENTS", "OPENHUB_SMOKE_INSTALL_RACE"]) delete env[k];
     if (clients !== undefined) env["OPENHUB_SMOKE_INSTALL_CLIENTS"] = clients;
     if (raceFirst !== undefined) env["OPENHUB_SMOKE_INSTALL_RACE"] = raceFirst;
@@ -80,7 +81,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || electronBin === null)("v0.
     await writeFile(path.join(b, "README.md"), "# notes only\n");
     await writeFile(path.join(b, ".mcp.json"), '{ "mcpServers": {} }\n');
     const out = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
-      const env: Record<string, string> = { ...(process.env as Record<string, string>), OPENHUB_SMOKE_USER_DATA: path.join(scratch, "ud-switch-race"), OPENHUB_SMOKE_SYSTEM_LOCALE: "en-US", OPENHUB_SMOKE_PROJECT: path.join(ROOT, "examples", "demo-project"), OPENHUB_SMOKE_INSTALL: "context7", OPENHUB_SMOKE_SWITCH_RACE: "context7", OPENHUB_SMOKE_PROJECT_B: b };
+      const env: Record<string, string> = { ...(process.env as Record<string, string>), OPENHUB_SMOKE_USER_DATA: path.join(scratch, "ud-switch-race"), OPENHUB_SMOKE_SYSTEM_LOCALE: "en-US", OPENHUB_SMOKE_PROJECT: path.join(ROOT, "examples", "demo-project"), OPENHUB_SMOKE_INSTALL: "chrome-devtools-mcp", OPENHUB_SMOKE_SWITCH_RACE: "chrome-devtools-mcp", OPENHUB_SMOKE_PROJECT_B: b };
       for (const k of ["ELECTRON_RUN_AS_NODE", "OPENHUB_SMOKE_UPDATE", "OPENHUB_SMOKE_REPAIR", "OPENHUB_SMOKE_RELEASE", "OPENHUB_SMOKE_ADOPT", "OPENHUB_SMOKE_HOME", "OPENHUB_SMOKE_I18N_SWITCH", "OPENHUB_SCREENSHOT", "OPENHUB_SMOKE_INSTALL_CLIENTS", "OPENHUB_SMOKE_INSTALL_RACE", "OPENHUB_SMOKE_USER_SCOPE"]) delete env[k];
       const child = spawn(electronBin!, [".", "--smoke"], { cwd: DESKTOP, env, shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
       let stdout = "";

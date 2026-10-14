@@ -29,7 +29,7 @@ import {
 } from "../../src/index";
 import { approveAll, createHarness, plannedOf } from "../installer/harness";
 import { abandonOperationLock, newScratch } from "../lifecycle/helpers";
-import { REPO_ROOT, fixtureProfile, legacySerenaEntry, seedEntries } from "../recommendation/helpers";
+import { REPO_ROOT, fixtureProfile, legacySerenaEntry, seedWithNpxFixture } from "../recommendation/helpers";
 
 /**
  * v0.2.1 #39(D1) Serena 신규 설치 중단과 기존 사용자 호환. 실제 Registry(Serena 없음)와 테스트 전용 v0.2.0 Serena Manifest만 쓴다.
@@ -63,7 +63,7 @@ async function asV020<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const serenaEntry = await legacySerenaEntry();
 /** 사용자 정의 Registry: 실제 Registry + v0.2.0 Serena Manifest. */
 const legacy = [...seed, serenaEntry];
@@ -187,7 +187,7 @@ describe("v0.2.1 #39 Serena 지원 중단(D1): 신규 설치 차단과 기존 �
 
   it("6. 다른 Registry 도구의 설치·추천에는 영향이 없다", async () => {
     const h = await createHarness(scratch, { entries: seed });
-    const memory = await plannedOf(h, h.request("memory-mcp", CURSOR));
+    const memory = await plannedOf(h, h.request("fixture-npx-mcp", CURSOR));
     expect(memory.plan.status).toBe("installable");
     const report = recommend(await fixtureProfile("react-pnpm"), seed, undefined);
     expect(report.recommendations.map((r) => r.toolId)).toEqual(expect.arrayContaining(["playwright-mcp", "chrome-devtools-mcp", "context7"]));

@@ -16,10 +16,10 @@ import {
   sandboxReportSchema,
   type DiscoveryReport,
 } from "../../src/index";
-import { FIXTURES_DIR, REPO_ROOT, seedEntries, snapshotPath } from "../recommendation/helpers";
+import { FIXTURES_DIR, REPO_ROOT, seedWithNpxFixture, snapshotPath } from "../recommendation/helpers";
 
 /** TASK-067 REQ-061 Metrics. 라벨된 fixture와 가짜 sandbox·discovery report만 쓴다(network·사용자 state 0). */
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const snapshot = await loadMetadataSnapshot(snapshotPath("metadata.seed-synthetic.json"));
 const LABELS = path.join(FIXTURES_DIR, "metrics", "labels.yaml");
 const labelsText = await readFile(LABELS, "utf8");
@@ -109,7 +109,7 @@ describe("REQ-061 Metrics", () => {
         {
           name: "/home/runner/work/openhub-ai/packages/core/test/registry/sandbox.e2e.test.ts",
           assertionResults: [
-            { title: "AC-054-08 memory-mcp 설치 + Health token " + SECRET, fullName: "x " + SECRET, status: "passed", duration: 1234.6, failureMessages: [] },
+            { title: "AC-054-08 fixture-npx-mcp 설치 + Health token " + SECRET, fullName: "x " + SECRET, status: "passed", duration: 1234.6, failureMessages: [] },
             { title: "unnamed", status: "failed", duration: 5, failureMessages: ["Error at C:\\Users\\alice\\x " + SECRET] },
           ],
         },
@@ -124,7 +124,7 @@ describe("REQ-061 Metrics", () => {
       { suite: "install-health", id: "unlabeled", status: "failed", durationMs: 5 },
     ]);
     const bytes = JSON.stringify(r);
-    for (const banned of [SECRET, "alice", "/home/runner", "memory-mcp"]) expect(bytes).not.toContain(banned);
+    for (const banned of [SECRET, "alice", "/home/runner", "fixture-npx-mcp"]) expect(bytes).not.toContain(banned);
     expect(sandboxReportSchema.safeParse({ ...r, results: [{ ...r.results[0], title: "x" }] }).success).toBe(false);
     const yml = readFileSync(path.join(REPO_ROOT, ".github/workflows/registry-remote.yml"), "utf8");
     expect(yml).toContain("scripts/sandbox-report.ts sandbox-vitest.json sandbox-report.json");

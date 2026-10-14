@@ -15,11 +15,11 @@ import {
   type ToolState,
 } from "../../src/index";
 import { approveAll, createHarness, plannedOf, type Harness } from "../installer/harness";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { newScratch } from "./helpers";
 
 /** TASK-042 Config 교체 writer. M4 설치로 만든 실제 config 파일을 LifecyclePlan의 config-replace 단계로 바꾼다. */
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await newScratch("config-replace-test");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 afterEach(() => vi.unstubAllEnvs());
@@ -28,7 +28,7 @@ const NOW = () => new Date("2026-10-07T01:02:03.000Z");
 function registry() {
   return vi.fn(async (url: string) => {
     const json = (doc: unknown) => new Response(JSON.stringify(doc), { status: 200 });
-    if (url.endsWith("server-memory/latest")) return json({ name: "@modelcontextprotocol/server-memory", version: "1.2.3" });
+    if (url.endsWith("npx-mcp/latest")) return json({ name: "@openhub-fixture/npx-mcp", version: "1.2.3" });
     if (url === "https://pypi.org/pypi/postgres-mcp/json") return json({ info: { name: "postgres-mcp", version: "0.3.0" } });
     return new Response("missing", { status: 404 });
   });
@@ -41,7 +41,7 @@ async function installed(h: Harness, toolId: string, targets: InstallRequest["ta
   expect(await recordInstallInState(planned, result, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: NOW })).toMatchObject({ ok: true });
 }
 async function stepsFor(h: Harness, over: Partial<LifecyclePlanOptions> = {}) {
-  const r = await planLifecycle({ operation: "update", toolId: "memory-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, entries: seed, platform: "linux", includeUser: false, fetch: registry(), ...over });
+  const r = await planLifecycle({ operation: "update", toolId: "fixture-npx-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, entries: seed, platform: "linux", includeUser: false, fetch: registry(), ...over });
   if (!r.ok) throw new Error(r.code);
   expect(r.planned.plan.status).toBe("ready");
   return r.planned.plan.steps.filter((s): s is ConfigReplaceStep => s.kind === "config-replace");
@@ -52,23 +52,23 @@ async function stateEntry(h: Harness, client: string): Promise<ToolState> {
   return Object.values(r.state.entries).find((e) => e.target.client === client)!;
 }
 const roots = (h: Harness, acknowledgements: string[] = ["base"]) => ({ projectRoot: h.projectRoot, homeDir: h.homeDir, fs: h.env.configFs!, acknowledgements });
-const MEMORY_123 = { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory@1.2.3"] };
+const MEMORY_123 = { command: "npx", args: ["-y", "@openhub-fixture/npx-mcp@1.2.3"] };
 
 describe("REQ-040 Config 교체 writer", () => {
   it("AC-042-01 JSON은 entryDigest가 같을 때만 mcpServers.<alias>를 바꾸고 나머지 key·순서·들여쓰기·줄바꿈을 유지한다", async () => {
     const h = await createHarness(scratch, { entries: seed });
     const before = { $schema: "x", mcpServers: { zeta: { command: "node", args: ["z.js"], extra: { keep: true } } }, trailingKey: [1, 2] };
     await writeFile(path.join(h.projectRoot, ".mcp.json"), JSON.stringify(before, null, 4).replace(/\n/gu, "\r\n") + "\r\n");
-    await installed(h, "memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    await installed(h, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const installedText = await readFile(path.join(h.projectRoot, ".mcp.json"), "utf8");
     const [step] = await stepsFor(h);
     const r = await replaceConfigEntry(step!, roots(h));
     expect(r.ok).toBe(true);
     const text = await readFile(path.join(h.projectRoot, ".mcp.json"), "utf8");
     const doc = JSON.parse(text);
-    expect(doc.mcpServers.memory).toEqual(MEMORY_123);
+    expect(doc.mcpServers["fixture-npx"]).toEqual(MEMORY_123);
     expect(Object.keys(doc)).toEqual(Object.keys(JSON.parse(installedText)));
-    expect(Object.keys(doc.mcpServers)).toEqual(["zeta", "memory"]);
+    expect(Object.keys(doc.mcpServers)).toEqual(["zeta", "fixture-npx"]);
     expect({ ...doc, mcpServers: { zeta: doc.mcpServers.zeta } }).toEqual(before);
     expect(text).toContain('\r\n    "mcpServers": {\r\n        "zeta"');
     expect(text.endsWith("}\r\n")).toBe(true);
@@ -98,7 +98,7 @@ describe("REQ-040 Config 교체 writer", () => {
 
   it("AC-042-03 precondition이 다르거나 block이 0회·2회 이상이면 CONFIG_DRIFT이고 write 0회다", async () => {
     const h = await createHarness(scratch, { entries: seed });
-    await installed(h, "memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    await installed(h, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const [step] = await stepsFor(h);
     const mcp = path.join(h.projectRoot, ".mcp.json");
     const original = await readFile(mcp, "utf8");
@@ -131,7 +131,7 @@ describe("REQ-040 Config 교체 writer", () => {
 
   it("AC-042-04 같은 디렉터리 임시 파일 → rename으로 쓰고 영수증으로 원본 byte를 되돌린다", async () => {
     const h = await createHarness(scratch, { entries: seed });
-    await installed(h, "memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    await installed(h, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const [step] = await stepsFor(h);
     const file = path.join(h.projectRoot, ".mcp.json");
     const original = await readFile(file);
@@ -148,13 +148,13 @@ describe("REQ-040 Config 교체 writer", () => {
 
   it("AC-042-05 D-013 allowlist 밖(~/.claude.json 포함)은 manual-setup-required이고 write 0회다", async () => {
     const h = await createHarness(scratch, { entries: seed });
-    await installed(h, "memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    await installed(h, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const [step] = await stepsFor(h);
     h.reset();
     for (const forged of [
       { ...step!, scope: "user" as const, file: "~/.claude.json" },
       { ...step!, file: "../.mcp.json" },
-      { ...step!, path: ["servers", "memory"] },
+      { ...step!, path: ["servers", "fixture-npx"] },
     ]) {
       expect(await replaceConfigEntry(forged, roots(h, ["base", "user-scope-config"]))).toMatchObject({ ok: false, code: "MANUAL_SETUP_REQUIRED" });
     }
@@ -165,9 +165,9 @@ describe("REQ-040 Config 교체 writer", () => {
 
   it("AC-042-06 Windows npx 항목은 교체 후에도 cmd /d /c npx이고 D-016 검증을 통과하지 못하면 write 0회다", async () => {
     const h = await createHarness(scratch, { entries: seed });
-    await installed(h, "memory-mcp", [{ client: "cursor", scope: "project" }], "windows");
+    await installed(h, "fixture-npx-mcp", [{ client: "cursor", scope: "project" }], "windows");
     const [step] = await stepsFor(h, { platform: "windows" });
-    expect(step!.value).toEqual({ command: "cmd", args: ["/d", "/c", "npx", "-y", "@modelcontextprotocol/server-memory@1.2.3"] });
+    expect(step!.value).toEqual({ command: "cmd", args: ["/d", "/c", "npx", "-y", "@openhub-fixture/npx-mcp@1.2.3"] });
     h.reset();
     for (const bad of ["%COMSPEC%", "!VAR!", "^&calc", "a&b"]) {
       const forged = { ...step!, value: { command: "cmd", args: ["/d", "/c", "npx", "-y", bad] } };
@@ -177,24 +177,24 @@ describe("REQ-040 Config 교체 writer", () => {
     expect(h.writes).toEqual([]);
     expect((await replaceConfigEntry(step!, roots(h))).ok).toBe(true);
     const doc = JSON.parse(await readFile(path.join(h.projectRoot, ".cursor", "mcp.json"), "utf8"));
-    expect(doc.mcpServers.memory).toEqual({ command: "cmd", args: ["/d", "/c", "npx", "-y", "@modelcontextprotocol/server-memory@1.2.3"] });
+    expect(doc.mcpServers["fixture-npx"]).toEqual({ command: "cmd", args: ["/d", "/c", "npx", "-y", "@openhub-fixture/npx-mcp@1.2.3"] });
   });
 
   it("AC-042-07 대상 파일·상위 디렉터리가 project root·home 밖으로 해석되는 symlink·junction이면 거부한다", async () => {
     const h = await createHarness(scratch, { entries: seed });
     const outside = await mkdtemp(path.join(scratch, "outside-"));
-    const entry = { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory"] };
-    await writeFile(path.join(outside, "mcp.json"), JSON.stringify({ mcpServers: { memory: entry } }));
-    await writeFile(path.join(outside, "config.toml"), '[mcp_servers.memory]\ncommand = "npx"\nargs = ["-y", "@modelcontextprotocol/server-memory"]\n');
+    const entry = { command: "npx", args: ["-y", "@openhub-fixture/npx-mcp"] };
+    await writeFile(path.join(outside, "mcp.json"), JSON.stringify({ mcpServers: { "fixture-npx": entry } }));
+    await writeFile(path.join(outside, "config.toml"), '[mcp_servers.fixture-npx]\ncommand = "npx"\nargs = ["-y", "@openhub-fixture/npx-mcp"]\n');
     await symlink(outside, path.join(h.projectRoot, ".cursor"), "junction");
     await symlink(outside, path.join(h.homeDir, ".codex"), "junction");
     const base = { id: "config", kind: "config-replace" as const, expectedEntryDigest: configEntryDigest(entry), value: MEMORY_123 };
     h.reset();
-    const cursor = await replaceConfigEntry({ ...base, client: "cursor", scope: "project", file: ".cursor/mcp.json", path: ["mcpServers", "memory"] }, roots(h));
-    const codex = await replaceConfigEntry({ ...base, client: "codex", scope: "user", file: "~/.codex/config.toml", path: ["mcp_servers", "memory"] }, roots(h, ["base", "user-scope-config"]));
+    const cursor = await replaceConfigEntry({ ...base, client: "cursor", scope: "project", file: ".cursor/mcp.json", path: ["mcpServers", "fixture-npx"] }, roots(h));
+    const codex = await replaceConfigEntry({ ...base, client: "codex", scope: "user", file: "~/.codex/config.toml", path: ["mcp_servers", "fixture-npx"] }, roots(h, ["base", "user-scope-config"]));
     expect([cursor, codex]).toMatchObject([{ ok: false, code: "CONFIG_PATH_ESCAPE" }, { ok: false, code: "CONFIG_PATH_ESCAPE" }]);
     expect(h.writes).toEqual([]);
-    expect(JSON.parse(await readFile(path.join(outside, "mcp.json"), "utf8")).mcpServers.memory).toEqual(entry);
+    expect(JSON.parse(await readFile(path.join(outside, "mcp.json"), "utf8")).mcpServers["fixture-npx"]).toEqual(entry);
   });
 
   it("AC-042-08 env는 Client별 참조 문법으로만 쓰고 실제 env 값은 파일에 0건이다", async () => {

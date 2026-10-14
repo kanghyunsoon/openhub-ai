@@ -16,7 +16,7 @@ import {
   type RecoveryMode,
 } from "../../src/index";
 import { approveAll, createHarness, plannedOf, type Harness } from "../installer/harness";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { newScratch } from "./helpers";
 
 /**
@@ -28,7 +28,7 @@ import { newScratch } from "./helpers";
 const skip = process.env["OPENHUB_E2E"] !== "1";
 const scratch = await newScratch("v021-journal-kill-e2e");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const tsx = createRequire(import.meta.url).resolve("tsx/cli");
 const worker = path.join(import.meta.dirname, "fixtures", "update-worker.ts");
 const TOOL = "github-mcp-server";
@@ -43,7 +43,7 @@ interface Setup {
   files: () => Promise<string[]>;
 }
 
-async function setup(scope: Scope, withMemory = false): Promise<Setup> {
+async function setup(scope: Scope, withNpxTool = false): Promise<Setup> {
   const h = await createHarness(scratch, { entries: seed });
   if (scope === "user") {
     await mkdir(path.join(h.homeDir, ".cursor"), { recursive: true });
@@ -57,7 +57,7 @@ async function setup(scope: Scope, withMemory = false): Promise<Setup> {
     expect(await recordInstallInState(p, r, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() })).toMatchObject({ ok: true });
   };
   await install(TOOL, [{ client: "cursor", scope }], scope === "user");
-  if (withMemory) await install("memory-mcp", [{ client: "claude-code", scope: "project" }], false);
+  if (withNpxTool) await install("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }], false);
   const cursorFile = scope === "project" ? path.join(h.projectRoot, ".cursor", "mcp.json") : path.join(h.homeDir, ".cursor", "mcp.json");
   const stateFile = path.join(h.homeDir, ".openhub", "state", "lifecycle.json");
   const files = async () => [await readFile(cursorFile, "utf8"), await readFile(stateFile, "utf8")];
@@ -232,7 +232,7 @@ describe.skipIf(skip)("v0.2.1 P0-3 실제 강제 종료 후 Recovery", () => {
     await r.reached();
     r.pause(true);
     try {
-      const req = s.h.request("memory-mcp", [{ client: "codex", scope: "project" }]);
+      const req = s.h.request("fixture-npx-mcp", [{ client: "codex", scope: "project" }]);
       const p = await plannedOf(s.h, req);
       expect(await runInstallTransaction(p, await approveAll(p), req, s.h.env)).toMatchObject({ status: "failed", code: "OPERATION_IN_PROGRESS" });
       expect(await s.files()).toEqual(killed);
@@ -241,7 +241,7 @@ describe.skipIf(skip)("v0.2.1 P0-3 실제 강제 종료 후 Recovery", () => {
       r.pause(false);
     }
     expect((await r.release()).result).toMatchObject({ status: "recovered" });
-    const req = s.h.request("memory-mcp", [{ client: "codex", scope: "project" }]);
+    const req = s.h.request("fixture-npx-mcp", [{ client: "codex", scope: "project" }]);
     const p = await plannedOf(s.h, req);
     expect((await runInstallTransaction(p, await approveAll(p), req, s.h.env)).status).toBe("succeeded");
     expect(JSON.parse((await s.files())[0]!)).toEqual(JSON.parse(s.original[0]!));
@@ -250,7 +250,7 @@ describe.skipIf(skip)("v0.2.1 P0-3 실제 강제 종료 후 Recovery", () => {
   it("다른 도구의 Update가 Health 대기 중(잠금 보유)이면 승인된 Recovery는 OPERATION_IN_PROGRESS이고 아무것도 바꾸지 않으며, 끝난 뒤 복구된다", async () => {
     const s = await setup("project", true);
     const killed = await killUpdateAt(s);
-    const u = await start(s, { toolId: "memory-mcp", client: "claude-code", scope: "project" });
+    const u = await start(s, { toolId: "fixture-npx-mcp", client: "claude-code", scope: "project" });
     await u.reached();
     const opts = optsOf(s, "undo");
     const built = await planRecovery(opts);

@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadRegistry, parseManifest, type Manifest, type RegistryEntry } from "../../src/index";
 import { checkRecommendationMetadata } from "../../src/registry/recommendation-checks";
-import { FIXTURES_DIR, REPO_ROOT, registryManifestCount } from "./helpers";
+import { FIXTURES_DIR, REPO_ROOT, npxFixtureEntry, registryManifestCount } from "./helpers";
 
 let root: string;
 beforeEach(async () => {
@@ -109,7 +109,7 @@ describe("REQ-020 Registry Recommendation Metadata", () => {
     const cross = checkRecommendationMetadata([entry("tool-b", ["GitHub"]), entry("tool-a", ["github"])]);
     expect(cross.entries.map((e) => e.manifest.name)).toEqual(["tool-a"]);
     expect(cross.issues[0]?.message).toContain("GitHub");
-    const self = checkRecommendationMetadata([entry("tool-c", ["memory", "MEMORY"])]);
+    const self = checkRecommendationMetadata([entry("tool-c", ["fixture-npx", "FIXTURE-NPX"])]);
     expect(self.entries).toEqual([]);
     expect(self.issues).toHaveLength(1);
   });
@@ -130,7 +130,10 @@ describe("REQ-020 Registry Recommendation Metadata", () => {
     expect(r.issues).toEqual([]);
     expect(r.entries).toHaveLength(registryManifestCount());
     const get = (name: string) => r.entries.find((e) => e.manifest.name === name)?.manifest.recommendation;
-    expect(get("memory-mcp")?.source).toEqual({ type: "shared-repo", path: "src/memory" });
+    // v0.2.1 #69: 유일한 shared-repo 도구였던 Memory MCP가 지원 중단으로 빠져 실제 Registry는 모두 dedicated다.
+    expect(Object.fromEntries(r.entries.map((e) => [e.manifest.name, e.manifest.recommendation?.source?.type]))).toEqual(Object.fromEntries(r.entries.map((e) => [e.manifest.name, "dedicated"])));
+    // shared-repo Manifest가 검증을 통과하는지는 테스트 전용 fixture(같은 Registry 로더·검증)로 본다.
+    expect((await npxFixtureEntry()).manifest.recommendation?.source).toEqual({ type: "shared-repo", path: "src/npx-mcp" });
     expect(get("postgres-mcp")?.appliesTo?.stacks).toEqual(["postgresql"]);
     const aliases = r.entries.flatMap((e) => e.manifest.recommendation?.identity?.mcpServerNames ?? []);
     expect(aliases.length).toBe(registryManifestCount());

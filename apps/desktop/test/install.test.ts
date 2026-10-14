@@ -39,7 +39,7 @@ const PROBES: BackendProbeReport = {
   uvx: { name: "uvx", available: true, version: "0.5.11", status: "ok" },
   docker: { name: "docker", available: true, version: "27.3.1", status: "ok" },
 };
-const NPX_TOOLS = ["memory-mcp", "context7", "playwright-mcp", "chrome-devtools-mcp"];
+const NPX_TOOLS = ["fixture-npx-mcp", "context7", "playwright-mcp", "chrome-devtools-mcp"];
 
 async function wired(options: { accept?: boolean; platform?: string } = {}) {
   const base = await mkdtemp(path.join(scratch, "case-"));

@@ -32,9 +32,14 @@ describe("v0.2.1 postgres-mcp Manifest", () => {
     expect(entries.map((e) => e.manifest.name)).not.toContain("serena");
     expect(withdrawnToolOf("serena")).toMatchObject({ toolId: "serena", since: "0.2.1", issue: "https://github.com/kanghyunsoon/openhub-ai/issues/59" });
     // #39 리뷰: 이름이 다른 Manifest를 식별하는 identity(저장소·MCP alias·PyPI 패키지)가 추가됐다. 식별 값만 있고 실행 명령·인자·image는 없다.
+    // #69: npm 패키지 식별(npmPackages)과 사용자 안내(advice·adviceEn, 선택)가 추가됐다. 여전히 실행 명령·인자·image·옵션은 없다.
     for (const t of WITHDRAWN_TOOLS) {
-      expect(Object.keys(t).sort()).toEqual(["displayName", "identity", "issue", "reason", "reasonEn", "since", "toolId"]);
-      expect(Object.keys(t.identity).sort()).toEqual(["mcpServerNames", "pypiPackages", "repositories"]);
+      const required = ["displayName", "identity", "issue", "reason", "reasonEn", "since", "toolId"];
+      const optional = ["advice", "adviceEn"];
+      expect(Object.keys(t).filter((k) => !optional.includes(k)).sort()).toEqual(required);
+      for (const k of Object.keys(t)) expect([...required, ...optional], k).toContain(k);
+      expect(Object.keys(t.identity).sort()).toEqual(["mcpServerNames", "npmPackages", "pypiPackages", "repositories"]);
+      expect(JSON.stringify(t)).not.toMatch(/"(command|args|image|options|install)"/u);
     }
   });
 });

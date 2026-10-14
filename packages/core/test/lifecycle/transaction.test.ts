@@ -23,12 +23,12 @@ import {
   type VerifiedLifecyclePlan,
 } from "../../src/index";
 import { approveAll, createHarness, plannedOf, type Harness } from "../installer/harness";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { newScratch } from "./helpers";
 import { fakeNpmSpawner, isNpxPrepareCall } from "../process/fake-npm";
 
 /** TASK-043 Update transaction. 임시 project·home, 가짜 registry·준비 spawner·Health 실행기, 실패 주입 fs. */
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await newScratch("lifecycle-tx-test");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 afterEach(() => vi.unstubAllEnvs());
@@ -39,7 +39,7 @@ const DIGEST = "sha256:" + "f".repeat(64);
 function registry() {
   return vi.fn(async (url: string) => {
     const json = (doc: unknown) => new Response(JSON.stringify(doc), { status: 200 });
-    if (url.endsWith("server-memory/latest")) return json({ name: "@modelcontextprotocol/server-memory", version: "1.2.3" });
+    if (url.endsWith("npx-mcp/latest")) return json({ name: "@openhub-fixture/npx-mcp", version: "1.2.3" });
     if (url === "https://pypi.org/pypi/postgres-mcp/json") return json({ info: { name: "postgres-mcp", version: "0.3.0" } });
     if (url.startsWith("https://ghcr.io/token")) return json({ token: "anon" });
     if (url.includes("/manifests/")) return new Response(null, { status: 200, headers: { "docker-content-digest": DIGEST } });
@@ -161,18 +161,18 @@ describe("REQ-040 REQ-043 REQ-050 Update transaction", () => {
   });
 
   it("AC-043-02 성공하면 revision+1·previous snapshot·healthy이고 승인된 skip은 commit하되 skipped(healthy 아님)다", async () => {
-    const c = await setup("memory-mcp");
+    const c = await setup("fixture-npx-mcp");
     const [before] = await stateEntries(c);
     const result = await run(c);
-    expect(result).toMatchObject({ status: "updated", stateCommitted: true, artifact: { from: "@modelcontextprotocol/server-memory", to: "@modelcontextprotocol/server-memory@1.2.3" } });
+    expect(result).toMatchObject({ status: "updated", stateCommitted: true, artifact: { from: "@openhub-fixture/npx-mcp", to: "@openhub-fixture/npx-mcp@1.2.3" } });
     const [after] = await stateEntries(c);
     expect(after!.revision).toBe(2);
     const { previous: _p, lastHealth: _h, ...beforeCore } = before!;
     expect(after!.previous).toEqual(beforeCore);
     expect(after!.lastHealth).toEqual({ status: "healthy", environmentUnverified: false, checkedAt: UPDATED_AT.toISOString() });
-    expect(after!.artifact.resolved?.spec).toBe("@modelcontextprotocol/server-memory@1.2.3");
+    expect(after!.artifact.resolved?.spec).toBe("@openhub-fixture/npx-mcp@1.2.3");
     const doc = JSON.parse((await c.file(".mcp.json")).toString("utf8"));
-    expect(after!.config.entryDigest).toBe(configEntryDigest(doc.mcpServers.memory));
+    expect(after!.config.entryDigest).toBe(configEntryDigest(doc.mcpServers["fixture-npx"]));
     expect(result.targets[0]).toMatchObject({ revisionBefore: 1, revisionAfter: 2, configApplied: true, configRestored: false });
 
     const s = await setup("postgres-mcp", [{ client: "claude-code", scope: "project" }], { skipHealth: true });
@@ -196,7 +196,7 @@ describe("REQ-040 REQ-043 REQ-050 Update transaction", () => {
   });
 
   it("AC-043-04 두 번째 config 교체가 실패하면 첫 번째 파일을 원본 byte로 되돌리고 config-failed(compensated)다", async () => {
-    const c = await setup("memory-mcp", [{ client: "claude-code", scope: "project" }, { client: "cursor", scope: "project" }], { fs: (b) => failingFs(b, [{ suffix: ".cursor/mcp.json" }]) });
+    const c = await setup("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }, { client: "cursor", scope: "project" }], { fs: (b) => failingFs(b, [{ suffix: ".cursor/mcp.json" }]) });
     const claude = await c.file(".mcp.json");
     const cursor = await c.file(".cursor/mcp.json");
     const state = await c.state();
@@ -240,14 +240,14 @@ describe("REQ-040 REQ-043 REQ-050 Update transaction", () => {
   }, 30_000);
 
   it("AC-043-06 state commit 실패면 config를 복원하고 state-commit-failed, 복원까지 실패하면 rollback-failed와 논리 경로 안내다", async () => {
-    const c = await setup("memory-mcp", undefined, { fs: (b) => failingFs(b, [{ suffix: "/.openhub/state/lifecycle.json" }]) });
+    const c = await setup("fixture-npx-mcp", undefined, { fs: (b) => failingFs(b, [{ suffix: "/.openhub/state/lifecycle.json" }]) });
     const config = await c.file(".mcp.json");
     const state = await c.state();
     expect(await run(c)).toMatchObject({ status: "state-commit-failed", code: "STATE_WRITE_FAILED", compensated: true });
     expect((await c.file(".mcp.json")).equals(config)).toBe(true);
     expect((await c.state()).equals(state)).toBe(true);
 
-    const d = await setup("memory-mcp", undefined, { fs: (b) => failingFs(b, [{ suffix: "/.openhub/state/lifecycle.json" }, { suffix: "/.mcp.json", after: 1 }]) });
+    const d = await setup("fixture-npx-mcp", undefined, { fs: (b) => failingFs(b, [{ suffix: "/.openhub/state/lifecycle.json" }, { suffix: "/.mcp.json", after: 1 }]) });
     const failed = await run(d);
     expect(failed).toMatchObject({ status: "rollback-failed", code: "CONFIG_RESTORE_FAILED", stateCommitted: false });
     expect(failed.nextActions.join("\n")).toContain(".mcp.json");
@@ -256,35 +256,35 @@ describe("REQ-040 REQ-043 REQ-050 Update transaction", () => {
   });
 
   it("AC-043-07 Health 성공(또는 승인된 skip) 전에는 state write가 0회다", async () => {
-    const c = await setup("memory-mcp");
+    const c = await setup("fixture-npx-mcp");
     await run(c);
     const firstStateWrite = c.log.findIndex((l) => /\.openhub\/state\/.*lifecycle\.json/u.test(l));
     expect(firstStateWrite).toBeGreaterThan(c.log.indexOf("health:run"));
     expect(c.log.indexOf("health:run")).toBeGreaterThan(c.log.findIndex((l) => l === "rename:project/.mcp.json"));
-    const failed = await setup("memory-mcp", undefined, { health: ["timeout", "total-timeout"] });
+    const failed = await setup("fixture-npx-mcp", undefined, { health: ["timeout", "total-timeout"] });
     await run(failed);
     expect(failed.log.filter((l) => /lifecycle\.json/u.test(l))).toEqual([]);
   });
 
   it("AC-043-08 npx·uvx update는 config args의 패키지 token 교체와 state 갱신뿐이고 패키지 매니저 명령 spawn이 0건이다(Prepare만)", async () => {
     for (const [toolId, before, after] of [
-      ["memory-mcp", ["-y", "@modelcontextprotocol/server-memory"], ["-y", "@modelcontextprotocol/server-memory@1.2.3"]],
+      ["fixture-npx-mcp", ["-y", "@openhub-fixture/npx-mcp"], ["-y", "@openhub-fixture/npx-mcp@1.2.3"]],
       // v0.2.1: postgres Manifest는 postgres-mcp 0.3.0 + mcp 1.30.0으로 고정한다. update는 --from 값(artifact)만 바꾸고 --with는 유지한다.
       ["postgres-mcp", ["--no-build", "--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"], ["--no-build", "--from", "postgres-mcp==0.3.1", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"]],
     ] as const) {
       const c = await setup(toolId);
       const original = JSON.parse((await c.file(".mcp.json")).toString("utf8"));
-      const server = toolId === "memory-mcp" ? "memory" : "postgres";
+      const server = toolId === "fixture-npx-mcp" ? "fixture-npx" : "postgres";
       expect(original.mcpServers[server].args).toEqual(before);
       expect((await run(c)).status).toBe("updated");
       const updated = JSON.parse((await c.file(".mcp.json")).toString("utf8"));
       expect(updated.mcpServers[server]).toEqual({ ...original.mcpServers[server], args: after });
       // v0.2.0 npx Prepare: npx는 정확한 target 버전을 npx cache에 받는 명령 두 개(cache 위치 확인, 내려받기)만 실행한다.
       // v0.2.1 uvx Prepare: uvx는 정확한 target 환경 준비와 offline 확인 두 개만 실행한다(python -c pass, MCP 서버 실행 없음).
-      if (toolId === "memory-mcp") {
+      if (toolId === "fixture-npx-mcp") {
         expect(c.exec.calls).toEqual([
           ["npm", "config", "get", "cache"],
-          ["npx", "--yes", "--package=@modelcontextprotocol/server-memory@1.2.3", "--", "node", "--version"],
+          ["npx", "--yes", "--package=@openhub-fixture/npx-mcp@1.2.3", "--", "node", "--version"],
         ]);
         expect(c.exec.calls.every(isNpxPrepareCall)).toBe(true);
       } else {
@@ -310,7 +310,7 @@ describe("REQ-040 REQ-043 REQ-050 Update transaction", () => {
   });
 
   it("v0.2.0 npx Prepare: npx update는 설정 교체 전에 target 버전을 준비하고, 준비가 실패하면 설정·Version State를 바꾸지 않고 Health도 실행하지 않는다", async () => {
-    const ok = await setup("memory-mcp");
+    const ok = await setup("fixture-npx-mcp");
     expect(ok.planned.plan.steps.map((s) => s.id)).toEqual(["npx-prepare", "config-claude-code-project", "health", "state-commit"]);
     const done = await run(ok);
     expect(done.status).toBe("updated");
@@ -318,7 +318,7 @@ describe("REQ-040 REQ-043 REQ-050 Update transaction", () => {
 
     // timeout 경로(process tree 종료·불완전 항목 정리)는 prepareNpxPackage 단위 테스트와 E2E가 다룬다.
     for (const prepare of ["fail"] as const) {
-      const c = await setup("memory-mcp", undefined, { prepare });
+      const c = await setup("fixture-npx-mcp", undefined, { prepare });
       const config = await c.file(".mcp.json");
       const state = await c.state();
       const result = await run(c);

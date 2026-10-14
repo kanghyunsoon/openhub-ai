@@ -408,6 +408,9 @@ describe("v0.2.0 PR B English 표시(실제 Plan·IPC 결과)", () => {
     const c = await k8sDesktop();
     const { recommend: rec, analyzeProject, loadMetadataSnapshot } = await import("@openhub/core");
     await writeFile(path.join(c.h.projectRoot, "Chart.yaml"), "apiVersion: v2\nname: web\nversion: 0.1.0\n");
+    // Kubernetes는 이미 설치되어 있다. 추천이 비지 않도록 지원 도구(Context7·브라우저 도구)가 필요한 React 의존성을 둔다
+    // (v0.2.0까지는 Memory MCP가 이 자리를 채웠으나 v0.2.1에서 Registry에서 빠졌다, #69).
+    await writeFile(path.join(c.h.projectRoot, "package.json"), '{ "name": "demo", "private": true, "dependencies": { "react": "^19.0.0" } }\n');
     const scan = await analyzeProject(c.h.projectRoot, { includeHost: false });
     if (!scan.ok) throw new Error(scan.error.code);
     const snapshot = await loadMetadataSnapshot(path.join(ROOT, "packages/core/test/fixtures/recommendation/metadata.seed-synthetic.json"));

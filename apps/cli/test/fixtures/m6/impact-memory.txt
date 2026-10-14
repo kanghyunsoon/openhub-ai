@@ -1,4 +1,4 @@
-Memory MCP (memory-mcp) 업데이트 영향
+Fixture NPX MCP (test only) (fixture-npx-mcp) 업데이트 영향
 
 버전        2025.8.4 → 2025.9.25
 판정        HIGH (WARNING)

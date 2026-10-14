@@ -20,13 +20,13 @@ const ok = (r: ReleaseSnapshotResult) => {
 };
 afterEach(() => vi.restoreAllMocks());
 
-const PKG = "@modelcontextprotocol/server-memory";
-const NPM_LATEST = "https://registry.npmjs.org/@modelcontextprotocol%2fserver-memory/latest";
+const PKG = "@openhub-fixture/npx-mcp";
+const NPM_LATEST = "https://registry.npmjs.org/@openhub-fixture%2fnpx-mcp/latest";
 const REL = (n: number) => "https://api.github.com/repos/acme/memory/releases?per_page=30&page=" + String(n);
 const TAGS = (n: number) => "https://api.github.com/repos/acme/memory/tags?per_page=30&page=" + String(n);
 const npmIdentity = (version: string) => ({ kind: "npm-package" as const, spec: PKG + "@" + version, version, digest: null, integrity: null, source: "npm-registry" as const });
 const memory = (current: string | null, extra: Partial<ReleaseRequest> = {}): ReleaseRequest => ({
-  toolId: "memory-mcp",
+  toolId: "fixture-npx-mcp",
   versionSource: "npm",
   backend: "npx",
   requested: PKG,

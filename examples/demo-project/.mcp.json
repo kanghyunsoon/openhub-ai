@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "memory": {
+    "context7": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory@2025.8.4"]
+      "args": ["-y", "@upstash/context7-mcp@4.3.0"]
     }
   }
 }

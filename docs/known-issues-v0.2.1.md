@@ -7,9 +7,8 @@ v0.2.1 is **not released yet**. This page describes the limits of the code on ma
 | Issue | Status | What you can do |
 | --- | --- | --- |
 | Serena: no new installs | By design in v0.2.1; re-support tracked in #59 | Keep or remove your existing entry; recovery still works |
+| Memory MCP: no new installs | By design in v0.2.1; storage fix tracked in #69 | Back up `memory.jsonl` before your client starts it again; recovery still works |
 | Postgres MCP Pro: first Health on Windows is close to the time limit | Not fixed; measured about 15 s of 20 s | Run Health again |
-| Unpinned npx tools download the package during their first Health (Memory MCP, Context7, Chrome DevTools MCP, Playwright MCP) | Known limit; measured up to about 10 s of 20 s on Windows; tracked in #70 | Run Health again |
-| Memory MCP stores memories inside the npx cache by default | Known limit; memories can be hidden or deleted when the version changes; tracked in #69 | Set `MEMORY_FILE_PATH` to an absolute path outside the npm cache |
 | Recovery of interrupted operations is CLI only | By design in v0.2.1 | Run the command the Installed view shows |
 | Environment limits during Health and benchmark are not a sandbox | Known limit | See below |
 | npm configuration (`node-options` in `.npmrc`) can still add Node.js options | Known limit; tracked in #63 | Check `npm config get node-options` |
@@ -27,27 +26,20 @@ v0.2.1 is **not released yet**. This page describes the limits of the code on ma
 - **Removing it:** follow the manual removal steps in the README (back up the client configuration file first).
 - **Status:** re-support is tracked in [#59](https://github.com/kanghyunsoon/openhub-ai/issues/59). A Windows Prepare failure seen once in six tries during earlier Serena testing was never explained; it is not a v0.2.1 path any more.
 
+## Memory MCP: no new installs
+
+- **What happens:** Memory MCP stores memories in `memory.jsonl` inside its package folder in the npx cache unless `MEMORY_FILE_PATH` is set. A new upstream version under the unpinned command replaces that folder and deletes the file, and an update or rollback to another version starts the server without the earlier memories (both reproduced). Memory MCP was removed from the Verified Registry. Install, update, rollback, Health, repair, adopt and benchmark refuse it with this reason, also when a custom Registry or a Manifest with another name installs the npm package `@modelcontextprotocol/server-memory`. Other servers from the shared `modelcontextprotocol/servers` repository are not affected.
+- **If you already use Memory MCP:** your client configuration, Version State and memory file are not changed, moved or deleted. `openhub lifecycle status` shows the entry as withdrawn with a link to #69. OpenHub does not start the server any more, but your client can, and OpenHub does not control that. Back up `memory.jsonl` before the next start. A file that was already deleted cannot be recovered by OpenHub.
+- **Interrupted Memory MCP operation:** `openhub lifecycle recover memory-mcp` still works; it does not need the Registry entry.
+- **Removing it:** follow the manual removal steps in the README (back up the client configuration file first). Removing the client entry does not delete the memory file.
+- **Status:** a stable storage path outside the npm cache and an approved copy of existing memories are tracked in [#69](https://github.com/kanghyunsoon/openhub-ai/issues/69).
+
 ## Postgres MCP Pro: first Health on Windows
 
 - **Symptom:** the first Health check after installing Postgres MCP Pro on Windows took about 15 seconds of the 20 second limit in our measurement (Linux: about 3 seconds). On a slower machine, disk or network it may stop with `startup-timeout`.
 - **What you can do:** run Health again (Installed → Health Check, or `openhub lifecycle health postgres-mcp`). The packages were prepared before the configuration was written, so later starts are faster (about 6.5 seconds in the same measurement).
 - **Update and rollback:** a different version has its own startup time. In our test an older version (0.2.1) needed about 31 seconds on Windows, so its Health check failed and OpenHub restored the previous configuration and Version State. This is the intended safe behavior, not data loss.
 - **Status:** not fixed. The 20 second limit is not raised to hide this.
-
-## Unpinned npx tools: the first Health downloads the package
-
-- **Which tools:** Memory MCP (`@modelcontextprotocol/server-memory`), Context7 (`@upstash/context7-mcp`), Chrome DevTools MCP (`chrome-devtools-mcp@latest`) and Playwright MCP (`@playwright/mcp@latest`). Their Registry command has no exact version, so OpenHub does not download them at install (the plan says "launch-on-demand" and shows `floating-artifact`). Pinning Memory MCP is under review and not part of this release.
-- **What happens:** the first Health check (like the first start by your client) runs npx, which looks up the newest version, downloads it with its dependencies into the npx cache and then starts the server. All of this counts against the 20 second startup limit. In our measurement Memory MCP needed 8.4–10.4 seconds on Windows and 3.5–3.9 seconds on Linux with an empty npm cache; in one of four packaged Windows test runs the first Health stopped with `startup-timeout`. A slow network, disk or antivirus scan makes this more likely. The other three tools were not measured.
-- **What you can do:** run Health again. A failed standalone Health check changes no configuration; a failed Health during an update restores the previous configuration and Version State. Later starts use the downloaded package, but an unpinned tool can download a newer version again whenever one is published.
-- **Status:** a strategy for preparing or pinning these tools is tracked in [#70](https://github.com/kanghyunsoon/openhub-ai/issues/70). The 20 second limit is not raised.
-
-## Memory MCP: where memories are stored
-
-- **Default location:** Memory MCP keeps its knowledge graph in `memory.jsonl` inside its own package folder. Started through npx, that folder is inside the npm cache, and each command form (unpinned, or a specific version) has its own folder.
-- **What we reproduced** (synthetic data, Windows and Linux): when a new version is published, the next start of the unpinned command replaces the package folder and **deletes** `memory.jsonl` in it. After an update or rollback to another version the server starts from another folder and **does not see** the memories stored before; a rollback shows them again only if the old folder still exists. Clearing the npm cache (`npm cache clean --force`) also removes them. OpenHub does not delete these files itself, and its update plan does not warn about this.
-- **What you can do:** before the next start, copy your `memory.jsonl` to a folder outside the npm cache and set `MEMORY_FILE_PATH` to that **absolute** path for this server. Versions 2026.x and 1.0.0 read and write the same file at an absolute path. Do not use `~` (versions before 1.0.0 do not expand it) or a relative path (it is resolved inside the package folder).
-- **Limit:** if you put `MEMORY_FILE_PATH` into the server entry of the client configuration file, OpenHub reports `config-drift` for that entry and refuses update and rollback instead of overwriting your setting.
-- **Status:** tracked in [#69](https://github.com/kanghyunsoon/openhub-ai/issues/69).
 
 ## Recovery is CLI only
 
@@ -95,4 +87,4 @@ See the [security model](security-model.md).
 - Kubernetes MCP Server is limited to version 0.0.67.
 - The Windows installer is unsigned; how SmartScreen or Smart App Control reacts has not been observed.
 - The Linux AppImage is tested by extracting it; starting it directly through FUSE is not tested.
-- The Verified Registry has 8 tools; the earlier 25–40 target is carried over.
+- The Verified Registry has 7 tools; the earlier 25–40 target is carried over.

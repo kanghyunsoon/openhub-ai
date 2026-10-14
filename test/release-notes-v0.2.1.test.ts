@@ -51,6 +51,24 @@ describe("v0.2.1 Release Notes", () => {
     for (const part of ["also when a custom Registry still contains it", "An existing Serena entry and its Version State are kept and shown as withdrawn", "an interrupted operation can still be recovered"]) expect(notes).toContain(part);
   });
 
+  it("Memory MCP는 Registry에 없고 지원 중단 목록·Issue #69와 일치하며, npm 패키지 식별·기존 데이터 보존·Client 실행 한계를 적는다", async () => {
+    const { entries } = await loadRegistry(path.join(ROOT, "registry"));
+    expect(entries.map((e) => e.manifest.name)).not.toContain("memory-mcp");
+    const memory = WITHDRAWN_TOOLS.find((t) => t.toolId === "memory-mcp")!;
+    expect(memory.since).toBe("0.2.1");
+    expect(memory.identity.npmPackages).toEqual(["@modelcontextprotocol/server-memory"]);
+    expect(memory.identity.repositories).toEqual([]);
+    expect(notes).toContain("**Memory MCP: new installs stopped.**");
+    expect(notes).toContain("(" + memory.issue + ")");
+    for (const part of ["also when a custom Registry installs the same npm package (`" + memory.identity.npmPackages[0] + "`)", "Other servers from the same GitHub repository are not affected", "the memory file are not changed, moved or deleted", "an interrupted operation can still be recovered", "OpenHub does not control that start", "cannot be recovered by OpenHub"]) expect(notes).toContain(part);
+    for (const doc of [knownEn, knownKo]) {
+      expect(doc).toContain(memory.issue);
+      expect(doc).toContain("openhub lifecycle recover memory-mcp");
+    }
+    expect(knownEn).toContain("## Memory MCP: no new installs");
+    expect(knownKo).toContain("## Memory MCP 신규 설치 불가");
+  });
+
   it("Kubernetes MCP Server Client 검증 표의 각 칸이 Core 기록과 같다", () => {
     for (const client of TOOL_CONFIG_CLIENTS) {
       const cells = (["windows", "linux", "macos"] as const).map((os) => {
@@ -77,9 +95,6 @@ describe("v0.2.1 Release Notes", () => {
       "are not part of the approved plan",
       "credentials hidden in a URL path cannot be detected",
       "npm's own `node-options` setting",
-      // 버전 미고정 npx 도구의 첫 Health 다운로드(#70)와 Memory MCP 저장 위치(#69)
-      "Unpinned npx tools download during their first Health.",
-      "Memory MCP stores memories inside the npx cache by default.",
       "the client decides the environment, not OpenHub",
       // 복구는 CLI만
       "**Recovery is in the CLI only.**",

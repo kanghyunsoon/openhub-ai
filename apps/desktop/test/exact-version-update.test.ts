@@ -26,20 +26,22 @@ import { PROJECT_SCAN_CHANNEL, registerProjectScan } from "../src/project-scan";
 import { PROJECT_RECOMMEND_CHANNEL, RecommendSession, registerProjectRecommend } from "../src/recommend";
 import { approveAll, createHarness, plannedOf } from "../../../packages/core/test/installer/harness";
 import { fakeNpmSpawner } from "../../../packages/core/test/process/fake-npm";
+import { registryWithNpxFixture } from "./npx-fixture-registry";
 
 /**
- * v0.2.0 RC 선택 A: INSTALLED의 "정확한 버전으로 Update". 원본 Registry(수정 없음)의 memory-mcp(고정 안 된 npx)를 Desktop 설치 IPC로
+ * v0.2.0 RC 선택 A: INSTALLED의 "정확한 버전으로 Update". 원본 Registry(수정 없음)의 fixture-npx-mcp(고정 안 된 npx)를 Desktop 설치 IPC로
  * 설치한 뒤 lifecycle:plan-update { version } → 네이티브 승인(가짜 대화상자) → 실행을 IPC로 그대로 호출한다. npm은 Prepare 캐시 계약을
  * 지키는 가짜(smokeNpmSpawner), Health는 주입, network 0(정확한 버전은 resolver가 조회하지 않는다).
  */
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const DESKTOP = path.join(ROOT, "apps", "desktop");
-const REGISTRY = path.join(ROOT, "registry");
+// 실제 Registry + 테스트 전용 npx fixture(v0.2.1 #69: Memory MCP 지원 중단으로 버전 미고정 npx 도구 역할을 대신한다)
+const REGISTRY = registryWithNpxFixture();
 const SEED_SNAPSHOT = path.join(ROOT, "packages/core/test/fixtures/recommendation/metadata.seed-synthetic.json");
 const scratch = await mkdtemp(path.join(tmpdir(), "openhub-desktop-exact-version-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));
-const PKG = "@modelcontextprotocol/server-memory";
-const MEMORY = "project:claude-code:memory";
+const PKG = "@openhub-fixture/npx-mcp";
+const MEMORY = "project:claude-code:fixture-npx";
 const POSTGRES = "project:claude-code:postgres";
 const NOTES = { command: "uvx", args: ["notes-mcp"] };
 const V1 = "2026.7.4";
@@ -86,7 +88,7 @@ async function setup(o: Options = {}) {
     // 정확한 버전은 조회하지 않는다. 버전 없이 계획할 때만 latest를 조회한다(npm registry 응답 형식의 가짜).
     fetch: async (url) => {
       fetches.push(String(url));
-      if (String(url) === "https://registry.npmjs.org/@modelcontextprotocol%2fserver-memory/latest") return new Response(JSON.stringify({ name: PKG, version: V2 }), { status: 200 });
+      if (String(url) === "https://registry.npmjs.org/@openhub-fixture%2fnpx-mcp/latest") return new Response(JSON.stringify({ name: PKG, version: V2 }), { status: 200 });
       return new Response("missing", { status: 404 });
     },
     runHealth: async (verified, options) => (healthRuns.push(verified.plan.operation), o.onHealth?.(verified, options), o.health?.() ?? HEALTHY),
@@ -111,7 +113,7 @@ async function setup(o: Options = {}) {
   const memoryState = async () => {
     const s = await readLifecycleState({ homeDir: home });
     if (!s.ok) throw new Error(s.code);
-    return Object.values(s.state.entries).find((e) => e.toolId === "memory-mcp")!;
+    return Object.values(s.state.entries).find((e) => e.toolId === "fixture-npx-mcp")!;
   };
   const cached = (spec: string) => stat(path.join(cache, "_npx", npxCacheKey(spec), "node_modules", ".package-lock.json")).then(() => true, () => false);
   return {
@@ -142,7 +144,7 @@ async function setup(o: Options = {}) {
 type Ctx = Awaited<ReturnType<typeof setup>>;
 async function withMemory(o: Options = {}) {
   const c = await setup(o);
-  expect(await c.installTool("memory-mcp")).toMatchObject({ status: "done", result: { status: "succeeded" } });
+  expect(await c.installTool("fixture-npx-mcp")).toMatchObject({ status: "done", result: { status: "succeeded" } });
   c.dialogs.length = 0;
   c.npmCalls.length = 0;
   return c;
@@ -164,7 +166,7 @@ describe("정확한 버전 입력 검증(main)", () => {
     let seen: Record<string, string> | undefined;
     let passedSource = false;
     const c = await setup({ onHealth: (v, o) => ((passedSource = o.sourceEnv !== undefined), (seen = mcpChildEnvForPlan(v.plan, o.sourceEnv))) });
-    expect(await c.installTool("memory-mcp")).toMatchObject({ status: "done" });
+    expect(await c.installTool("fixture-npx-mcp")).toMatchObject({ status: "done" });
     const { plan, result } = await updateTo(c, V2);
     expect(result.status).toBe("updated");
     expect(seen).toBeDefined();
@@ -240,7 +242,7 @@ describe("정확한 버전 입력 검증(main)", () => {
 describe("정확한 버전 Update V1 → V2 → Rollback V1(IPC, 실제 파일·Version State)", () => {
   it("계획·승인 대화상자·Prepare·Client 설정·Version State·Health가 정확한 버전을 따른다", async () => {
     const c = await withMemory();
-    expect((await c.mcp()).mcpServers.memory!.args).toEqual(["-y", PKG]);
+    expect((await c.mcp()).mcpServers["fixture-npx"]!.args).toEqual(["-y", PKG]);
 
     const first = await updateTo(c, V1);
     expect(first.plan.version).toEqual({ from: PKG, to: PKG + "@" + V1 });
@@ -256,7 +258,7 @@ describe("정확한 버전 Update V1 → V2 → Rollback V1(IPC, 실제 파일·
     expect(detail).toMatch(/sha256:[0-9a-f]{64}/u);
     expect(await c.cached(PKG + "@" + V1)).toBe(true);
     const afterV1 = await c.mcp();
-    expect(afterV1.mcpServers.memory!.args).toContain(PKG + "@" + V1);
+    expect(afterV1.mcpServers["fixture-npx"]!.args).toContain(PKG + "@" + V1);
     expect(afterV1.mcpServers.notes).toEqual(NOTES);
     expect((await c.memoryState()).artifact.resolved?.spec).toBe(PKG + "@" + V1);
 
@@ -264,7 +266,7 @@ describe("정확한 버전 Update V1 → V2 → Rollback V1(IPC, 실제 파일·
     expect(second.plan.version).toEqual({ from: PKG + "@" + V1, to: PKG + "@" + V2 });
     expect(second.result.status).toBe("updated");
     expect(await c.cached(PKG + "@" + V2)).toBe(true);
-    expect((await c.mcp()).mcpServers.memory!.args).toContain(PKG + "@" + V2);
+    expect((await c.mcp()).mcpServers["fixture-npx"]!.args).toContain(PKG + "@" + V2);
     const v2State = await c.memoryState();
     expect(v2State.artifact.resolved?.spec).toBe(PKG + "@" + V2);
     expect(v2State.previous?.artifact.resolved?.spec).toBe(PKG + "@" + V1);
@@ -364,7 +366,7 @@ describe("버전을 바꾸면 계획을 버린다", () => {
     expect((await c.showUser(true)).status).toBe("ok");
     expect((await c.showUser(false)).status).toBe("ok");
     expect(await c.run(MEMORY, { version: V1 })).toMatchObject({ status: "done", result: { status: "updated" } });
-    expect((await c.mcp()).mcpServers.memory!.args).toContain(PKG + "@" + V1);
+    expect((await c.mcp()).mcpServers["fixture-npx"]!.args).toContain(PKG + "@" + V1);
   });
 
   it("F. 실행이 끝난 계획은 다시 실행할 수 없다(no-plan)", async () => {

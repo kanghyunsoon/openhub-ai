@@ -118,7 +118,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || electronBin === null)("v0.
       await mk(project, { recursive: true });
       await mk(home, { recursive: true });
       await writeFile(path.join(project, "package.json"), '{ "name": "api", "dependencies": { "pg": "^8.13.0" } }\n');
-      await writeFile(path.join(project, ".mcp.json"), JSON.stringify({ mcpServers: { memory: { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory@1.2.3"] } } }, null, 2) + "\n");
+      await writeFile(path.join(project, ".mcp.json"), JSON.stringify({ mcpServers: { context7: { command: "npx", args: ["-y", "@upstash/context7-mcp@1.2.3"] } } }, null, 2) + "\n");
       const r = await launch(path.join(base, "user-data"), locale, undefined, { OPENHUB_SMOKE_PROJECT: project, OPENHUB_SMOKE_ADOPT: "1", OPENHUB_SMOKE_HOME: home });
       expect(r.code, JSON.stringify(r.smoke.adopt)).toBe(0);
       return r.smoke.adopt!;
@@ -132,12 +132,12 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1" || electronBin === null)("v0.
     expect(en.dialogs[1]!.detail).toContain("(third-party code)");
     expect(en.dialogs[1]!.detail).toContain("This is not a Health Check");
     expect(en.dialogs[1]!.detail).toMatch(/• \[base\] .*• \[artifact-fetch\] /su);
-    expect(en.adoptResult).toContain("Adopt completed: memory-mcp");
-    expect(en.benchmarkResult).toMatch(/^Benchmark memory-mcp — \d of 5 measured runs succeeded/u);
+    expect(en.adoptResult).toContain("Adopt completed: context7");
+    expect(en.benchmarkResult).toMatch(/^Benchmark context7 — \d of 5 measured runs succeeded/u);
     const ko = await run("ko-KR");
     expect(ko.dialogs.map((d) => d.title)).toEqual(["OpenHub Adopt 승인", "OpenHub Benchmark 승인"]);
-    expect(ko.dialogs[0]!.detail).toContain("Adopt 계획: memory-mcp (ready)");
-    expect(ko.dialogs[1]!.detail).toContain("Benchmark 계획: memory-mcp (ready)");
+    expect(ko.dialogs[0]!.detail).toContain("Adopt 계획: context7 (ready)");
+    expect(ko.dialogs[1]!.detail).toContain("Benchmark 계획: context7 (ready)");
     console.log("desktop adopt i18n: " + JSON.stringify({ en: en.dialogs.map((d) => d.title), ko: ko.dialogs.map((d) => d.title), spawns: [en.spawns, ko.spawns], enFirstLine: en.benchmarkResult.split("\n")[0] }));
   }, 300_000);
 });

@@ -8,7 +8,7 @@ afterEach(() => setDesktopLocale("en"));
 const result = (backend: "npx" | "uvx"): InstallResultV1 => ({
   schemaVersion: 1,
   planDigest: "sha256:" + "0".repeat(64),
-  toolId: backend === "uvx" ? "postgres-mcp" : "memory-mcp",
+  toolId: backend === "uvx" ? "postgres-mcp" : "fixture-npx-mcp",
   backend,
   status: "succeeded",
   steps: [],

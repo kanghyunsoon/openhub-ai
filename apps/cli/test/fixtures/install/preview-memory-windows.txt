@@ -1,14 +1,14 @@
-Memory MCP (memory-mcp) 설치 계획
+Fixture NPX MCP (test only) (fixture-npx-mcp) 설치 계획
 
 설치 상태    프로젝트 범위 기준 미설치(사용자 범위 미검사)
 검사 범위    프로젝트
 Backend      npx
 준비 단계    없음 — OpenHub는 아무것도 실행하지 않고, Client가 처음 실행할 때 패키지를 받습니다(launch-on-demand)
-Client 실행 명령  cmd /d /c npx -y @modelcontextprotocol/server-memory
+Client 실행 명령  cmd /d /c npx -y @openhub-fixture/npx-mcp
   Windows 호환 정책(OpenHub): Client가 npx를 실행할 수 있도록 설정 파일에 cmd /d /c npx 형태로 기록합니다. OpenHub는 이 명령을 실행하지 않습니다.
 
 변경 파일
-  - .cursor/mcp.json (Cursor, 프로젝트 범위) mcpServers.memory 항목 추가 · 새 파일
+  - .cursor/mcp.json (Cursor, 프로젝트 범위) mcpServers.fixture-npx 항목 추가 · 새 파일
 
 환경변수
   (필요 없음)
@@ -22,4 +22,4 @@ Warnings
   - [base] 위 설치 계획(실행 명령, 쓰는 설정 파일, 네트워크 사용)을 확인했고 이대로 실행하는 데 동의합니다.
   - [floating-artifact] 원격 패키지 버전이 고정되어 있지 않습니다. 나중에 실행하면 다른 artifact가 내려올 수 있습니다.
 
-Plan digest  sha256:5fedacdead373dda51cc9fc2b8a98aa4cf7d6cbe21aabcc1a7362175473be2cd
+Plan digest  sha256:ad029fe1f4098a639afa1dd55d5d6e684fa065e41d18f6ad420f3d37b55f9a31

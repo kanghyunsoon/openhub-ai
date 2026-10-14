@@ -46,13 +46,13 @@
       "kind": "config-patch",
       "path": [
         "mcpServers",
-        "memory"
+        "fixture-npx"
       ],
       "scope": "project",
       "value": {
         "args": [
           "-y",
-          "@modelcontextprotocol/server-memory"
+          "@openhub-fixture/npx-mcp"
         ],
         "command": "npx"
       }
