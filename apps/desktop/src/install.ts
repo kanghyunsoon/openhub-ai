@@ -7,6 +7,7 @@ import {
   configTargetFor,
   defaultHostEnvironment,
   installTargetChange,
+  installPreparationCommands,
   loadRegistry,
   locateWindowsNpxLauncher,
   npmChildEnv,
@@ -233,7 +234,15 @@ export function nativeDialogPrompter(dialog: NativeDialogLike, projectName?: str
       const userWarning = written.some((t) => t.scope === "user") ? [tr("install.dialog.userScopeWarning")] : [];
       // 대상 프로젝트(폴더 이름, v0.2.1 P0-1). project 범위 파일은 이 폴더 안에 쓴다.
       const projectLine = projectName === undefined ? [] : [tr("install.dialog.project", { name: projectName })];
-      const detail = [...projectLine, ...targetLines, ...userWarning, "", ...request.requirements.map((r) => tr("dialog.requirement", { id: r.id, message: installApprovalText(r.id) })), "", tr("dialog.digest", { digest: planDigest })].join("\n");
+      const commands = installPreparationCommands(plan);
+      // 각 명령을 별도 줄에 완전하게 보여 준다(긴 명령도 자르지 않음). 값이 아닌 검증된 Plan의 run 단계만 사용한다.
+      const preparation = commands.length === 0 ? [] : [
+        tr("install.dialog.preparationHeading"),
+        ...commands.map((command) => "  " + command),
+        tr(plan.artifact?.preparation === "npm-cache" ? "install.dialog.npmPrepareMeaning" : plan.artifact?.preparation === "uv-cache" ? "install.dialog.uvPrepareMeaning" : "install.dialog.dockerPrepareMeaning"),
+        "",
+      ];
+      const detail = [...projectLine, ...targetLines, ...userWarning, "", ...preparation, ...request.requirements.map((r) => tr("dialog.requirement", { id: r.id, message: installApprovalText(r.id) })), "", tr("dialog.digest", { digest: planDigest })].join("\n");
       const { response } = await dialog.showMessageBox({
         type: "warning",
         title: tr("install.dialog.title"),

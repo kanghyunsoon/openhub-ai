@@ -11,6 +11,11 @@ import { installTargetChange, requiredEnvNotice, type InstallPlanV1, type Planne
 const SCOPE_LABEL = { project: "프로젝트", user: "사용자" } as const;
 const CLIENT_LABEL = { "claude-code": "Claude Code", codex: "Codex", cursor: "Cursor" } as const;
 
+/** 검증된 InstallPlan의 실제 준비 실행 단계. Preview와 최종 네이티브 승인에 동일한 명령을 표시한다. */
+export function installPreparationCommands(plan: InstallPlanV1): string[] {
+  return plan.steps.filter((step) => step.kind === "run").map((step) => [step.executable, ...step.args].join(" "));
+}
+
 export const WINDOWS_NPX_WRAPPER_NOTICE =
   "Windows 호환 정책(OpenHub): Client가 npx를 실행할 수 있도록 설정 파일에 cmd /d /c npx 형태로 기록합니다. OpenHub는 이 명령을 실행하지 않습니다.";
 
@@ -37,12 +42,13 @@ export function formatInstallPlanPreview(planned: PlannedInstall): string[] {
     lines.push("Backend      " + backend.adapter + (backend.selection === "fallback" ? " (대체 backend)" : "") + skipped);
   }
   const runSteps = plan.steps.filter((s) => s.kind === "run");
+  const preparationCommands = installPreparationCommands(plan);
   if (plan.artifact !== null) {
     lines.push(
       "준비 단계    " +
         (runSteps.length === 0
           ? "없음 — OpenHub는 아무것도 실행하지 않고, Client가 처음 실행할 때 패키지를 받습니다(launch-on-demand)"
-          : runSteps.map((s) => s.executable + " " + s.args.join(" ")).join(", ") +
+          : preparationCommands.join(", ") +
             (plan.artifact.preparation === "npm-cache"
               ? " — OpenHub가 설정을 쓰기 전에 이 버전을 npx cache에 받습니다(MCP 서버는 실행하지 않음, 네트워크·다운로드·의존성 설치 스크립트)"
               : plan.artifact.preparation === "uv-cache"

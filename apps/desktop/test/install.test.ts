@@ -11,9 +11,11 @@ import {
   analyzeProject,
   buildInstallPlan,
   formatInstallPlanPreview,
+  installPreparationCommands,
   inspectConfigTarget,
   loadRegistry,
   planInstall,
+  requestApproval,
   recommend,
   requiredEnvNotice,
   verifyInstallation,
@@ -24,6 +26,7 @@ import {
 import { INSTALL_DISCARD_CHANNEL, INSTALL_OPTIONS_CHANNEL, INSTALL_PLAN_CHANNEL, INSTALL_RUN_CHANNEL, InstallSession, buildInstallPlanView, nativeDialogPrompter, registerInstall, smokeInstallDeps, type InstallPlanResponse, type InstallRunResponse, type NativeDialogLike } from "../src/install";
 import { PROJECT_SCAN_CHANNEL, fixedDirectory, registerProjectScan } from "../src/project-scan";
 import { PROJECT_RECOMMEND_CHANNEL, RecommendSession, registerProjectRecommend } from "../src/recommend";
+import { setDesktopLocale } from "../src/i18n/index";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const SEED_SNAPSHOT = path.join(ROOT, "packages/core/test/fixtures/recommendation/metadata.seed-synthetic.json");
@@ -94,6 +97,26 @@ async function wired(options: { accept?: boolean; platform?: string } = {}) {
   };
 }
 const files = async (dir: string) => (await readdir(dir, { recursive: true })).map((f) => f.replace(/\\/gu, "/")).sort();
+
+async function approvalDialogFor(toolId: string, locale: "en" | "ko") {
+  const w = await wired();
+  const { entries } = await loadRegistry(path.join(ROOT, "registry"));
+  const profile = await analyzeProject(w.project);
+  if (!profile.ok) throw new Error("analysis");
+  const report = recommend(profile.profile, entries, undefined, { platform: "linux" });
+  const target = await inspectConfigTarget("claude-code", "project", toolId, { projectRoot: w.project, homeDir: w.home });
+  const built = buildInstallPlan({ toolId, entries, report, probes: PROBES, targets: [target], platform: "linux" });
+  if (!built.ok) throw new Error(built.code);
+  const dialogs: Parameters<NativeDialogLike["showMessageBox"]>[0][] = [];
+  setDesktopLocale(locale);
+  try {
+    const outcome = await requestApproval(built.planned, nativeDialogPrompter({ showMessageBox: async (options) => (dialogs.push(options), { response: 1 }) }, "synthetic-project"));
+    expect(outcome.status).toBe("approved");
+    return { planned: built.planned, detail: dialogs[0]!.detail };
+  } finally {
+    setDesktopLocale("ko");
+  }
+}
 
 describe("REQ-034 Desktop 설치 흐름", () => {
   it("AC-036-01 IPC 인자는 현재 추천 목록의 toolId 하나뿐이고 경로·Plan을 보내도 무시한다", async () => {
@@ -176,6 +199,66 @@ describe("REQ-034 Desktop 설치 흐름", () => {
     expect(done).toMatchObject({ status: "done", result: { status: "succeeded" } });
     expect(nativeDialogPrompter({ showMessageBox: async () => ({ response: 1 }) }).channel).toBe("desktop-native-dialog");
     for (const file of ["src/preload.ts", "renderer/install.js", "src/install.ts"]) expect(await read(file), file).not.toMatch(/install:approve|approveDigest|ipcRenderer\.invoke\("[^"]*approve/u);
+  });
+
+  it("최종 네이티브 승인에 실제 Context7 Prepare 명령·위험·변경 범위·digest가 보이고 취소하면 쓰기·실행이 없다", async () => {
+    const w = await wired({ accept: false });
+    await w.scan();
+    const response = await w.plan("context7");
+    if (response.status !== "ok") throw new Error(response.status);
+    expect(await w.run("context7")).toEqual({ status: "rejected" });
+    const detail = w.dialogs[0]?.detail ?? "";
+    expect(detail).toContain("npx --yes --package=@upstash/context7-mcp@4.1.0 -- node --version");
+    expect(detail).toContain("의존성 설치 스크립트");
+    expect(detail).toContain(".mcp.json");
+    expect(detail).toContain("[base]");
+    expect(detail).toMatch(/sha256:[a-f0-9]{64}/u);
+    expect(w.spawns).toEqual([]);
+    expect(await readFile(path.join(w.project, ".mcp.json"), "utf8")).toBe('{ "mcpServers": {} }\n');
+  });
+
+  it("최종 승인은 npx·uvx·Docker 실제 run 명령을 한국어·영어로 전부 표시하고 준비 의미를 구분한다", async () => {
+    for (const locale of ["ko", "en"] as const) {
+      for (const [toolId, expected] of [
+        ["context7", "npx --yes --package=@upstash/context7-mcp@4.1.0 -- node --version"],
+        ["postgres-mcp", "uvx --no-build"],
+        ["github-mcp-server", "docker pull ghcr.io/github/github-mcp-server"],
+      ] as const) {
+        const { planned, detail } = await approvalDialogFor(toolId, locale);
+        const commands = installPreparationCommands(planned.plan);
+        expect(commands.length, toolId).toBeGreaterThan(0);
+        for (const command of commands) expect(detail).toContain(command);
+        expect(detail).toContain(expected);
+        expect(detail).toContain(planned.planDigest);
+        expect(detail).toContain(".mcp.json");
+        expect(detail).toContain("[base]");
+        expect(detail).toContain(locale === "ko" ? "준비 명령" : "Preparation commands");
+        if (toolId === "context7") expect(detail).toContain(locale === "ko" ? "의존성 설치 스크립트" : "dependency install scripts");
+        if (toolId === "postgres-mcp") expect(detail).toContain(locale === "ko" ? "wheel만" : "Wheels only");
+        if (toolId === "github-mcp-server") expect(detail).toContain(locale === "ko" ? "컨테이너 이미지를 받습니다" : "Pulls the container image");
+      }
+    }
+  });
+
+  it("run 단계가 없으면 준비 명령을 표시하지 않고, 합성 환경 비밀값도 대화상자에 노출하지 않는다", async () => {
+    const secret = "SYNTHETIC_APPROVAL_SECRET_0123456789";
+    const previous = process.env.OPENHUB_SYNTHETIC_APPROVAL_SECRET;
+    process.env.OPENHUB_SYNTHETIC_APPROVAL_SECRET = secret;
+    try {
+      const w = await wired();
+      await w.scan();
+      expect((await w.plan("postgres-mcp")).status).toBe("ok"); // fixture의 floating uvx: launch-on-demand
+      const result = await w.run("postgres-mcp");
+      expect(result.status).toBe("done");
+      const detail = w.dialogs[0]?.detail ?? "";
+      expect(detail).not.toContain("준비 명령");
+      expect(detail).not.toContain("uvx ");
+      expect(detail).not.toContain(secret);
+      expect(detail).toMatch(/Plan digest sha256:[a-f0-9]{64}/u);
+    } finally {
+      if (previous === undefined) delete process.env.OPENHUB_SYNTHETIC_APPROVAL_SECRET;
+      else process.env.OPENHUB_SYNTHETIC_APPROVAL_SECRET = previous;
+    }
   });
 
   it("AC-036-05 PLAN_STALE이면 재승인 화면으로 돌아간다", async () => {
