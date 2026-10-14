@@ -1,0 +1,31 @@
+# 테스트 전용 npx fixture(v0.2.1 #69). 버전이 고정되지 않은 npx MCP 도구의 대표로, 예전에 Memory MCP가 맡던 테스트 역할을 대신한다.
+# 실제 registry/에는 없다. 패키지 이름은 합성(@openhub-fixture/*)이며 테스트는 가짜 npm·가짜 registry fetch로만 쓴다(실제 npm 0).
+schemaVersion: 1
+name: fixture-npx-mcp
+displayName: Fixture NPX MCP (test only)
+summary: 테스트 전용 npx MCP fixture(버전 미고정, launch-on-demand)
+repository:
+  github: openhub-fixture/npx-mcp
+category: [memory, mcp]
+capabilities: [knowledge-graph-memory]
+targets: [claude-code, codex, cursor]
+platform: { windows: true, macos: true, linux: true }
+requirements:
+  node: ">=18"
+install:
+  preferredAdapter: npx
+  options:
+    command: "npx -y @openhub-fixture/npx-mcp"
+  fallback:
+    - adapter: npm
+      package: "@openhub-fixture/npx-mcp"
+healthCheck:
+  type: mcp-handshake
+update:
+  source: npm
+rollback:
+  supported: true
+verification: community
+recommendation:
+  identity: { mcpServerNames: [fixture-npx] }
+  source: { type: dedicated }
