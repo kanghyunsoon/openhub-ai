@@ -17,8 +17,8 @@ const STATUSES = new Set(["PASS", "FAIL", "NOT-RUN"]);
  * @type {Readonly<Record<"windows" | "linux", readonly string[]>>}
  */
 export const REQUIRED_CHECKS = Object.freeze({
-  windows: Object.freeze(["reject-writes-nothing", "plan-stale-blocks-and-keeps-external-change", "kubernetes-secret-denied-configmap-read-no-token", "kubernetes-reviewed-tool-config", "kubernetes-only-0.0.67", "health-failure-compensation", "app-version-shown"]),
-  linux: Object.freeze(["reject-writes-nothing", "plan-stale-blocks-and-keeps-external-change", "kubernetes-secret-denied-configmap-read-no-token", "kubernetes-reviewed-tool-config", "kubernetes-only-0.0.67", "health-failure-compensation", "app-version-shown", "first-start-follows-os-korean"]),
+  windows: Object.freeze(["reject-writes-nothing", "plan-stale-blocks-and-keeps-external-change", "v1-exact-version-prepared", "kubernetes-secret-denied-configmap-read-no-token", "kubernetes-reviewed-tool-config", "kubernetes-only-0.0.67", "health-failure-compensation", "app-version-shown"]),
+  linux: Object.freeze(["reject-writes-nothing", "plan-stale-blocks-and-keeps-external-change", "v1-exact-version-prepared", "kubernetes-secret-denied-configmap-read-no-token", "kubernetes-reviewed-tool-config", "kubernetes-only-0.0.67", "health-failure-compensation", "app-version-shown", "first-start-follows-os-korean"]),
 });
 
 /**

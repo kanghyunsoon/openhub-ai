@@ -197,7 +197,8 @@ describe("REQ-034 CLI openhub install", () => {
   });
 
   it("AC-035-09 --scope user는 host 검사를 켜고 user-scope-config를 요구하며 host 미검사 Plan은 프로젝트 범위 기준 미설치로 표시한다", async () => {
-    const user = await install(["context7", "--client", "cursor", "--scope", "user"], { answers: ["y", "y", "context7"] });
+    // v0.2.1(#70): Context7은 고정돼 npx Prepare(실제 npm cache 필요)를 거친다. 이 검사는 사용자 범위 동작만 보므로 고정 안 된 Playwright MCP로 본다.
+    const user = await install(["playwright-mcp", "--client", "cursor", "--scope", "user"], { answers: ["y", "y", "playwright-mcp"] });
     expect(user.code).toBe(0);
     expect(user.stdout.join("\n")).toContain("검사 범위    프로젝트 + 사용자");
     expect(user.stdout.filter((l) => l.startsWith("[user-scope-config]"))).toHaveLength(1);
@@ -205,7 +206,7 @@ describe("REQ-034 CLI openhub install", () => {
     // config 쓰기 대상은 여전히 ~/.cursor/mcp.json 하나다.
     expect(await files(user.home)).toEqual([".cursor", ".cursor/mcp.json", ".openhub", ".openhub/state", ".openhub/state/lifecycle.json"]);
     expect(await files(user.project)).toEqual(["package.json"]);
-    const project = await install(["context7", "--client", "cursor"], { answers: ["n"] });
+    const project = await install(["playwright-mcp", "--client", "cursor"], { answers: ["n"] });
     expect(project.stdout.join("\n")).toContain("설치 상태    프로젝트 범위 기준 미설치(사용자 범위 미검사)");
     expect(project.stdout.join("\n")).not.toContain("[user-scope-config]");
   });

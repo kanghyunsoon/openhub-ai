@@ -141,11 +141,14 @@ describe("REQ-043 Install 연계·Status·Drift", () => {
     );
     const h = await createHarness(scratch, { entries: pinned });
     await installed(h, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
+    // v0.2.1(#70): Context7은 고정됐으므로 floating 예는 고정 안 된 실제 Registry 도구(Playwright MCP)로 본다.
+    await installed(h, "playwright-mcp", [{ client: "claude-code", scope: "project" }]);
     await installed(h, "context7", [{ client: "claude-code", scope: "project" }]);
     await installed(h, "github-mcp-server", [{ client: "cursor", scope: "project" }]);
     const byName = Object.fromEntries((await items(h, { entries: pinned })).map((i) => [i.serverName, i.artifact]));
     expect(byName["fixture-npx"]).toEqual({ lock: "artifact-locked", presence: "launch-on-demand", requested: "@openhub-fixture/npx-mcp@2025.9.1", resolved: "@openhub-fixture/npx-mcp@2025.9.1" });
-    expect(byName["context7"]).toMatchObject({ lock: "artifact-unlocked", presence: "launch-on-demand", resolved: null });
+    expect(byName["playwright"]).toMatchObject({ lock: "artifact-unlocked", presence: "launch-on-demand", resolved: null });
+    expect(byName["context7"]).toMatchObject({ lock: "artifact-locked", requested: "@upstash/context7-mcp@4.1.0", resolved: "@upstash/context7-mcp@4.1.0" });
     expect(byName["github"]).toMatchObject({ lock: "artifact-unlocked", presence: "artifact-unknown" });
     const memory = Object.values((await stateOf(h)).entries).find((e) => e.target.serverName === "fixture-npx")!;
     expect(memory.artifact.resolved).toEqual({ kind: "npm-package", spec: "@openhub-fixture/npx-mcp@2025.9.1", version: "2025.9.1", digest: null, integrity: null, source: "npm-registry" });

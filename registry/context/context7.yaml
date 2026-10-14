@@ -17,7 +17,9 @@ env:
 install:
   preferredAdapter: npx
   options:
-    command: "npx -y @upstash/context7-mcp"
+    # v0.2.1(#70): 검토한 정확한 버전으로 고정한다. 고정 버전은 승인 뒤 npx Prepare로 미리 받으므로 첫 Health가 다운로드를 기다리지 않는다
+    # (고정 전 빈 cache 첫 Health: 약 13.7~29 s, 한 번은 20 s 제한 초과). 다른 버전은 INSTALLED의 정확한 버전 Update로 바꾼다.
+    command: "npx -y @upstash/context7-mcp@4.1.0"
   fallback:
     - adapter: npm
       package: "@upstash/context7-mcp"

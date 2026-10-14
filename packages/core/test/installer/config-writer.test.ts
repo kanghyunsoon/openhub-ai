@@ -329,7 +329,8 @@ describe("REQ-036 Agent Client Config Writer", () => {
 
   it("AC-032-12 Windows npx는 세 Client config에 cmd /d /c npx로 기록되고 절대 cmd.exe 경로가 없으며 Probe·Executor는 cmd를 실행하지 않는다", async () => {
     const r = await roots();
-    const plan = await planWith("context7", [["claude-code", "project"], ["cursor", "project"], ["codex", "project"]], r, "windows");
+    // v0.2.1(#70): Context7은 고정돼 npx Prepare(실행 단계)가 생겼다. "준비 실행 0건" 경로는 고정 안 된 실제 Registry 도구(Playwright MCP)로 본다.
+    const plan = await planWith("playwright-mcp", [["claude-code", "project"], ["cursor", "project"], ["codex", "project"]], r, "windows");
     const verified = await verifiedPlanOf({ plan, planDigest: installPlanDigest(plan) });
     const spawned: string[][] = [];
     const spawner = ((executable: string, args: readonly string[]) => {
@@ -345,13 +346,13 @@ describe("REQ-036 Agent Client Config Writer", () => {
     });
     expect(report).toMatchObject({ ok: true, prepared: true });
     expect(spawned).toEqual([]);
-    const wrapper = { command: "cmd", args: ["/d", "/c", "npx", "-y", "@upstash/context7-mcp"] };
+    const wrapper = { command: "cmd", args: ["/d", "/c", "npx", "@playwright/mcp@latest"] };
     const claude = await readFile(path.join(r.projectRoot, ".mcp.json"), "utf8");
     const cursor = await readFile(path.join(r.projectRoot, ".cursor", "mcp.json"), "utf8");
     const codex = await readFile(path.join(r.projectRoot, ".codex", "config.toml"), "utf8");
-    expect(JSON.parse(claude).mcpServers.context7).toEqual(wrapper);
-    expect(JSON.parse(cursor).mcpServers.context7).toEqual(wrapper);
-    expect((parseToml(codex) as any).mcp_servers.context7).toEqual(wrapper);
+    expect(JSON.parse(claude).mcpServers.playwright).toEqual(wrapper);
+    expect(JSON.parse(cursor).mcpServers.playwright).toEqual(wrapper);
+    expect((parseToml(codex) as any).mcp_servers.playwright).toEqual(wrapper);
     for (const text of [claude, cursor, codex]) {
       for (const banned of ["cmd.exe", "System32", "npx.cmd", "C:\\", "C:/"]) expect(text).not.toContain(banned);
     }

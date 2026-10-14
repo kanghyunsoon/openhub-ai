@@ -9,7 +9,8 @@ v0.2.1 is **not released yet**. This page describes the limits of the code on ma
 | Serena: no new installs | By design in v0.2.1; re-support tracked in #59 | Keep or remove your existing entry; recovery still works |
 | Memory MCP: no new installs | By design in v0.2.1; storage fix tracked in #69 | Before your client starts it again, back up `memory.jsonl` and set `MEMORY_FILE_PATH` to an absolute path; recovery still works |
 | Postgres MCP Pro: first Health on Windows is close to the time limit | Not fixed; measured about 15 s of 20 s | Run Health again |
-| Unpinned npx tools (Context7, Chrome DevTools MCP, Playwright MCP) download the package during their first Health | Known limit; Context7 measured about 15.8 s of 20 s on one Windows PC, the other two not measured; tracked in #70 | Run Health again |
+| Unpinned npx tools (Chrome DevTools MCP, Playwright MCP) download the package during their first Health | Known limit; not measured; tracked in #70 | Run Health again |
+| Context7 entries installed before v0.2.1 stay unpinned until you update them | By design (no automatic change) | Update to the reviewed 4.1.0 or choose another exact version |
 | Recovery of interrupted operations is CLI only | By design in v0.2.1 | Run the command the Installed view shows |
 | Environment limits during Health and benchmark are not a sandbox | Known limit | See below |
 | npm configuration (`node-options` in `.npmrc`) can still add Node.js options | Known limit; tracked in #63 | Check `npm config get node-options` |
@@ -51,11 +52,12 @@ v0.2.1 is **not released yet**. This page describes the limits of the code on ma
 
 ## Unpinned npx tools: the first Health downloads the package
 
-- **Which tools:** Context7 (`@upstash/context7-mcp`), Chrome DevTools MCP (`chrome-devtools-mcp@latest`) and Playwright MCP (`@playwright/mcp@latest`). Their Registry command has no exact version, so OpenHub does not download them at install (the plan says "launch-on-demand" and shows `floating-artifact`).
+- **Which tools:** Chrome DevTools MCP (`chrome-devtools-mcp@latest`) and Playwright MCP (`@playwright/mcp@latest`). Their Registry command has no exact version, so OpenHub does not download them at install (the plan says "launch-on-demand" and shows `floating-artifact`).
 - **What happens:** the first Health check (like the first start by your client) runs npx, which looks up the newest version, downloads it with its dependencies into the npx cache and then starts the server. All of this counts against the 20 second startup limit.
-- **Measured:** Context7 only. With an empty npm cache its first start took about 15.8 seconds on one Windows development PC and 6.4–8.2 seconds on Linux; with the package already downloaded about 0.7 seconds on Linux. In packaged release-candidate runs on CI runners its first Health passed, one run per platform, which does not show how often it can fail. Chrome DevTools MCP and Playwright MCP were **not measured**. A slow network, disk or antivirus scan makes `startup-timeout` more likely.
+- **Measured:** Chrome DevTools MCP and Playwright MCP were **not measured**. Context7 had the same problem before v0.2.1 pinned it: with an empty npm cache its first start took about 15.8 seconds on one Windows development PC and 6.4–8.2 seconds on Linux, and in an independent test one first Health on Windows stopped with `startup-timeout` after about 29 seconds (the retry took about 3 seconds). A slow network, disk or antivirus scan makes `startup-timeout` more likely.
+- **Context7 in v0.2.1:** pinned to `@upstash/context7-mcp@4.1.0` and prepared after approval, before any client file is written, so its first Health starts the prepared package. Entries installed by an earlier version keep their unpinned command until you update them; the update plan prepares 4.1.0 (or the exact version you enter), runs Health and keeps your configuration if either step fails. Adopt needs the reviewed command; an entry with another version or no version is not adopted.
 - **What you can do:** run Health again. A failed standalone Health check changes no configuration; a failed Health during an update restores the previous configuration and Version State. Later starts use the downloaded package, but an unpinned tool downloads again whenever a newer version is published.
-- **Status:** a strategy for preparing or pinning these tools is tracked in [#70](https://github.com/kanghyunsoon/openhub-ai/issues/70). The 20 second limit is not raised.
+- **Status:** a strategy for preparing or pinning the remaining unpinned tools (resolve an exact version in the plan, then approve, prepare and write that version) is tracked in [#70](https://github.com/kanghyunsoon/openhub-ai/issues/70). The 20 second limit is not raised.
 
 ## Recovery is CLI only
 

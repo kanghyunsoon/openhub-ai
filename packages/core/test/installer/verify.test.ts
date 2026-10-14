@@ -73,7 +73,8 @@ describe("REQ-035 Post-install Verification", () => {
     expect(h.analyzeCalls.at(-1)).toBe(false);
 
     const u = await createHarness(scratch, { entries: seed });
-    const user = u.request("context7", [{ client: "cursor", scope: "user" }]);
+    // v0.2.1(#70): Context7은 고정돼 Prepare 대상이 됐다. launch-on-demand 경로는 고정 안 된 실제 Registry 도구(Playwright MCP)로 본다.
+    const user = u.request("playwright-mcp", [{ client: "cursor", scope: "user" }]);
     const p2 = await plannedOf(u, user);
     expect(p2.plan.approvalRequirements).toContain("user-scope-config");
     u.reset();
