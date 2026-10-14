@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { checkReleaseNotes } from "../scripts/release-github-lib";
-import { clientVerificationLevel, loadRegistry, parseUvxArgs, TOOL_CONFIG_CLIENTS, uvxAdapter, wheelsOnlyUvxLaunchArgs, WITHDRAWN_TOOLS, type InstallStep, type RegistryEntry } from "../packages/core/src/index";
+import { clientVerificationLevel, isPinnedArtifact, loadRegistry, npxArtifact, parseUvxArgs, TOOL_CONFIG_CLIENTS, uvxAdapter, wheelsOnlyUvxLaunchArgs, WITHDRAWN_TOOLS, type InstallStep, type RegistryEntry } from "../packages/core/src/index";
 import { createHarness, plannedOf } from "../packages/core/test/installer/harness";
 
 /**
@@ -67,6 +67,38 @@ describe("v0.2.1 Release Notes", () => {
     }
     expect(knownEn).toContain("## Memory MCP: no new installs");
     expect(knownKo).toContain("## Memory MCP 신규 설치 불가");
+  });
+
+  it("기존 Memory MCP 사용자 보호 안내: 직접 백업·절대 경로 MEMORY_FILE_PATH·~/상대 경로 제한·이미 지워진 파일 복구 불가, 자동 보호 주장 없음", () => {
+    expect(notes).toContain("v0.2.1 does not protect the file for you");
+    expect(notes).toContain("set `MEMORY_FILE_PATH` to the absolute path of the copy (not `~` or a relative path)");
+    for (const part of ["**Protect your memories yourself.**", "the same loss can still happen if you do nothing", "npm config get cache", "Do not use `~` (versions before 1.0.0 do not expand it) or a relative path", "cannot be recovered by OpenHub", "shows the entry as `config-drift` next to the withdrawn notice"]) expect(knownEn, part).toContain(part);
+    for (const part of ["**기억은 직접 보호해야 합니다.**", "아무것도 하지 않으면 같은 손실이 여전히 일어날 수 있습니다", "npm config get cache", "OpenHub가 복구할 수 없습니다", "`config-drift`를 표시합니다"]) expect(knownKo, part).toContain(part);
+    for (const doc of [notes, knownEn, knownKo]) expect(doc).not.toMatch(/existing (Memory MCP )?users are (now )?safe|no action (is )?needed|자동으로 (보호|이전)합니다/u);
+  });
+
+  it("버전 고정 안 된 npx 도구 목록과 측정 범위가 실제 Registry와 같다(#70): Context7만 측정, 나머지는 미측정", async () => {
+    const { entries } = await loadRegistry(path.join(ROOT, "registry"));
+    const unpinned = entries
+      .filter((e) => e.manifest.install.preferredAdapter === "npx")
+      .filter((e) => !isPinnedArtifact("npx", npxArtifact(String(e.manifest.install.options?.["command"] ?? "").split(/\s+/u).slice(1))))
+      .map((e) => e.manifest.displayName)
+      .sort();
+    expect(unpinned).toEqual(["Chrome DevTools MCP", "Context7", "Playwright MCP"]);
+    const bullet = notes.split("\n").find((l) => l.startsWith("- **Unpinned npx tools download during their first Health.**"))!;
+    expect(bullet).toBeDefined();
+    for (const name of unpinned) {
+      expect(bullet).toContain(name);
+      expect(knownEn).toContain(name);
+      expect(knownKo).toContain(name);
+    }
+    expect(bullet).not.toContain("Memory MCP");
+    expect(bullet).toContain("Only Context7 was measured: about 15.8 seconds on one Windows PC");
+    expect(bullet).toContain("Chrome DevTools MCP and Playwright MCP were not measured");
+    expect(knownEn).toContain("Chrome DevTools MCP and Playwright MCP were **not measured**");
+    expect(knownKo).toContain("Chrome DevTools MCP와 Playwright MCP는 **측정하지 않았습니다**");
+    // 오래된 main SHA로 현재 코드를 설명하지 않는다.
+    for (const doc of [knownEn, knownKo]) expect(doc).not.toMatch(/main `[0-9a-f]{7}`/u);
   });
 
   it("Kubernetes MCP Server Client 검증 표의 각 칸이 Core 기록과 같다", () => {

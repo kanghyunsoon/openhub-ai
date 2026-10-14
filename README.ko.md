@@ -113,7 +113,7 @@ Pinokio 지원은 pterm 0.0.25 기준입니다. 기본 테스트는 가짜 pinok
 
 ## 알려진 문제
 
-시작 전에 [v0.2.0 알려진 문제](docs/known-issues-v0.2.0.ko.md)를 읽어 주세요: 설치 중 프로젝트 전환, 중단된 업데이트, 새 PC의 Postgres MCP Pro, Windows에서 uvx 도구의 느린 첫 실행.
+시작 전에 [v0.2.0 알려진 문제](docs/known-issues-v0.2.0.ko.md)를 읽어 주세요: 설치 중 프로젝트 전환, 중단된 업데이트, 새 PC의 Postgres MCP Pro, Windows에서 uvx 도구의 느린 첫 실행. 아직 릴리스하지 않은 `main` 코드의 제한은 [v0.2.1 알려진 문제](docs/known-issues-v0.2.1.ko.md)에 있습니다.
 
 다운로드 파일은 v0.2.0입니다. 이 README는 아직 배포하지 않은 `main` 코드도 설명합니다. 차이:
 
@@ -125,7 +125,8 @@ Pinokio 지원은 pterm 0.0.25 기준입니다. 기본 테스트는 가짜 pinok
 | Health·Benchmark가 MCP 서버에 넘기는 환경 | 내 환경 전체 | OS·경로 변수, 프록시·CA, backend 자체 설정, 도구가 선언한 변수만. 환경변수의 패키지 index·registry 설정을 그대로 넘길 수 없으면(예: 인증 정보가 든 URL) Health·Benchmark를 실행하지 않습니다. 그런 설정은 `uv.toml`·`.npmrc`에 두세요([보안 모델](docs/security-model.md)) |
 | Windows에서 Postgres MCP Pro 첫 실행 | Health 시간 제한에 걸릴 수 있음 | 정확한 버전(`postgres-mcp==0.3.0`, `mcp==1.30.0`, wheel만)을 설정 쓰기 전에 준비하고, Client도 `--no-build`로 실행합니다 |
 | Serena | 설치 가능. Client가 첫 실행 때 의존성(`proxy-tools`)을 소스에서 빌드 | **새 설치·업데이트·롤백·Health·repair·편입(adopt)·Benchmark를 하지 않습니다**: 그 빌드를 검증할 수 없습니다. 기존 Serena 항목과 Version State는 그대로 두고 지원 중단으로 표시하며, 중단된 작업은 복구할 수 있습니다. 원하면 [수동 제거 절차](#도구와-openhub-제거)로 지우세요. 재지원: [#59](https://github.com/kanghyunsoon/openhub-ai/issues/59) |
-| Memory MCP | 설치 가능. 기본적으로 기억을 npx cache 안의 `memory.jsonl`에 저장 | **새 설치·업데이트·롤백·Health·repair·편입(adopt)·Benchmark를 하지 않습니다**: 새 버전이 나오면 그 파일이 지워지고, 다른 버전은 이전 기억 없이 시작합니다. 기존 항목, Version State, 기억 파일은 그대로 두고 지원 중단으로 표시하며, 중단된 작업은 복구할 수 있습니다. Client는 계속 실행할 수 있으니 먼저 `memory.jsonl`을 백업하세요([알려진 문제](docs/known-issues-v0.2.1.ko.md)). 저장 경로 해결: [#69](https://github.com/kanghyunsoon/openhub-ai/issues/69) |
+| Memory MCP | 설치 가능. 기본적으로 기억을 npx cache 안의 `memory.jsonl`에 저장 | **새 설치·업데이트·롤백·Health·repair·편입(adopt)·Benchmark를 하지 않습니다**: 새 버전이 나오면 그 파일이 지워지고, 다른 버전은 이전 기억 없이 시작합니다. 기존 항목, Version State, 기억 파일은 그대로 두고 지원 중단으로 표시하며, 중단된 작업은 복구할 수 있습니다. Client는 계속 실행할 수 있고 OpenHub가 파일을 보호해 주지 않으니, `memory.jsonl`을 백업하고 `MEMORY_FILE_PATH`에 npm cache 밖의 절대 경로를 지정하세요([알려진 문제](docs/known-issues-v0.2.1.ko.md)). 저장 경로 해결: [#69](https://github.com/kanghyunsoon/openhub-ai/issues/69) |
+| 버전 고정 안 된 npx 도구(Context7, Chrome DevTools MCP, Playwright MCP)의 첫 Health | 20초 시작 제한 안에서 패키지를 내려받음 | 변경 없음. Context7은 빈 npm cache에서 Windows PC 1대 기준 약 15.8초, 나머지 둘은 미측정. `startup-timeout`이면 Health를 다시 실행([알려진 문제](docs/known-issues-v0.2.1.ko.md), [#70](https://github.com/kanghyunsoon/openhub-ai/issues/70)) |
 
 ## 데모
 
