@@ -185,4 +185,3 @@ describe("v0.2.1 #70 Context7 정확한 버전 고정", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
-
