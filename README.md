@@ -112,7 +112,7 @@ To remove the app: on Windows use *Settings → Apps → Installed apps → Open
 
    For the default "Only for me" installation it is `%LOCALAPPDATA%\Programs\OpenHub AI\Uninstall OpenHub AI.exe`. If you chose another folder during setup, it is in that folder.
 3. Before you run it, check that it belongs to this installation: it is in the same folder as `OpenHub AI.exe`, and *Properties → Details* shows *Product name* "OpenHub AI" and the version you installed. Like the installer it is unsigned, so Windows may show a security warning with *Unknown Publisher*. Do not run an uninstaller from any other location.
-4. Run it and follow the wizard. It can take a minute or two before the files are removed. Afterwards the program folder, the Start menu and desktop shortcuts and the uninstall entry are gone.
+4. Run it and follow the wizard. It can take a few minutes before the files are removed (about 3 minutes in one silent uninstall on the test PC); wait for it to finish. Afterwards the program folder, the Start menu and desktop shortcuts and the uninstall entry are gone.
 
 Uninstalling does not delete your client configuration files, `~/.openhub` or the app data folder described above.
 
