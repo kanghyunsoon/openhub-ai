@@ -60,8 +60,8 @@ describe("checkRcResult", () => {
     const windows = pass("windows");
     windows.checks["first-start-follows-os-korean"] = { status: "PASS" };
     expect(checkRcResult(windows, { os: "windows" }).failures).toEqual(["check first-start-follows-os-korean: unknown check id"]);
-    // v0.2.1(#70): Context7 고정 뒤 설치 단계의 V1 Prepare·첫 Health를 별도 필수 check로 둔다(이전 "고정 안 됨 → V1" Update 검사를 대신한다).
-    expect(REQUIRED_CHECKS.windows).toEqual(["reject-writes-nothing", "plan-stale-blocks-and-keeps-external-change", "install-prepared-exact-version", "kubernetes-secret-denied-configmap-read-no-token", "kubernetes-reviewed-tool-config", "kubernetes-only-0.0.67", "health-failure-compensation", "app-version-shown"]);
+    // v0.2.1(#70): V1이 정확한 버전으로 Prepare되고 Health가 통과했는지를 별도 필수 check로 둔다(고정 Manifest는 설치, 이전 산출물은 Update로 V1에 이른다).
+    expect(REQUIRED_CHECKS.windows).toEqual(["reject-writes-nothing", "plan-stale-blocks-and-keeps-external-change", "v1-exact-version-prepared", "kubernetes-secret-denied-configmap-read-no-token", "kubernetes-reviewed-tool-config", "kubernetes-only-0.0.67", "health-failure-compensation", "app-version-shown"]);
     expect(REQUIRED_CHECKS.linux).toEqual([...REQUIRED_CHECKS.windows, "first-start-follows-os-korean"]);
   });
 
@@ -192,10 +192,12 @@ describe("RC workflow·하네스 배선", () => {
     expect(issues).toEqual([]);
     const entry = entries.find((e) => e.manifest.name === id);
     expect(entry, "harness tool must be in the bundled Registry").toBeDefined();
-    // v0.2.1(#70): 번들 Manifest는 TOOL_V1로 고정이다. 설치가 V1을 Prepare하고(install-prepared-exact-version), INSTALLED의 정확한 버전
-    // 입력(npx 항목이면 고정 여부와 상관없이 열린다)으로 V2 Update·Rollback V1을 검사한다.
+    // v0.2.1(#70): 번들 Manifest는 TOOL_V1로 고정이다. 설치가 V1을 Prepare하고(v1-exact-version-prepared), INSTALLED의 정확한 버전
+    // 입력(npx 항목이면 고정 여부와 상관없이 열린다)으로 V2 Update·Rollback V1을 검사한다. 이전 산출물(고정 안 됨)은 Update로 V1에 이른다.
     expect(entry!.manifest.install.options?.["command"]).toBe("npx -y " + pkg + "@" + v1);
-    expect(harness).toContain('check("install-prepared-exact-version"');
+    expect(harness).toContain('check("v1-exact-version-prepared"');
+    expect(harness).toContain('bundled === "npx -y " + v1Spec');
+    expect(harness).toContain('bundled === "npx -y " + TOOL_PKG');
     expect(entry!.manifest.recommendation?.identity?.mcpServerNames?.[0]).toBe(alias);
     for (const v of [v1, v2]) expect(v).toMatch(/^\d+\.\d+\.\d+$/u);
     expect(v1).not.toBe(v2);

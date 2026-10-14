@@ -85,7 +85,9 @@ const PROJECT_MCP = JSON.stringify({ mcpServers: { notes: NOTES } }, null, 2) + 
 // v0.2.1(#69): Memory MCP는 지원 중단되어 Core가 계획 단계에서 거부하므로 Context7로 옮겼다. 자격증명 없이 시작하고
 // initialize·tools/list에 외부 서비스가 필요 없다.
 // v0.2.1(#70): 번들 Registry의 Context7 Manifest는 TOOL_V1로 고정됐다(npx -y @upstash/context7-mcp@4.1.0). 그래서 설치가 곧 V1이고
-// 승인 뒤 npx Prepare를 거친다(check install-prepared-exact-version). 이어서 V2 Update → Health → Rollback V1 → Health를 그대로 검사한다.
+// 승인 뒤 npx Prepare를 거친다. 하네스는 앱에 번들된 Manifest를 읽어 V1에 이르는 길을 고른다: 고정이면 설치, 고정 안 됨(이전 산출물,
+// PR 자체 점검의 v0.2.0)이면 기존처럼 정확한 버전 Update. 어느 쪽이든 필수 check v1-exact-version-prepared(V1 Prepare 표시·cache 완료·
+// Client 설정과 Version State가 V1·V1 Health 성공)를 통과해야 한다. 이어서 V2 Update → Health → Rollback V1 → Health를 그대로 검사한다.
 // 근거·검증 범위 대응표: docs/specs/v0.2.1-rc-lifecycle-tool.md
 const TOOL_ID = "context7";
 const TOOL_ALIAS = "context7";
@@ -185,7 +187,13 @@ const PATCH_DIALOG = String.raw`(async () => {
   const answerDialog = ${answerDialog.toString()};
   const installDialogAnswers = ${installDialogAnswers.toString()};
   installDialogAnswers(dialog, fs, globalThis);
-  return { userData: app.getPath("userData"), home: process.mainModule.require("node:os").homedir(), systemLanguages: [...app.getPreferredSystemLanguages(), app.getSystemLocale()], appVersion: app.getVersion() };
+  // 번들 Registry의 RC 대상 도구 명령(읽기만). v0.2.1(#70)부터 Context7이 고정이고, 이전 산출물(PR 자체 점검의 v0.2.0)은 고정 안 됨이다.
+  let toolCommand = null;
+  try {
+    const t = process.mainModule.require("node:fs").readFileSync(process.mainModule.require("node:path").join(process.resourcesPath, "registry", "context", "context7.yaml"), "utf8");
+    toolCommand = /^\s*command:\s*"([^"]+)"/mu.exec(t)?.[1] ?? null;
+  } catch {}
+  return { userData: app.getPath("userData"), home: process.mainModule.require("node:os").homedir(), systemLanguages: [...app.getPreferredSystemLanguages(), app.getSystemLocale()], appVersion: app.getVersion(), toolCommand };
 })()`;
 
 async function launch(ctx, extraEnv = {}) {
@@ -553,23 +561,32 @@ async function run() {
         out.dialog.versionLine && out.dialog.prepareCommand && out.dialog.approvalIds.includes("health-execution") && out.health.status === "health-checked" && out.health.outcome === "succeeded";
       return out;
     };
-    // V1은 설치로 들어온다(고정 Manifest, v0.2.1 #70). 이전 RC의 "고정 안 됨 → V1" Update 대신, 설치가 정확한 V1을 Prepare했고
-    // Client 설정·Version State가 V1이며 준비된 V1의 첫 Health(단계 8)가 통과했는지 본다. V2 Update·Rollback 검사는 그대로다.
+    // V1에 이르는 길: 번들 Manifest가 TOOL_V1 고정이면 설치(v0.2.1 #70), 고정 안 됨(이전 산출물)이면 정확한 버전 Update. 그 밖의 명령이면 실패다.
     const v1Spec = TOOL_PKG + "@" + TOOL_V1;
-    const v1State = await toolState();
-    const v1 = {
-      version: TOOL_V1,
-      source: "install",
-      clientArgs: installEntry?.args ?? null,
-      state: v1State,
-      prepared: prepared(v1Spec),
-      dialog: { prepareCommand: installPrepareShown },
-      health: { status: toolHealth.status, outcome: toolHealth.outcome },
-    };
-    v1.ok =
-      toolInstall.status === "succeeded" && (v1.clientArgs ?? []).includes(v1Spec) && v1State?.requested === v1Spec && v1State?.resolved === v1Spec && v1.prepared && installPrepareShown &&
-      toolHealth.status === "health-checked" && toolHealth.outcome === "succeeded";
-    check("install-prepared-exact-version", v1.ok, v1);
+    const bundled = app.info.toolCommand;
+    let v1;
+    if (bundled === "npx -y " + v1Spec) {
+      // 설치가 정확한 V1을 Prepare했고 Client 설정·Version State가 V1이며 준비된 V1의 첫 Health(단계 8)가 통과했는가.
+      const v1State = await toolState();
+      v1 = {
+        version: TOOL_V1,
+        source: "install",
+        bundledCommand: bundled,
+        clientArgs: installEntry?.args ?? null,
+        state: v1State,
+        prepared: prepared(v1Spec),
+        dialog: { prepareCommand: installPrepareShown },
+        health: { status: toolHealth.status, outcome: toolHealth.outcome },
+      };
+      v1.ok =
+        toolInstall.status === "succeeded" && (v1.clientArgs ?? []).includes(v1Spec) && v1State?.requested === v1Spec && v1State?.resolved === v1Spec && v1.prepared && installPrepareShown &&
+        toolHealth.status === "health-checked" && toolHealth.outcome === "succeeded";
+    } else if (bundled === "npx -y " + TOOL_PKG) {
+      v1 = { ...(await exactStep(TOOL_V1)), source: "update-from-unpinned", bundledCommand: bundled };
+    } else {
+      v1 = { version: TOOL_V1, source: "unknown", bundledCommand: bundled, ok: false };
+    }
+    check("v1-exact-version-prepared", v1.ok, v1);
     const toolV1 = JSON.parse((await read(p(".mcp.json"))) ?? "{}").mcpServers?.[TOOL_ALIAS];
     const v2 = await exactStep(TOOL_V2);
     const othersKept9 = JSON.stringify(await otherConfigs()) === JSON.stringify(others0);
