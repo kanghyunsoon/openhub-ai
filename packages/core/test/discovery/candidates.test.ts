@@ -70,10 +70,14 @@ describe("REQ-052 Discovery Candidate pipeline", () => {
       ["ex-img-mcp", ["mcp-registry"], "ex/img-mcp", "docker:docker.io/ex/img-mcp", "medium"],
       ["acme-weather-mcp", ["github-topic", "npm-search", "mcp-registry"], "acme/weather-mcp", "npm:@acme/weather-mcp", "high"],
       ["py-tool", ["mcp-registry"], "py/py-tool", "pypi:py-tool", "medium"],
+      // v0.2.1 #69: Memory MCP가 Registry에서 빠져 공유 저장소 자체는 저장소만 아는 Candidate로 남는다. 지원 중단 package(server-memory)는 제외된다.
+      ["modelcontextprotocol-servers", ["github-topic"], "modelcontextprotocol/servers", null, "low"],
       ["solo-only-github", ["github-topic"], "solo/only-github", null, "low"],
     ]);
     const ids = a.candidates.map((c) => c.id).join(" ");
-    for (const known of ["servers", "server-memory", "github-mcp-server"]) expect(ids).not.toContain(known);
+    for (const known of ["server-memory", "github-mcp-server"]) expect(ids).not.toContain(known);
+    // v0.2.1 #69: 지원 중단 package는 Registry에 없어도 Candidate가 아니다(공유 저장소 자체는 위 목록처럼 저장소 Candidate로 남는다).
+    expect(a.candidates.map((c) => c.package?.key ?? null)).not.toContain("npm:@modelcontextprotocol/server-memory");
     expect(a.candidates.find((c) => c.id === "acme-weather-mcp")!.signals).toMatchObject({ stars: 120, updatedAt: "2026-09-03T00:00:00.000Z" });
   });
 
