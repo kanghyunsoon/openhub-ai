@@ -25,7 +25,7 @@ import {
   type RegistryEntry,
 } from "../../src/index";
 import { approveAll, createHarness, plannedOf } from "../installer/harness";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 
 /**
  * v0.2.1 #46 리뷰(A안): 패키지 출처 불변성. Prepare가 uv·npm에 넘기는 index·registry 설정을 MCP 서버(Health·Benchmark) 환경에 같은 값으로
@@ -118,7 +118,7 @@ describe("mcpPackageSourceMismatch(이름만, 값 없음)", () => {
 
 describe("Lifecycle Health·Benchmark: 출처를 확인할 수 없으면 실행하지 않는다", () => {
   const PIN = "uvx --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted";
-  const NPX_PIN = "npx -y @modelcontextprotocol/server-memory@2026.8.31";
+  const NPX_PIN = "npx -y @openhub-fixture/npx-mcp@2026.8.31";
   const CURSOR = [{ client: "cursor" as const, scope: "project" as const }];
   const CLEAN = () => ({ ...BASE, DATABASE_URI: "postgresql://probe:synthetic-declared@db/app" });
   const CREDENTIALED = () => ({ ...CLEAN(), UV_INDEX_URL: "https://u:" + SECRET + "@pypi.corp.example/simple" });
@@ -131,9 +131,9 @@ describe("Lifecycle Health·Benchmark: 출처를 확인할 수 없으면 실행�
     return { pid: 9100, stdout: null, stderr: new EventEmitter(), on: (e: string, l: (...a: unknown[]) => void) => events.on(e, l), kill: () => true } as unknown as ExecChild;
   };
 
-  async function installed(tool: "postgres" | "memory" = "postgres") {
-    const seed = await seedEntries();
-    const toolId = tool === "postgres" ? "postgres-mcp" : "memory-mcp";
+  async function installed(tool: "postgres" | "fixture-npx" = "postgres") {
+    const seed = await seedWithNpxFixture();
+    const toolId = tool === "postgres" ? "postgres-mcp" : "fixture-npx-mcp";
     const entries: RegistryEntry[] = seed.map((e) => (e.manifest.name === toolId ? { ...e, manifest: { ...e.manifest, install: { ...e.manifest.install, options: { command: tool === "postgres" ? PIN : NPX_PIN } } } } : e));
     const h = await createHarness(scratch, { entries });
     const install = h.request(toolId, CURSOR);
@@ -200,7 +200,7 @@ describe("Lifecycle Health·Benchmark: 출처를 확인할 수 없으면 실행�
 
   // 수정 전(5454c36): 승인한 출처가 Plan에 없어 인증 정보 없는 주소 변경(mirror-a → mirror-b)을 잡지 못하고 실행했다.
   for (const [label, tool, name, a, b] of [
-    ["npm NPM_CONFIG_REGISTRY", "memory", "NPM_CONFIG_REGISTRY", "https://mirror-a.example/", "https://mirror-b.example/"],
+    ["npm NPM_CONFIG_REGISTRY", "fixture-npx", "NPM_CONFIG_REGISTRY", "https://mirror-a.example/", "https://mirror-b.example/"],
     ["uv UV_INDEX_URL", "postgres", "UV_INDEX_URL", "https://mirror-a.example/simple", "https://mirror-b.example/simple"],
   ] as const) {
     it("승인 뒤 " + label + " 주소 변경(인증 정보 없음) → PLAN_STALE, spawn 0. 같은 주소면 Health 단계에 같은 출처 digest", async () => {

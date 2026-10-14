@@ -24,12 +24,12 @@ import {
   type PlannedBenchmark,
   type RegistryEntry,
 } from "../../src/index";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { newScratch } from "../lifecycle/helpers";
 import { MEMORY, adoptOptions, mcp, newCase, plannedOf, type Case } from "../adopt/helpers";
 
 /** TASK-065 BenchmarkPlan v1과 benchmark-plan-v1 승인 종류. Adopt로 Version State를 만들고 임시 project·home만 쓴다(spawn·network 0). */
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await newScratch("benchmark-plan-test");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 const NOW = () => new Date("2026-10-08T01:00:00.000Z");
@@ -46,13 +46,13 @@ async function adopted(files: Record<string, unknown>, over: Partial<AdoptPlanOp
   return c;
 }
 // 명시적인 빈 원본(#46 리뷰): 원본이 없으면 npx·uvx Benchmark 계획이 막힌다(BENCHMARK_PACKAGE_SOURCE_UNVERIFIED).
-const bopts = (c: Case, over: Partial<BenchmarkPlanOptions> = {}): BenchmarkPlanOptions => ({ toolId: "memory-mcp", projectRoot: c.projectRoot, homeDir: c.homeDir, entries: seed, platform: "linux", includeUser: false, mcpSourceEnv: () => ({}), ...over });
+const bopts = (c: Case, over: Partial<BenchmarkPlanOptions> = {}): BenchmarkPlanOptions => ({ toolId: "fixture-npx-mcp", projectRoot: c.projectRoot, homeDir: c.homeDir, entries: seed, platform: "linux", includeUser: false, mcpSourceEnv: () => ({}), ...over });
 const planned = (r: BenchmarkPlanResult): PlannedBenchmark => {
   if (!r.ok) throw new Error(r.code + " " + r.message);
   return r.planned;
 };
 const codes = (p: PlannedBenchmark) => p.plan.blockers.map((b) => b.code);
-const pinned = { ".mcp.json": mcp({ memory: { command: "npx", args: ["-y", MEMORY + "@1.2.3"] } }) };
+const pinned = { ".mcp.json": mcp({ "fixture-npx": { command: "npx", args: ["-y", MEMORY + "@1.2.3"] } }) };
 async function approve(p: PlannedBenchmark) {
   const o = await requestBenchmarkApproval(p, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
   if (o.status !== "approved") throw new Error(o.status);
@@ -71,14 +71,14 @@ describe("REQ-061 BenchmarkPlan v1", () => {
     const ok = planned(await planBenchmark(bopts(await adopted(pinned))));
     expect(ok.plan.status).toBe("ready");
     expect(ok.plan.artifact.resolved?.spec).toBe(MEMORY + "@1.2.3");
-    const unlocked = planned(await planBenchmark(bopts(await adopted({ ".mcp.json": mcp({ memory: { command: "npx", args: ["-y", MEMORY] } }) }))));
+    const unlocked = planned(await planBenchmark(bopts(await adopted({ ".mcp.json": mcp({ "fixture-npx": { command: "npx", args: ["-y", MEMORY] } }) }))));
     expect(codes(unlocked)).toContain("BENCHMARK_ARTIFACT_UNLOCKED");
     const none = planned(await planBenchmark(bopts(await newCase(scratch, pinned))));
     expect(none.plan).toMatchObject({ status: "blocked", target: null, launch: null });
     expect(codes(none)).toContain("BENCHMARK_NOT_MANAGED");
     const c = await adopted(pinned);
     for (const edit of [(m: RegistryEntry["manifest"]) => void (m.healthCheck = { type: "http", url: "http://127.0.0.1:42000/health", expectStatus: 200 }), (m: RegistryEntry["manifest"]) => void (m.install.preferredAdapter = "pinokio")]) {
-      const p = planned(await planBenchmark(bopts(c, { entries: withManifest("memory-mcp", edit) })));
+      const p = planned(await planBenchmark(bopts(c, { entries: withManifest("fixture-npx-mcp", edit) })));
       expect(codes(p)).toContain("BENCHMARK_UNSUPPORTED");
     }
   });
@@ -93,7 +93,7 @@ describe("REQ-061 BenchmarkPlan v1", () => {
   });
 
   it("AC-065-03 launch는 고정 artifact로 HealthStep 규칙대로 만들고 cmd wrapper·절대 경로가 없다", async () => {
-    const c = await adopted({ ".mcp.json": mcp({ memory: { command: "cmd", args: ["/d", "/c", "npx", "-y", MEMORY + "@1.2.3"] } }) }, { platform: "windows" });
+    const c = await adopted({ ".mcp.json": mcp({ "fixture-npx": { command: "cmd", args: ["/d", "/c", "npx", "-y", MEMORY + "@1.2.3"] } }) }, { platform: "windows" });
     const p = planned(await planBenchmark(bopts(c, { platform: "windows" })));
     expect(p.plan.launch).toEqual({ executable: "npx", args: ["-y", MEMORY + "@1.2.3"], envNames: [], cwd: "isolated" });
     const bytes = serializeBenchmarkPlan(p.plan);
@@ -159,7 +159,7 @@ describe("REQ-061 BenchmarkPlan v1", () => {
       }],
       ["launch", async () => ({ platform: "macos" })],
       ["registry", async () => ({ entries: withManifest("context7", (m) => void (m.summary = "changed")) })],
-      ["manifest", async () => ({ entries: withManifest("memory-mcp", (m) => void (m.summary = "changed")) })],
+      ["manifest", async () => ({ entries: withManifest("fixture-npx-mcp", (m) => void (m.summary = "changed")) })],
     ];
     for (const [kind, change] of cases) {
       const c = await adopted(pinned);
@@ -183,7 +183,7 @@ describe("REQ-061 BenchmarkPlan v1", () => {
 
   it("AC-065-08 대상 config 항목이 state와 다르면 BENCHMARK_CONFIG_DRIFT다", async () => {
     const c = await adopted(pinned);
-    await writeFile(path.join(c.projectRoot, ".mcp.json"), JSON.stringify(mcp({ memory: { command: "npx", args: ["-y", MEMORY + "@1.2.3", "--x"] } }), null, 2) + "\n");
+    await writeFile(path.join(c.projectRoot, ".mcp.json"), JSON.stringify(mcp({ "fixture-npx": { command: "npx", args: ["-y", MEMORY + "@1.2.3", "--x"] } }), null, 2) + "\n");
     expect(codes(planned(await planBenchmark(bopts(c))))).toContain("BENCHMARK_CONFIG_DRIFT");
     await writeFile(path.join(c.projectRoot, ".mcp.json"), JSON.stringify(mcp({}), null, 2) + "\n");
     expect(codes(planned(await planBenchmark(bopts(c))))).toContain("BENCHMARK_CONFIG_DRIFT");

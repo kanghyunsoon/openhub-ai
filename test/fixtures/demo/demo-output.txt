@@ -24,14 +24,14 @@ AI Clients
   Claude Code                        1.00  .mcp.json (config: mcpServers)
 
 AI Tools
-  memory [mcp-server; claude-code]   1.00  .mcp.json (config: memory (stdio, npx))
+  context7 [mcp-server; claude-code] 1.00  .mcp.json (config: context7 (stdio, npx))
 
 Detectors  ai-environment:ok  databases:ok  frameworks:ok  infrastructure:ok  kubernetes:ok  languages:ok  package-managers:ok
 (exit 0)
 
 == 2. Existing tools — 이미 설정된 MCP 서버
 $ openhub lifecycle status --project examples/demo-project
-memory · Claude Code · 프로젝트 (.mcp.json)
+context7 · Claude Code · 프로젝트 (.mcp.json)
   Tool       (식별 안 됨)
   상태       untracked-foreign(OpenHub가 관리하지 않는 설정)
   Health: Unknown (아직 확인하지 않음)
@@ -44,7 +44,7 @@ $ openhub project recommend examples/demo-project
 OpenHub Recommendations — demo-project
 
 검사 범위  프로젝트 (사용자 범위 미검사 — --include-host로 확인)
-설치된 MCP  memory → memory-mcp (프로젝트)
+설치된 MCP  context7 → context7 (프로젝트)
 
 추천
  1. Chrome DevTools MCP (chrome-devtools-mcp)  [likely-gap · high · 브라우저 자동화]
@@ -68,19 +68,13 @@ OpenHub Recommendations — demo-project
     - DB 스키마 조회 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)
     - PostgreSQL 전용 도구와 프로젝트 스택이 일치
     … 이유 8개 더 (--json)
- 4. Context7 (context7)  [likely-gap · medium · 라이브러리 문서 조회]
-    Project Fit 0.75 · OpenScore 0.96
-    Capability  라이브러리 문서 조회
-    - React이(가) package.json의 의존성(react)에서 탐지됨 → 라이브러리 문서 조회 필요
-    - 라이브러리 문서 조회 도구가 프로젝트 범위에서 탐지되지 않음(사용자 범위 미검사)
-    - Claude Code에서 사용 가능
-    … 이유 6개 더 (--json)
 
 충족된 Capability
-  - 지식 그래프 메모리: memory (프로젝트)
+  - 라이브러리 문서 조회: context7 (프로젝트)
 
 후보 없는 Gap
   - 코드 편집 [likely-gap]: 등록된 도구 없음: 코드 편집을(를) 제공하는 호환 도구가 Registry에 없음
+  - 지식 그래프 메모리 [likely-gap]: 등록된 도구 없음: 지식 그래프 메모리을(를) 제공하는 호환 도구가 Registry에 없음
   - 의미 기반 코드 탐색 [likely-gap]: 등록된 도구 없음: 의미 기반 코드 탐색을(를) 제공하는 호환 도구가 Registry에 없음
 
 OpenScore는 저장소 유지관리·활동성·커뮤니티 신호이며 보안·코드 품질 평가가 아닙니다
@@ -118,15 +112,15 @@ Plan digest  sha256:<프로젝트 위치에 따라 달라짐>
 (exit 1)
 
 == 5. Adopt — 기존 설정을 관리 대상으로 등록(데모가 임시 HOME에서 승인 질문에 답함, 설정 파일 변경 없음)
-$ openhub adopt memory-mcp --project examples/demo-project
-Adopt 계획: memory-mcp (ready)
-대상: claude-code · project · .mcp.json · 서버 memory
+$ openhub adopt context7 --project examples/demo-project
+Adopt 계획: context7 (ready)
+대상: claude-code · project · .mcp.json · 서버 context7
 식별: exact — 서버 이름과 package·image가 모두 Registry와 일치 [alias-and-artifact]
-  일치한 artifact: npm:@modelcontextprotocol/server-memory
-  현재 서버 이름: memory
-  Registry 이름: memory-mcp (canonical alias memory)
-실행 방식(기존 설정 그대로): npx · npx -y @modelcontextprotocol/server-memory@2025.8.4
-artifact: @modelcontextprotocol/server-memory@2025.8.4 (설정에 고정된 spec을 기록합니다)
+  일치한 artifact: npm:@upstash/context7-mcp
+  현재 서버 이름: context7
+  Registry 이름: context7 (canonical alias context7)
+실행 방식(기존 설정 그대로): npx · npx -y @upstash/context7-mcp@4.3.0
+artifact: @upstash/context7-mcp@4.3.0 (설정에 고정된 spec을 기록합니다)
 효과: Version State 기록 1회 · 설정 파일 변경 0 · 실행 0 · 네트워크 0
 Health: Not verified (adopt는 MCP 서버를 실행하지 않습니다)
 승인 요구:
@@ -134,91 +128,91 @@ Health: Not verified (adopt는 MCP 서버를 실행하지 않습니다)
 plan digest: sha256:<프로젝트 위치에 따라 달라짐>
 
 위 adopt 계획(관리 대상으로 등록할 설정 항목과 Version State 기록 1회)을 확인했고 등록하는 데 동의합니다. 설정 파일은 바뀌지 않고 아무것도 실행하지 않습니다.
-Adopt 완료: memory-mcp (Version State revision 1). 설정 파일은 바뀌지 않았습니다.
+Adopt 완료: context7 (Version State revision 1). 설정 파일은 바뀌지 않았습니다.
 Health: Not verified (lifecycle health로 확인할 수 있습니다)
 (exit 0)
 
 == 6. Releases — 고정 release fixture
-$ openhub releases memory-mcp --project examples/demo-project --no-token
-Memory MCP (memory-mcp) 릴리스
+$ openhub releases context7 --project examples/demo-project --no-token
+Context7 (context7) 릴리스
 
 버전 출처   npm · notes github-release
-현재        2025.8.4
-최신        2025.9.25 · 게시 2025-09-25
-포함 릴리스 2025.9.25, 2025.9.1
+현재        4.3.0
+최신        4.4.1 · 게시 2025-09-25
+포함 릴리스 4.4.1, 4.4.0
 
 요약(결정론 분류, 근거 [버전 L줄])
   Breaking      1
-    - [2025.9.1 L1] BREAKING: renamed open_nodes to read_nodes
+    - [4.4.0 L1] BREAKING: renamed resolve-library to resolve-library-id
   Security      0
   Compatibility 1
-    - [2025.9.1 L2] See the migration guide
+    - [4.4.0 L2] See the migration guide
   Performance   0
   Fix           1
-    - [2025.9.25 L3] Fixed entity dedupe
+    - [4.4.1 L3] Fixed library id resolution
   Other         1
-    - [2025.9.25 L5] Added search_nodes limit
+    - [4.4.1 L5] Added a token limit to get-library-docs
 
-Release notes 2025.9.25 (원문 일부, 해석하지 않음)
+Release notes 4.4.1 (원문 일부, 해석하지 않음)
   | ## What's Changed
   | ### Bug Fixes
-  | - Fixed entity dedupe
+  | - Fixed library id resolution
   | ### Features
-  | - Added search_nodes limit
+  | - Added a token limit to get-library-docs
 
-링크        https://github.com/modelcontextprotocol/servers/releases/tag/2025.9.25
+링크        https://github.com/upstash/context7/releases/tag/v4.4.1
 (exit 0)
 
 == 7. Impact — 업데이트 영향
-$ openhub impact memory-mcp --project examples/demo-project --no-token
-Memory MCP (memory-mcp) 업데이트 영향
+$ openhub impact context7 --project examples/demo-project --no-token
+Context7 (context7) 업데이트 영향
 
-버전        2025.8.4 → 2025.9.25
+버전        4.3.0 → 4.4.1
 판정        HIGH (WARNING)
 이유
   - notes-breaking (high)
   - notes-migration (medium)
   - version-minor (low)
 근거
-  - release-note 2025.9.1: line 1
-  - release-note 2025.9.1: line 2
-  - version npm: 2025.8.4 -> 2025.9.25
+  - release-note 4.4.0: line 1
+  - release-note 4.4.0: line 2
+  - version npm: 4.3.0 -> 4.4.1
 영향 파일   .mcp.json
 
 Impact는 판단 근거이며 승인이 아닙니다. 실행은 openhub update의 계획·승인을 거칩니다.
 (exit 0)
 
 == 8. Update preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)
-$ openhub update memory-mcp --project examples/demo-project
-Update available: 2025.8.4 → 2025.9.25
+$ openhub update context7 --project examples/demo-project
+Update available: 4.3.0 → 4.4.1
 Impact: HIGH (WARNING)
 Reasons: notes-breaking, notes-migration, version-minor
 Summary: Breaking 1 · Security 0 · Compatibility 1 · Performance 0 · Fix 1 · Other 1
 (Impact·Summary는 판단 근거이며 승인이 아닙니다. 아래 계획을 확인하세요)
 
-Memory MCP (memory-mcp) 업데이트 계획
+Context7 (context7) 업데이트 계획
 
 상태         ready
 Backend      npx
-현재 버전    @modelcontextprotocol/server-memory@2025.8.4
-목표 버전    @modelcontextprotocol/server-memory@2025.9.25
-요청 spec    @modelcontextprotocol/server-memory
-준비 단계    npx --yes --package=@modelcontextprotocol/server-memory@2025.9.25 -- node --version — OpenHub가 설정을 바꾸기 전에 이 버전을 npx cache에 받습니다(MCP 서버는 실행하지 않음, 네트워크·다운로드·의존성 설치 스크립트)
+현재 버전    @upstash/context7-mcp@4.3.0
+목표 버전    @upstash/context7-mcp@4.4.1
+요청 spec    @upstash/context7-mcp
+준비 단계    npx --yes --package=@upstash/context7-mcp@4.4.1 -- node --version — OpenHub가 설정을 바꾸기 전에 이 버전을 npx cache에 받습니다(MCP 서버는 실행하지 않음, 네트워크·다운로드·의존성 설치 스크립트)
 Client 실행 명령
-  현재  npx -y @modelcontextprotocol/server-memory@2025.8.4
-  변경  npx -y @modelcontextprotocol/server-memory@2025.9.25
+  현재  npx -y @upstash/context7-mcp@4.3.0
+  변경  npx -y @upstash/context7-mcp@4.4.1
 
 대상
-  - .mcp.json (Claude Code, 프로젝트 범위) mcpServers.memory 항목 교체 · revision 1
+  - .mcp.json (Claude Code, 프로젝트 범위) mcpServers.context7 항목 교체 · revision 1
 
 Health Check
   필수 — MCP 서버를 격리 임시 디렉터리에서 실행해 initialize·tools/list 응답을 확인합니다(Client 앱은 실행하지 않음)
   제한 시간 startup 20초 · handshake 10초 · 전체 45초
-  MCP 서버 process에는 OS 실행에 필요한 변수(PATH·HOME·TEMP 등)만 넘깁니다(Manifest가 선언한 환경변수 없음). 그 밖의 API 키·token·자격증명 환경변수는 넘기지 않습니다
+  MCP 서버 process에는 OS 실행에 필요한 변수(PATH·HOME·TEMP 등)와 Manifest가 선언한 CONTEXT7_API_KEY만 넘깁니다. 선언된 변수는 예외입니다: 값이 설정되어 있으면(토큰·접속 문자열 등 비밀값 포함) MCP 서버가 그 값을 그대로 받습니다. OpenHub는 값을 읽거나 저장하지 않습니다. 그 밖의 API 키·token·자격증명 환경변수와 코드 주입 변수(NODE_OPTIONS 등)는 넘기지 않습니다
   Health가 실패하면 설정을 원래 내용으로 되돌리고 Version State를 바꾸지 않습니다
 
 환경변수
-  (필요 없음)
+  - CONTEXT7_API_KEY (선택)
 
 Warnings
   - [health-execution] Health Check는 MCP 서버(제3자 코드)를 격리된 임시 디렉터리에서 실행하며 패키지나 이미지를 내려받을 수 있습니다.
@@ -249,18 +243,17 @@ TRENDING — OpenHub Trend Score (historical star growth가 아니라 현재 pop
   2. chrome-devtools-mcp — Trend 96 (popularity 46 · release 25 · activity 25; stars 40000, release 2025-12-12, push 2025-12-29)
   3. playwright-mcp — Trend 94 (popularity 44 · release 25 · activity 25; stars 30000, release 2025-12-26, push 2025-12-26)
   4. github-mcp-server — Trend 93 (popularity 43 · release 25 · activity 25; stars 25000, release 2025-12-20, push 2025-12-31)
-  5. memory-mcp — Trend 67 (popularity 24 · release 18 · activity 25; stars 80000, release 2025-11-02, push 2025-12-28, shared-repository)
-  6. postgres-mcp — Trend 43 (popularity 33 · release 0 · activity 10; stars 2500, release 2024-11-27, push 2025-11-17)
-  7. kubernetes-mcp-server — metadata unavailable
-  8. mongodb-mcp-server — metadata unavailable
+  5. postgres-mcp — Trend 43 (popularity 33 · release 0 · activity 10; stars 2500, release 2024-11-27, push 2025-11-17)
+  6. kubernetes-mcp-server — metadata unavailable
+  7. mongodb-mcp-server — metadata unavailable
 (exit 0)
 
 == 10. Benchmark preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)
-$ openhub benchmark memory-mcp --project examples/demo-project
-Benchmark 계획: memory-mcp (ready)
-대상: claude-code · project · .mcp.json · 서버 memory
-artifact(고정): @modelcontextprotocol/server-memory@2025.8.4
-실행: npx -y @modelcontextprotocol/server-memory@2025.8.4 (격리 임시 디렉터리, shell 없음)
+$ openhub benchmark context7 --project examples/demo-project
+Benchmark 계획: context7 (ready)
+대상: claude-code · project · .mcp.json · 서버 context7
+artifact(고정): @upstash/context7-mcp@4.3.0
+실행: npx -y @upstash/context7-mcp@4.3.0 (격리 임시 디렉터리, shell 없음)
 횟수: 준비 1 + 측정 5 · 제한: 시작 20초 · handshake 10초 · 회당 45초 · 전체 300초
 MCP 서버를 6번(준비 1 + 측정 5) 실행해 initialize·tools/list 응답 시간만 잽니다. MCP tool은 호출하지 않습니다(tools/call 0).
 MCP 서버 process에는 OS 실행에 필요한 변수(PATH·HOME·TEMP 등)만 넘깁니다(Manifest가 선언한 환경변수 없음). 그 밖의 API 키·token·자격증명 환경변수는 넘기지 않습니다

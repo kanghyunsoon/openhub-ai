@@ -4,7 +4,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { RESOLVER_MAX_BYTES, RESOLVER_TIMEOUT_MS, lifecycleStatus, parseImageRef, recordInstallInState, resolveArtifact, runInstallTransaction, type ResolveResult } from "../../src/index";
 import { uvxArtifact } from "../../src/installer/command";
 import { approveAll, createHarness, plannedOf } from "../installer/harness";
-import { REPO_ROOT, seedEntries } from "../recommendation/helpers";
+import { REPO_ROOT, seedWithNpxFixture } from "../recommendation/helpers";
 import { newScratch } from "./helpers";
 
 /** TASK-039 Artifact Resolver. 실제 네트워크는 쓰지 않고 가짜 fetch만 쓴다. */
@@ -263,9 +263,9 @@ describe("REQ-040 REQ-043 Artifact Resolver", () => {
     // 런타임 spy: install → state 기록 → status 전 과정에서 네트워크 호출 0회.
     const net = vi.fn(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", net);
-    const seed = await seedEntries();
+    const seed = await seedWithNpxFixture();
     const h = await createHarness(scratch, { entries: seed });
-    const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }], false);
+    const request = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }], false);
     const planned = await plannedOf(h, request);
     const result = await runInstallTransaction(planned, await approveAll(planned), request, h.env);
     expect(result.status).toBe("succeeded");

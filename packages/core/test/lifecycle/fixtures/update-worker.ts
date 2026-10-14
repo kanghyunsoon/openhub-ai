@@ -18,12 +18,12 @@ import {
   type LifecycleRequest,
 } from "../../../src/index";
 import { createHarness } from "../../installer/harness";
-import { seedEntries } from "../../recommendation/helpers";
+import { seedWithNpxFixture } from "../../recommendation/helpers";
 import { fakeNpmSpawner } from "../../process/fake-npm";
 
 type Cmd = { op?: "update" | "recover"; holdAt?: string; toolId: string; client: "cursor" | "claude-code" | "codex"; scope: "project" | "user"; base: string; projectRoot: string; homeDir: string; holdDir: string };
 const cmd = JSON.parse(process.argv[2]!) as Cmd;
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const h = await createHarness(cmd.base, { entries: seed, dirs: { base: cmd.base, projectRoot: cmd.projectRoot, homeDir: cmd.homeDir } });
 
 /** 멈춤: 표시 파일을 만들고 release가 생길 때까지 event loop 전체를 막는다(일시 정지된 프로세스와 같다). */
@@ -52,10 +52,13 @@ if (cmd.op === "recover") {
       const json = (doc: unknown) => new Response(JSON.stringify(doc), { status: 200 });
       if (url.startsWith("https://ghcr.io/token")) return json({ token: "anon" });
       if (url.includes("/manifests/")) return new Response(null, { status: 200, headers: { "docker-content-digest": "sha256:" + "f".repeat(64) } });
-      if (url.endsWith("server-memory/latest")) return json({ name: "@modelcontextprotocol/server-memory", version: "1.2.3" });
+      if (url.endsWith("npx-mcp/latest")) return json({ name: "@openhub-fixture/npx-mcp", version: "1.2.3" });
       return new Response("missing", { status: 404 });
     },
     configFs: h.env.configFs!,
+    // v0.2.1(#46): MCP 실행 환경 원본이 없으면 npx·uvx 계획이 PACKAGE_SOURCE_UNVERIFIED로 막힌다. 이 worker의 Health는 가짜이므로
+    // 명시적인 빈 환경(출처 설정 없음 = 기본 공개 registry·index)을 넘긴다. #46 이후 이 값이 없어 이 E2E가 계획 단계에서 실패했다.
+    mcpSourceEnv: () => ({}),
     spawner: fakeNpmSpawner({ cacheRoot: path.join(cmd.base, "npm-cache-" + process.pid) }).spawner,
     trace: (phase) => (!holdInHealth && phase === cmd.holdAt ? hold(phase) : undefined),
     runHealth: async (verified) => {

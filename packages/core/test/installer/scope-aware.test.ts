@@ -15,7 +15,7 @@ import {
   type RegistryEntry,
 } from "../../src/index";
 import { approveAll, createHarness, newScratch, plannedOf, type Harness } from "./harness";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 
 /**
  * v0.2.0 범위별 설치 판정. 설치 대상의 식별 기준은 Tool ID + Client + scope + 서버 이름이다.
@@ -24,8 +24,8 @@ import { seedEntries } from "../recommendation/helpers";
  */
 const scratch = await newScratch("scope-aware");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
-const entries: RegistryEntry[] = await seedEntries();
-const TOOL = "memory-mcp";
+const entries: RegistryEntry[] = await seedWithNpxFixture();
+const TOOL = "fixture-npx-mcp";
 type Target = InstallRequest["targets"][number];
 const T = (client: Target["client"], scope: Target["scope"] = "project"): Target => ({ client, scope });
 
@@ -66,7 +66,7 @@ describe("v0.2.0 범위별 설치 판정(Tool + Client + scope + 서버 이름)"
     const result = await runInstallTransaction(planned, await approveAll(planned), request, h.env);
     expect(result.status).toBe("succeeded");
     expect(result.configChanges.map((c) => [c.client, c.scope, c.applied])).toEqual([["cursor", "user", true]]);
-    expect(JSON.parse((await readOrNull(abs(h, T("cursor", "user"))))!).mcpServers).toHaveProperty("memory");
+    expect(JSON.parse((await readOrNull(abs(h, T("cursor", "user"))))!).mcpServers).toHaveProperty("fixture-npx");
     expect(await readFile(abs(h, T("cursor")), "utf8")).toBe(projectBytes);
   });
 
@@ -99,7 +99,7 @@ describe("v0.2.0 범위별 설치 판정(Tool + Client + scope + 서버 이름)"
     expect(planned.plan.steps).toEqual([]);
     expect(planned.plan.approvalRequirements).toEqual(["base"]);
     expect(planned.plan.targets.map((t) => installTargetChange(planned.plan, t))).toEqual(["unchanged"]);
-    expect(formatInstallPlanPreview(planned).join("\n")).toContain("mcpServers.memory 변경 없음");
+    expect(formatInstallPlanPreview(planned).join("\n")).toContain("mcpServers.fixture-npx 변경 없음");
     h.reset();
     const result = await runInstallTransaction(planned, undefined, request, h.env);
     expect(result).toMatchObject({ status: "no-op", code: "ALREADY_INSTALLED", configChanges: [] });
@@ -112,7 +112,7 @@ describe("v0.2.0 범위별 설치 판정(Tool + Client + scope + 서버 이름)"
     const h = await createHarness(scratch, { entries });
     const file = abs(h, T("cursor", "user"));
     await mkdir(path.dirname(file), { recursive: true });
-    const custom = '{\n  "mcpServers": {\n    "memory": { "command": "npx", "args": ["-y", "my-own-memory-fork"] }\n  }\n}\n';
+    const custom = '{\n  "mcpServers": {\n    "fixture-npx": { "command": "npx", "args": ["-y", "my-own-memory-fork"] }\n  }\n}\n';
     await writeFile(file, custom);
     const planned = await plannedOf(h, h.request(TOOL, [T("cursor", "user"), T("codex")]));
     expect(planned.plan.status).toBe("blocked");
@@ -137,7 +137,7 @@ describe("v0.2.0 범위별 설치 판정(Tool + Client + scope + 서버 이름)"
     expect(writtenClients(planned.plan)).toEqual(["claude-code:project", "codex:project"]);
     const preview = formatInstallPlanPreview(planned).join("\n");
     for (const f of [".mcp.json", ".codex/config.toml", ".cursor/mcp.json"]) expect(preview).toContain("  - " + f + " ");
-    expect(preview).toContain(".cursor/mcp.json (Cursor, 프로젝트 범위) mcpServers.memory 변경 없음");
+    expect(preview).toContain(".cursor/mcp.json (Cursor, 프로젝트 범위) mcpServers.fixture-npx 변경 없음");
     const result = await runInstallTransaction(planned, await approveAll(planned), request, h.env);
     expect(result.status).toBe("partial-compensated");
     expect(result.configChanges.map((c) => [c.client, c.applied, c.restored])).toEqual([
@@ -174,7 +174,7 @@ describe("v0.2.0 범위별 설치 판정(Tool + Client + scope + 서버 이름)"
     const approval = await approveAll(planned);
     const cursorFile = abs(h, T("cursor"));
     const doc = JSON.parse(await readFile(cursorFile, "utf8"));
-    doc.mcpServers.memory.args.push("--changed");
+    doc.mcpServers["fixture-npx"].args.push("--changed");
     await writeFile(cursorFile, JSON.stringify(doc, null, 2) + "\n");
     h.reset();
     const result = await runInstallTransaction(planned, approval, request, h.env);

@@ -35,10 +35,10 @@ const ok = (r: ReleaseSnapshotResult) => {
 };
 afterEach(() => vi.useRealTimers());
 
-const memory: ReleaseRequest = { toolId: "memory-mcp", versionSource: "npm", backend: "npx", requested: "@modelcontextprotocol/server-memory", resolved: null };
-const NPM_LATEST = "https://registry.npmjs.org/@modelcontextprotocol%2fserver-memory/latest";
+const memory: ReleaseRequest = { toolId: "fixture-npx-mcp", versionSource: "npm", backend: "npx", requested: "@openhub-fixture/npx-mcp", resolved: null };
+const NPM_LATEST = "https://registry.npmjs.org/@openhub-fixture%2fnpx-mcp/latest";
 const npmRoutes = (version = "2.1.0") => ({
-  [NPM_LATEST]: json({ name: "@modelcontextprotocol/server-memory", version, engines: { node: ">=20" }, deprecated: "use @mcp/memory instead" }),
+  [NPM_LATEST]: json({ name: "@openhub-fixture/npx-mcp", version, engines: { node: ">=20" }, deprecated: "use @mcp/memory instead" }),
 });
 const pg = (resolvedVersion: string | null): ReleaseRequest => ({
   toolId: "postgres-mcp",
@@ -94,7 +94,7 @@ describe("REQ-045 ReleaseSnapshot v1과 버전 출처", () => {
     const f = fakeFetch(npmRoutes());
     const s = ok(await collectReleaseSnapshot(memory, { fetch: f.fetch, now: NOW }));
     expect(f.calls.map((c) => c.url)).toEqual([NPM_LATEST]);
-    expect(s).toMatchObject({ versionSource: "npm", notesSource: "none", current: { spec: "@modelcontextprotocol/server-memory", version: null, digest: null } });
+    expect(s).toMatchObject({ versionSource: "npm", notesSource: "none", current: { spec: "@openhub-fixture/npx-mcp", version: null, digest: null } });
     expect(s.target).toEqual({ version: "2.1.0", tag: null, publishedAt: null, prerelease: false, yanked: false, deprecated: "use @mcp/memory instead", title: null, notes: null, url: null, digest: null, runtime: { node: ">=20", python: null } });
     const wrong = fakeFetch({ [NPM_LATEST]: json({ name: "evil", version: "1.0.0" }) });
     expect(await collectReleaseSnapshot(memory, { fetch: wrong.fetch, now: NOW })).toMatchObject({ ok: false, code: "RELEASE_INVALID" });

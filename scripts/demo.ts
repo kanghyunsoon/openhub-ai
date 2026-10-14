@@ -25,9 +25,9 @@ const PROBES: BackendProbeReport = {
 };
 const json = (doc: unknown) => new Response(JSON.stringify(doc), { status: 200, headers: { "content-type": "application/json" } });
 const RELEASES = [
-  { tag_name: "2025.9.25", name: "2025.9.25", body: "## What's Changed\n### Bug Fixes\n- Fixed entity dedupe\n### Features\n- Added search_nodes limit", draft: false, prerelease: false, published_at: "2025-09-25T00:00:00Z", html_url: "https://github.com/modelcontextprotocol/servers/releases/tag/2025.9.25" },
-  { tag_name: "2025.9.1", name: "2025.9.1", body: "- BREAKING: renamed open_nodes to read_nodes\n- See the migration guide", draft: false, prerelease: false, published_at: "2025-09-01T00:00:00Z", html_url: "https://github.com/modelcontextprotocol/servers/releases/tag/2025.9.1" },
-  { tag_name: "2025.8.4", name: "2025.8.4", body: "- old", draft: false, prerelease: false, published_at: "2025-08-04T00:00:00Z", html_url: "https://github.com/modelcontextprotocol/servers/releases/tag/2025.8.4" },
+  { tag_name: "v4.4.1", name: "v4.4.1", body: "## What's Changed\n### Bug Fixes\n- Fixed library id resolution\n### Features\n- Added a token limit to get-library-docs", draft: false, prerelease: false, published_at: "2025-09-25T00:00:00Z", html_url: "https://github.com/upstash/context7/releases/tag/v4.4.1" },
+  { tag_name: "v4.4.0", name: "v4.4.0", body: "- BREAKING: renamed resolve-library to resolve-library-id\n- See the migration guide", draft: false, prerelease: false, published_at: "2025-09-01T00:00:00Z", html_url: "https://github.com/upstash/context7/releases/tag/v4.4.0" },
+  { tag_name: "v4.3.0", name: "v4.3.0", body: "- old", draft: false, prerelease: false, published_at: "2025-08-04T00:00:00Z", html_url: "https://github.com/upstash/context7/releases/tag/v4.3.0" },
 ];
 
 export interface DemoResult {
@@ -50,8 +50,8 @@ export async function runDemo(): Promise<DemoResult> {
     await mkdir(home);
     const fetch = async (url: string) => {
       fetched.push(url);
-      if (url.endsWith("server-memory/latest")) return json({ name: "@modelcontextprotocol/server-memory", version: "2025.9.25", engines: { node: ">=18" } });
-      if (url.startsWith("https://api.github.com/repos/modelcontextprotocol/servers/releases")) return json(RELEASES);
+      if (url.endsWith("context7-mcp/latest")) return json({ name: "@upstash/context7-mcp", version: "4.4.1", engines: { node: ">=20.18.1" } });
+      if (url.startsWith("https://api.github.com/repos/upstash/context7/releases")) return json(RELEASES);
       return new Response("not in demo fixture", { status: 404 });
     };
     const spawner: ExecSpawner = (exe, args) => {
@@ -107,13 +107,13 @@ export async function runDemo(): Promise<DemoResult> {
     await step("2. Existing tools — 이미 설정된 MCP 서버", ["lifecycle", "status", "--project", project], null);
     await step("3. Recommend — 맞춤 추천(설치하지 않음)", ["project", "recommend", project], null);
     await step("4. Install preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)", ["install", "playwright-mcp", "--project", project, "--client", "claude-code"], { approve: null });
-    await step("5. Adopt — 기존 설정을 관리 대상으로 등록(데모가 임시 HOME에서 승인 질문에 답함, 설정 파일 변경 없음)", ["adopt", "memory-mcp", "--project", project], { approve: "memory-mcp" });
-    await step("6. Releases — 고정 release fixture", ["releases", "memory-mcp", "--project", project, "--no-token"], null);
-    await step("7. Impact — 업데이트 영향", ["impact", "memory-mcp", "--project", project, "--no-token"], null);
-    await step("8. Update preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)", ["update", "memory-mcp", "--project", project], { approve: null });
+    await step("5. Adopt — 기존 설정을 관리 대상으로 등록(데모가 임시 HOME에서 승인 질문에 답함, 설정 파일 변경 없음)", ["adopt", "context7", "--project", project], { approve: "context7" });
+    await step("6. Releases — 고정 release fixture", ["releases", "context7", "--project", project, "--no-token"], null);
+    await step("7. Impact — 업데이트 영향", ["impact", "context7", "--project", project, "--no-token"], null);
+    await step("8. Update preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)", ["update", "context7", "--project", project], { approve: null });
     await step("9. Discover — New for your project", ["discover", "--view", "new", "--project", project], null);
     await step("9. Discover — Trending", ["trending"], null);
-    await step("10. Benchmark preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)", ["benchmark", "memory-mcp", "--project", project], { approve: null });
+    await step("10. Benchmark preview — 계획을 보여 주고 데모는 승인하지 않음(실행 0)", ["benchmark", "context7", "--project", project], { approve: null });
     lines.push("", "== 요약", "가짜 fetch 응답 " + fetched.length + "회(실제 네트워크 0) · 프로세스 실행 " + spawned.length + "회");
     return { lines, fetched, spawned };
   } finally {

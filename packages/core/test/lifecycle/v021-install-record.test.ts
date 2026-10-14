@@ -16,7 +16,7 @@ import {
   type LifecycleRequest,
 } from "../../src/index";
 import { approveAll, createHarness, plannedOf, type Harness } from "../installer/harness";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { fakeNpmSpawner } from "../process/fake-npm";
 import { newScratch } from "./helpers";
 
@@ -25,7 +25,7 @@ import { newScratch } from "./helpers";
  * - 설정을 쓴 뒤 기록하기 전에 멈춰 있어도 다른 install·Health·update는 OPERATION_IN_PROGRESS이고 아무것도 바꾸지 않는다.
  * - 기록이 실패하면 설정을 되돌리고 STATE_RECORD_FAILED다(성공 + 경고가 아니다). 되돌리지 못하면 COMPENSATION_INCOMPLETE다.
  */
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await newScratch("v021-install-record");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 const now = () => new Date("2026-10-11T00:00:00.000Z");
@@ -72,9 +72,9 @@ const entryNames = async (homeDir: string) => {
 describe("v0.2.1 B [A] 설치와 Version State 기록은 하나의 작업 잠금 안에서 한다", () => {
   it("성공하면 기록한 항목 수를 돌려주고 Version State와 설정이 일치한다", async () => {
     const h = await createHarness(scratch, { entries: seed });
-    const r = await installRecorded(h, "memory-mcp", [{ client: "claude-code", scope: "project" }, { client: "cursor", scope: "project" }]);
+    const r = await installRecorded(h, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }, { client: "cursor", scope: "project" }]);
     expect(r.recorded).toBe(2);
-    expect(await entryNames(h.homeDir)).toEqual(["memory-mcp:claude-code", "memory-mcp:cursor"]);
+    expect(await entryNames(h.homeDir)).toEqual(["fixture-npx-mcp:claude-code", "fixture-npx-mcp:cursor"]);
   });
 
   it("설정을 쓴 뒤 기록 전에 멈춰 있으면 다른 install·Health·update는 OPERATION_IN_PROGRESS이고, 끝난 뒤 기록 유실이 없다", async () => {
@@ -92,13 +92,13 @@ describe("v0.2.1 B [A] 설치와 Version State 기록은 하나의 작업 잠금
       await gate;
     }) };
     const phases: string[] = [];
-    const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    const request = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const planned = await plannedOf(h, request);
     const running = runInstallAndRecord(planned, await approveAll(planned), request, { ...paused, trace: (p) => phases.push(p) }, { now });
     await atRecord;
     // 지금: memory 설정은 이미 쓰였고(config-write·verify 끝) Version State 기록 직전에 멈춰 있다.
     expect(phases.slice(-2)).toEqual(["verify", "record"]);
-    expect(JSON.parse(await readFile(path.join(h.projectRoot, ".mcp.json"), "utf8")).mcpServers.memory).toBeDefined();
+    expect(JSON.parse(await readFile(path.join(h.projectRoot, ".mcp.json"), "utf8")).mcpServers["fixture-npx"]).toBeDefined();
     const during = { claude: await readFile(path.join(h.projectRoot, ".mcp.json"), "utf8"), state: await readFile(path.join(h.homeDir, ".openhub", "state", "lifecycle.json"), "utf8") };
 
     const otherInstall = h.request("postgres-mcp", [{ client: "codex", scope: "project" }]);
@@ -127,7 +127,7 @@ describe("v0.2.1 B [A] 설치와 Version State 기록은 하나의 작업 잠금
     expect(existsSync(path.join(h.homeDir, ".openhub", "state", "operation.lock"))).toBe(false);
     // 끝난 뒤 다시 하면 진행되고, 두 기록 모두 남는다.
     expect((await runInstallAndRecord(otherPlanned, await approveAll(otherPlanned), otherInstall, h.env, { now })).result.status).toBe("succeeded");
-    expect(await entryNames(h.homeDir)).toEqual(["memory-mcp:claude-code", "postgres-mcp:claude-code", "postgres-mcp:codex"]);
+    expect(await entryNames(h.homeDir)).toEqual(["fixture-npx-mcp:claude-code", "postgres-mcp:claude-code", "postgres-mcp:codex"]);
   });
 
   it("기록이 실패하면 이번에 쓴 설정을 원래 byte로 되돌리고 STATE_RECORD_FAILED다(succeeded가 아니다)", async () => {
@@ -137,7 +137,7 @@ describe("v0.2.1 B [A] 설치와 Version State 기록은 하나의 작업 잠금
     const failing = { ...h.env, configFs: stateWriteHook(h.env.configFs!, async () => {
       throw Object.assign(new Error("disk full"), { code: "ENOSPC" });
     }) };
-    const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    const request = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const planned = await plannedOf(h, request);
     const r = await runInstallAndRecord(planned, await approveAll(planned), request, failing, { now });
     expect(r.recorded).toBe(0);
@@ -155,7 +155,7 @@ describe("v0.2.1 B [A] 설치와 Version State 기록은 하나의 작업 잠금
     await rm(path.dirname(stateFile), { recursive: true, force: true });
     await (await import("node:fs/promises")).mkdir(path.dirname(stateFile), { recursive: true });
     await writeFile(stateFile, "{ not json");
-    const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    const request = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const planned = await plannedOf(h, request);
     const r = await runInstallAndRecord(planned, await approveAll(planned), request, h.env, { now });
     expect(r.result).toMatchObject({ status: "partial-compensated", code: "STATE_RECORD_FAILED", retryable: false });
@@ -172,7 +172,7 @@ describe("v0.2.1 B [A] 설치와 Version State 기록은 하나의 작업 잠금
       await writeFile(mcp, external); // 다른 프로그램이 설정을 바꿨다
       throw Object.assign(new Error("denied"), { code: "EACCES" });
     }) };
-    const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    const request = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const planned = await plannedOf(h, request);
     const r = await runInstallAndRecord(planned, await approveAll(planned), request, failing, { now });
     expect(r.result).toMatchObject({ status: "failed", code: "COMPENSATION_INCOMPLETE", retryable: false });
@@ -181,10 +181,10 @@ describe("v0.2.1 B [A] 설치와 Version State 기록은 하나의 작업 잠금
 
   it("승인이 없거나 이미 설치된 계획이면 잠금·기록 없이 기존 결과다", async () => {
     const h = await createHarness(scratch, { entries: seed });
-    const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    const request = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const planned = await plannedOf(h, request);
     expect(await runInstallAndRecord(planned, undefined, request, h.env, { now })).toMatchObject({ result: { status: "approval-required" }, recorded: 0 });
-    await installRecorded(h, "memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    await installRecorded(h, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const again = await plannedOf(h, request);
     expect(await runInstallAndRecord(again, undefined, request, h.env, { now })).toMatchObject({ result: { status: "no-op", code: "ALREADY_INSTALLED" }, recorded: 0 });
   });

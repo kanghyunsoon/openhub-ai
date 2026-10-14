@@ -17,7 +17,7 @@ import {
 } from "@openhub/core";
 import { runCli } from "../src/cli";
 import { OPEN_SCORE_NOTICE } from "../src/recommend";
-import { memoryIO } from "./helpers";
+import { memoryIO, registryWithNpxFixture } from "./helpers";
 
 const REPO = path.resolve(import.meta.dirname, "../../..");
 const PROJECTS = path.join(REPO, "packages/core/test/fixtures/projects");
@@ -155,11 +155,12 @@ describe("REQ-046 project recommend Identity Fingerprint 연결", () => {
     const project = await mkdtemp(path.join(tmpdir(), "openhub-rec-identity-"));
     try {
       await writeFile(path.join(project, "package.json"), JSON.stringify({ name: "identity-demo", dependencies: { react: "^19.0.0" } }));
-      await writeFile(path.join(project, ".mcp.json"), JSON.stringify({ mcpServers: { "team-memory": { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory@2025.9.1"], env: { SECRET_VALUE: "sk-proj-abcdefghijklmnopqrstuvwxyz" } } } }));
-      const x = io();
+      await writeFile(path.join(project, ".mcp.json"), JSON.stringify({ mcpServers: { "team-memory": { command: "npx", args: ["-y", "@openhub-fixture/npx-mcp@2025.9.1"], env: { SECRET_VALUE: "sk-proj-abcdefghijklmnopqrstuvwxyz" } } } }));
+      // Registry 도구의 package로 식별하는 경로: 테스트 전용 npx fixture가 든 Registry(v0.2.1 #69)
+      const x = io({ registryDir: registryWithNpxFixture() });
       expect(await runCli(["project", "recommend", project, "--json"], x)).toBe(0);
       const report = recommendationReportSchema.parse(JSON.parse(x.stdout.join("\n")));
-      expect(report.installedTools.map((t) => [t.serverName, t.resolution, t.toolId])).toEqual([["team-memory", "resolved", "memory-mcp"]]);
+      expect(report.installedTools.map((t) => [t.serverName, t.resolution, t.toolId])).toEqual([["team-memory", "resolved", "fixture-npx-mcp"]]);
       expect(report.assessment.warnings.map((w) => w.code)).toContain("identity-strong-match");
       expect(x.stdout.join("\n")).not.toMatch(/sk-proj|SECRET_VALUE/u);
       expect(containsAbsolutePath(x.stdout.join("\n"))).toBe(false);

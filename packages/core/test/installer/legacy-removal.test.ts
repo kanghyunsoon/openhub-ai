@@ -31,12 +31,12 @@ import {
   verifyPinokioApproval,
 } from "../../src/index";
 import { approveAll, createHarness, plannedOf } from "./harness";
-import { REPO_ROOT, item, profile, seedEntries, tool } from "../recommendation/helpers";
+import { REPO_ROOT, item, profile, seedWithNpxFixture, tool } from "../recommendation/helpers";
 import { newScratch } from "../lifecycle/helpers";
 import { pinokioManifest } from "../pinokio/helpers";
 
 /** TASK-058 M1 approvePlan 삭제와 전체 회귀(D-028). */
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await newScratch("legacy-removal-test");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 const GOLDENS = path.join(REPO_ROOT, "packages/core/test/fixtures/m6/goldens");
@@ -66,18 +66,18 @@ async function golden(name: string, actual: string) {
   expect(actual).toBe(await readFile(file, "utf8"));
 }
 const registryFetch = async (url: string) =>
-  url === "https://registry.npmjs.org/@modelcontextprotocol%2fserver-memory/latest" ? new Response(JSON.stringify({ name: "@modelcontextprotocol/server-memory", version: "1.2.3" }), { status: 200 }) : new Response("missing", { status: 404 });
+  url === "https://registry.npmjs.org/@openhub-fixture%2fnpx-mcp/latest" ? new Response(JSON.stringify({ name: "@openhub-fixture/npx-mcp", version: "1.2.3" }), { status: 200 }) : new Response("missing", { status: 404 });
 
-/** memory-mcp를 설치하고 update LifecyclePlan을 만든 표본(골든·출력 검사 공용). */
+/** fixture-npx-mcp를 설치하고 update LifecyclePlan을 만든 표본(골든·출력 검사 공용). */
 async function sample() {
   const h = await createHarness(scratch, { entries: seed });
-  const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+  const request = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
   const install = await plannedOf(h, request);
   const installBytes = serializeInstallPlan(install.plan);
   const result = await runInstallTransaction(install, await approveAll(install), request, h.env);
   expect(result.status).toBe("succeeded");
   expect(await recordInstallInState(install, result, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: NOW })).toMatchObject({ ok: true });
-  const life = await planLifecycle({ operation: "update", toolId: "memory-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, entries: seed, platform: "linux", includeUser: false, fetch: registryFetch, ...(h.env.configFs === undefined ? {} : { fs: h.env.configFs }) });
+  const life = await planLifecycle({ operation: "update", toolId: "fixture-npx-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, entries: seed, platform: "linux", includeUser: false, fetch: registryFetch, ...(h.env.configFs === undefined ? {} : { fs: h.env.configFs }) });
   if (!life.ok) throw new Error(life.code);
   const read = await readLifecycleState({ homeDir: h.homeDir });
   if (!read.ok) throw new Error(read.code);
@@ -148,15 +148,15 @@ describe("REQ-004 M1 approvePlan 삭제와 전체 회귀", () => {
   it("AC-058-05 전체 결과·출력 표본에서 secret·token·API key·절대 경로가 0건이다", async () => {
     const s = await sample();
     const releaseFetch = async (url: string) =>
-      url.endsWith("server-memory/latest")
-        ? new Response(JSON.stringify({ name: "@modelcontextprotocol/server-memory", version: "1.2.3" }), { status: 200 })
-        : url.startsWith("https://api.github.com/repos/modelcontextprotocol/servers/releases")
-          ? new Response(JSON.stringify([{ tag_name: "1.2.3", name: "1.2.3", body: "- fixed " + TOKEN.slice(0, 6), draft: false, prerelease: false, published_at: "2026-09-01T00:00:00Z", html_url: "https://github.com/modelcontextprotocol/servers/releases/tag/1.2.3" }]), { status: 200 })
+      url.endsWith("npx-mcp/latest")
+        ? new Response(JSON.stringify({ name: "@openhub-fixture/npx-mcp", version: "1.2.3" }), { status: 200 })
+        : url.startsWith("https://api.github.com/repos/openhub-fixture/npx-mcp/releases")
+          ? new Response(JSON.stringify([{ tag_name: "1.2.3", name: "1.2.3", body: "- fixed " + TOKEN.slice(0, 6), draft: false, prerelease: false, published_at: "2026-09-01T00:00:00Z", html_url: "https://github.com/openhub-fixture/npx-mcp/releases/tag/1.2.3" }]), { status: 200 })
           : new Response("missing", { status: 404 });
-    const snap = await collectReleaseSnapshot({ toolId: "memory-mcp", versionSource: "npm", backend: "npx", requested: "@modelcontextprotocol/server-memory", resolved: null, github: "modelcontextprotocol/servers" }, { fetch: releaseFetch, now: NOW, githubToken: TOKEN });
+    const snap = await collectReleaseSnapshot({ toolId: "fixture-npx-mcp", versionSource: "npm", backend: "npx", requested: "@openhub-fixture/npx-mcp", resolved: null, github: "openhub-fixture/npx-mcp" }, { fetch: releaseFetch, now: NOW, githubToken: TOKEN });
     if (!snap.ok) throw new Error(snap.code);
-    const impact = analyzeUpdateImpact({ state: s.state, configEnvNames: [], manifest: seed.find((e) => e.manifest.name === "memory-mcp")!.manifest, snapshot: snap.snapshot, runtimes: { node: "22.11.0" } });
-    const report = recommend(profile({ languages: [item("typescript", "TypeScript")], aiTools: [tool("memory")] }), seed, undefined, { platform: "linux" });
+    const impact = analyzeUpdateImpact({ state: s.state, configEnvNames: [], manifest: seed.find((e) => e.manifest.name === "fixture-npx-mcp")!.manifest, snapshot: snap.snapshot, runtimes: { node: "22.11.0" } });
+    const report = recommend(profile({ languages: [item("typescript", "TypeScript")], aiTools: [tool("fixture-npx")] }), seed, undefined, { platform: "linux" });
     const pinokio = buildPinokioPlan({ operation: "install", manifest: pinokioManifest() }, { versions: { pterm: "0.0.25", pinokiod: "4.0.3", script: "4.0" }, appState: { exists: false, digest: "sha256:" + "0".repeat(64) }, installed: null });
     if (!pinokio.ok) throw new Error(pinokio.code);
     const outputs = [s.installBytes, serializeLifecyclePlan(s.life.plan), s.stateBytes, serializeReleaseSnapshot(snap.snapshot), serializeReleaseSummary(summarizeReleases(snap.snapshot)), serializeUpdateImpact(impact), serializeRecommendationReport(report)];

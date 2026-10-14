@@ -7,7 +7,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { containsAbsolutePath, type BackendProbeReport, type ExecChild, type ExecSpawner } from "@openhub/core";
 import { runCli } from "../src/cli";
 import type { InstallPrompter } from "../src/install";
-import { memoryIO } from "./helpers";
+import { memoryIO, registryWithNpxFixture } from "./helpers";
 
 const REPO = path.resolve(import.meta.dirname, "../../..");
 const GOLDENS = path.join(import.meta.dirname, "fixtures/install");
@@ -57,7 +57,7 @@ async function install(args: string[], options: { answers?: string[]; tty?: bool
     return { stdout: null, stderr: null, on: (e: string, l: (...x: unknown[]) => void) => events.on(e, l), kill: () => true } as ExecChild;
   };
   let probes = 0;
-  const io = Object.assign(memoryIO(REPO), {
+  const io = Object.assign(memoryIO(REPO, registryWithNpxFixture()), {
     prompter,
     spawner,
     probe: async () => (probes++, options.probes ?? PROBES),
@@ -94,9 +94,9 @@ describe("REQ-034 CLI openhub install", () => {
       expect(text).toContain(part);
     }
     await golden("preview-postgres-linux.txt", text);
-    const windows = await install(["memory-mcp", "--client", "cursor"], { answers: ["n"], platform: "win32" });
+    const windows = await install(["fixture-npx-mcp", "--client", "cursor"], { answers: ["n"], platform: "win32" });
     const win = previewOf(windows);
-    expect(win).toContain("Client 실행 명령  cmd /d /c npx -y @modelcontextprotocol/server-memory");
+    expect(win).toContain("Client 실행 명령  cmd /d /c npx -y @openhub-fixture/npx-mcp");
     expect(win).toContain("Windows 호환 정책(OpenHub)");
     expect(win).not.toMatch(/공식 권장|officially recommended/u);
     await golden("preview-memory-windows.txt", win);
@@ -135,7 +135,7 @@ describe("REQ-034 CLI openhub install", () => {
   });
 
   it("AC-035-04 TTY가 아니고 --json도 없으면 exit 3 APPROVAL_REQUIRED이고 probe·spawn 0회다", async () => {
-    const r = await install(["memory-mcp", "--client", "claude-code"], { tty: false });
+    const r = await install(["fixture-npx-mcp", "--client", "claude-code"], { tty: false });
     expect(r.code).toBe(3);
     expect(r.stderr.join("\n")).toContain("APPROVAL_REQUIRED");
     expect(r.probes).toBe(0);
@@ -145,12 +145,12 @@ describe("REQ-034 CLI openhub install", () => {
 
   it("AC-035-05 --json은 Plan과 digest만 출력하고 TTY여도 실행하지 않는다", async () => {
     for (const tty of [true, false]) {
-      const r = await install(["memory-mcp", "--client", "claude-code", "--json"], { tty, answers: ["y", "memory-mcp"] });
+      const r = await install(["fixture-npx-mcp", "--client", "claude-code", "--json"], { tty, answers: ["y", "fixture-npx-mcp"] });
       expect(r.code).toBe(0);
       const doc = JSON.parse(r.stdout.join("\n"));
       expect(Object.keys(doc).sort()).toEqual(["plan", "planDigest"]);
       expect(doc.planDigest).toMatch(/^sha256:[0-9a-f]{64}$/u);
-      expect(doc.plan.toolId).toBe("memory-mcp");
+      expect(doc.plan.toolId).toBe("fixture-npx-mcp");
       expect(r.questions).toEqual([]);
       expect(r.spawns).toEqual([]);
       expect(await files(r.project)).toEqual(["package.json"]);
@@ -159,7 +159,7 @@ describe("REQ-034 CLI openhub install", () => {
 
   it("AC-035-06 --yes, -y, --approve는 exit 2다", async () => {
     for (const flag of [["--yes"], ["-y"], ["--approve"], ["--approve", "sha256:" + "0".repeat(64)], ["--approve=sha256:" + "0".repeat(64)], ["--yes=true"]]) {
-      const r = await install(["memory-mcp", "--client", "claude-code", ...flag]);
+      const r = await install(["fixture-npx-mcp", "--client", "claude-code", ...flag]);
       expect(r.code, flag.join(" ")).toBe(2);
       expect(r.probes).toBe(0);
       expect(r.questions).toEqual([]);
@@ -175,7 +175,7 @@ describe("REQ-034 CLI openhub install", () => {
     expect(unknown.code).toBe(2);
     expect(unknown.stderr).toEqual(["Registry에 없는 Tool입니다. openhub registry list로 Tool ID를 확인하세요."]);
     const none = { node: PROBES.node, npx: { name: "npx", available: false, version: null, status: "not-found" }, uvx: { name: "uvx", available: false, version: null, status: "not-found" }, docker: { name: "docker", available: false, version: null, status: "not-found" } } as const;
-    const blocked = await install(["memory-mcp", "--client", "claude-code"], { probes: none });
+    const blocked = await install(["fixture-npx-mcp", "--client", "claude-code"], { probes: none });
     expect(blocked.code).toBe(1);
     expect(blocked.stderr).toEqual(["이 환경에서는 설치할 수 없습니다 (blocked). 위 Warnings를 확인하세요."]);
     expect(blocked.questions).toEqual([]);
@@ -224,18 +224,18 @@ describe("REQ-034 CLI openhub install", () => {
 
   it("AC-035-02 고른 대상에 같은 항목이 이미 있으면 승인 없이 no-op이고 아무것도 실행하지 않는다(v0.2.0: 다른 항목이면 충돌로 막는다)", async () => {
     const dirs = await setup();
-    await writeFile(path.join(dirs.project, ".mcp.json"), '{ "mcpServers": { "memory": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"] } } }\n');
-    const r = await install(["memory-mcp", "--client", "claude-code"], { dirs });
+    await writeFile(path.join(dirs.project, ".mcp.json"), '{ "mcpServers": { "fixture-npx": { "command": "npx", "args": ["-y", "@openhub-fixture/npx-mcp"] } } }\n');
+    const r = await install(["fixture-npx-mcp", "--client", "claude-code"], { dirs });
     expect(r.code).toBe(0);
     expect(r.stdout.join("\n")).toContain("결과  no-op");
-    expect(r.stdout.join("\n")).toContain("mcpServers.memory 변경 없음");
+    expect(r.stdout.join("\n")).toContain("mcpServers.fixture-npx 변경 없음");
     expect(r.questions).toEqual([]);
     expect(r.spawns).toEqual([]);
     // 같은 이름의 다른 항목: 충돌로 막고 묻지도, 실행하지도, 덮어쓰지도 않는다.
     const other = await setup();
-    const mine = '{ "mcpServers": { "memory": { "command": "npx", "args": [] } } }\n';
+    const mine = '{ "mcpServers": { "fixture-npx": { "command": "npx", "args": [] } } }\n';
     await writeFile(path.join(other.project, ".mcp.json"), mine);
-    const c = await install(["memory-mcp", "--client", "claude-code"], { dirs: other });
+    const c = await install(["fixture-npx-mcp", "--client", "claude-code"], { dirs: other });
     expect(c.code).toBe(1);
     expect(c.stdout.join("\n")).toContain("충돌, 덮어쓰지 않음");
     expect(c.questions).toEqual([]);

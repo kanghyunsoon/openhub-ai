@@ -19,12 +19,12 @@ import {
   type PlannedAdopt,
   type RegistryEntry,
 } from "../../src/index";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { newScratch, stateOf, toolState } from "../lifecycle/helpers";
 import { MEMORY, adoptOptions, mcp, newCase, plannedOf, type Case } from "./helpers";
 
 /** TASK-060 Adopt 실행: 승인 검증 → Version State write 1회. 임시 project·home만 쓴다. */
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await newScratch("adopt-execute-test");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 const NOW = () => new Date("2026-10-07T01:02:03.000Z");
@@ -45,7 +45,7 @@ async function prepared(files: Record<string, unknown>, over: Partial<AdoptPlanO
 const exec = (approval: Awaited<ReturnType<typeof approve>>, options: AdoptPlanOptions, regen: Partial<AdoptPlanOptions> = {}, fs?: ConfigFs) =>
   executeAdopt(approval, { toolId: options.toolId, homeDir: options.homeDir, now: NOW, regenerate: () => planAdopt({ ...options, ...regen }), ...(fs === undefined ? {} : { fs }) });
 const strongFiles = { ".mcp.json": mcp({ "my-memory": { command: "npx", args: ["-y", MEMORY] } }) };
-const exactFiles = { ".mcp.json": mcp({ memory: { command: "npx", args: ["-y", MEMORY + "@1.2.3"] } }) };
+const exactFiles = { ".mcp.json": mcp({ "fixture-npx": { command: "npx", args: ["-y", MEMORY + "@1.2.3"] } }) };
 const withManifest = (toolId: string, edit: (m: RegistryEntry["manifest"]) => void): RegistryEntry[] =>
   seed.map((e) => {
     if (e.manifest.name !== toolId) return e;
@@ -81,7 +81,7 @@ describe("REQ-063 Adopt 실행", () => {
     const read = await readLifecycleState({ homeDir: options.homeDir });
     if (!read.ok) throw new Error(read.code);
     const s = read.state.entries[p.plan.target.entryKey]!;
-    expect(s).toMatchObject({ toolId: "memory-mcp", revision: 1, previous: null, lastHealth: null, appliedPlanDigest: p.planDigest, backend: "npx" });
+    expect(s).toMatchObject({ toolId: "fixture-npx-mcp", revision: 1, previous: null, lastHealth: null, appliedPlanDigest: p.planDigest, backend: "npx" });
     expect(s.target.serverName).toBe("my-memory");
     expect(s.config.entryDigest).toBe(p.plan.precondition.entryDigest);
     expect(s.artifact).toEqual({ requested: MEMORY, resolved: null });
@@ -90,7 +90,7 @@ describe("REQ-063 Adopt 실행", () => {
 
   it("AC-060-03 승인 후 config 항목이 바뀌면 PLAN_STALE(config-entry)이고 state write 0이다", async () => {
     const { c, options, approval } = await prepared(exactFiles);
-    await writeFile(path.join(c.projectRoot, ".mcp.json"), JSON.stringify(mcp({ memory: { command: "npx", args: ["-y", MEMORY + "@1.2.4"] } }), null, 2) + "\n");
+    await writeFile(path.join(c.projectRoot, ".mcp.json"), JSON.stringify(mcp({ "fixture-npx": { command: "npx", args: ["-y", MEMORY + "@1.2.4"] } }), null, 2) + "\n");
     const r = await exec(approval, options);
     expect(r.status).toBe("stale");
     expect(r.changed).toContain("config-entry");
@@ -99,7 +99,7 @@ describe("REQ-063 Adopt 실행", () => {
 
   it("AC-060-04 같은 파일의 다른 내용만 바뀌어도 PLAN_STALE(config-file)이고 state write 0이다", async () => {
     const { c, options, approval } = await prepared(exactFiles);
-    await writeFile(path.join(c.projectRoot, ".mcp.json"), JSON.stringify(mcp({ memory: { command: "npx", args: ["-y", MEMORY + "@1.2.3"] }, other: { command: "npx", args: ["-y", "x"] } }), null, 2) + "\n");
+    await writeFile(path.join(c.projectRoot, ".mcp.json"), JSON.stringify(mcp({ "fixture-npx": { command: "npx", args: ["-y", MEMORY + "@1.2.3"] }, other: { command: "npx", args: ["-y", "x"] } }), null, 2) + "\n");
     const r = await exec(approval, options);
     expect(r).toMatchObject({ status: "stale", changed: ["config-file"] });
     expect(await exists(stateFile(c))).toBe(false);
@@ -107,9 +107,9 @@ describe("REQ-063 Adopt 실행", () => {
 
   it("AC-060-05 identity·registry·manifest·target이 바뀌면 PLAN_STALE(해당 항목)이고 state write 0이다", async () => {
     const cases: [Partial<AdoptPlanOptions>, string][] = [
-      [{ entries: withManifest("memory-mcp", (m) => void (m.recommendation!.identity = { mcpServerNames: ["my-memory"] })) }, "identity"],
+      [{ entries: withManifest("fixture-npx-mcp", (m) => void (m.recommendation!.identity = { mcpServerNames: ["my-memory"] })) }, "identity"],
       [{ entries: withManifest("context7", (m) => void (m.summary = "changed")) }, "registry"],
-      [{ entries: withManifest("memory-mcp", (m) => void (m.summary = "changed")) }, "manifest"],
+      [{ entries: withManifest("fixture-npx-mcp", (m) => void (m.summary = "changed")) }, "manifest"],
       [{ platform: "macos" }, "target"],
     ];
     for (const [regen, kind] of cases) {
@@ -123,7 +123,7 @@ describe("REQ-063 Adopt 실행", () => {
 
   it("AC-060-06 승인과 실행 사이에 같은 EntryKey가 생기면 PLAN_STALE(state-present)이고 기존 entry는 그대로다", async () => {
     const { c, options, p, approval } = await prepared(exactFiles);
-    const other = toolState({ target: { client: "claude-code", scope: "project", file: ".mcp.json", serverName: "memory", projectName: "project", projectKey: p.plan.target.projectKey } });
+    const other = toolState({ target: { client: "claude-code", scope: "project", file: ".mcp.json", serverName: "fixture-npx", projectName: "project", projectKey: p.plan.target.projectKey } });
     expect(await commitLifecycleState(stateOf(other), null, { homeDir: c.homeDir })).toMatchObject({ ok: true });
     const before = await readFile(stateFile(c));
     const r = await exec(approval, options);
@@ -152,7 +152,7 @@ describe("REQ-063 Adopt 실행", () => {
       return s.items.find((i) => i.serverName === "my-memory")!;
     };
     const item = await status();
-    expect(item).toMatchObject({ toolId: "memory-mcp", state: "state-consistent", revision: 1, artifact: { lock: "artifact-unlocked" } });
+    expect(item).toMatchObject({ toolId: "fixture-npx-mcp", state: "state-consistent", revision: 1, artifact: { lock: "artifact-unlocked" } });
     expect(item.health).not.toBe("healthy");
     expect(formatLifecycleStatusItem(item).join("\n")).toContain("아직 확인하지 않음");
     await writeFile(path.join(c.projectRoot, ".mcp.json"), JSON.stringify(mcp({ "my-memory": { command: "npx", args: ["-y", MEMORY, "--x"] } }), null, 2) + "\n");
@@ -165,9 +165,9 @@ describe("REQ-063 Adopt 실행", () => {
     const { c, options, approval } = await prepared(strongFiles);
     expect((await exec(approval, options)).status).toBe("adopted");
     const fetch = vi.fn(async (url: string) =>
-      url === "https://registry.npmjs.org/@modelcontextprotocol%2fserver-memory/latest" ? new Response(JSON.stringify({ name: MEMORY, version: "1.2.3" }), { status: 200 }) : new Response("missing", { status: 404 }),
+      url === "https://registry.npmjs.org/@openhub-fixture%2fnpx-mcp/latest" ? new Response(JSON.stringify({ name: MEMORY, version: "1.2.3" }), { status: 200 }) : new Response("missing", { status: 404 }),
     );
-    const base = { toolId: "memory-mcp", projectRoot: c.projectRoot, homeDir: c.homeDir, entries: seed, platform: "linux" as const, includeUser: false, fetch };
+    const base = { toolId: "fixture-npx-mcp", projectRoot: c.projectRoot, homeDir: c.homeDir, entries: seed, platform: "linux" as const, includeUser: false, fetch };
     const update = await planLifecycle({ ...base, operation: "update" });
     if (!update.ok) throw new Error(update.code);
     expect(update.planned.plan.status).toBe("ready");

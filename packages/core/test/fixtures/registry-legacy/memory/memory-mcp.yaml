@@ -1,3 +1,4 @@
+# v0.2.0~v0.2.1 main까지 Verified Registry에 있던 Memory MCP Manifest(테스트 전용, v0.2.1 #69). 실제 registry/에는 없다(지원 중단).
 schemaVersion: 1
 name: memory-mcp
 displayName: Memory MCP

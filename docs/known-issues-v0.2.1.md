@@ -7,6 +7,7 @@ v0.2.1 is **not released yet**. This page describes the limits of the code on ma
 | Issue | Status | What you can do |
 | --- | --- | --- |
 | Serena: no new installs | By design in v0.2.1; re-support tracked in #59 | Keep or remove your existing entry; recovery still works |
+| Memory MCP: no new installs | By design in v0.2.1; storage fix tracked in #69 | Back up `memory.jsonl` before your client starts it again; recovery still works |
 | Postgres MCP Pro: first Health on Windows is close to the time limit | Not fixed; measured about 15 s of 20 s | Run Health again |
 | Recovery of interrupted operations is CLI only | By design in v0.2.1 | Run the command the Installed view shows |
 | Environment limits during Health and benchmark are not a sandbox | Known limit | See below |
@@ -24,6 +25,14 @@ v0.2.1 is **not released yet**. This page describes the limits of the code on ma
 - **Interrupted Serena operation:** `openhub lifecycle recover serena` still works; it does not need the Registry entry.
 - **Removing it:** follow the manual removal steps in the README (back up the client configuration file first).
 - **Status:** re-support is tracked in [#59](https://github.com/kanghyunsoon/openhub-ai/issues/59). A Windows Prepare failure seen once in six tries during earlier Serena testing was never explained; it is not a v0.2.1 path any more.
+
+## Memory MCP: no new installs
+
+- **What happens:** Memory MCP stores memories in `memory.jsonl` inside its package folder in the npx cache unless `MEMORY_FILE_PATH` is set. A new upstream version under the unpinned command replaces that folder and deletes the file, and an update or rollback to another version starts the server without the earlier memories (both reproduced). Memory MCP was removed from the Verified Registry. Install, update, rollback, Health, repair, adopt and benchmark refuse it with this reason, also when a custom Registry or a Manifest with another name installs the npm package `@modelcontextprotocol/server-memory`. Other servers from the shared `modelcontextprotocol/servers` repository are not affected.
+- **If you already use Memory MCP:** your client configuration, Version State and memory file are not changed, moved or deleted. `openhub lifecycle status` shows the entry as withdrawn with a link to #69. OpenHub does not start the server any more, but your client can, and OpenHub does not control that. Back up `memory.jsonl` before the next start. A file that was already deleted cannot be recovered by OpenHub.
+- **Interrupted Memory MCP operation:** `openhub lifecycle recover memory-mcp` still works; it does not need the Registry entry.
+- **Removing it:** follow the manual removal steps in the README (back up the client configuration file first). Removing the client entry does not delete the memory file.
+- **Status:** a stable storage path outside the npm cache and an approved copy of existing memories are tracked in [#69](https://github.com/kanghyunsoon/openhub-ai/issues/69).
 
 ## Postgres MCP Pro: first Health on Windows
 
@@ -78,4 +87,4 @@ See the [security model](security-model.md).
 - Kubernetes MCP Server is limited to version 0.0.67.
 - The Windows installer is unsigned; how SmartScreen or Smart App Control reacts has not been observed.
 - The Linux AppImage is tested by extracting it; starting it directly through FUSE is not tested.
-- The Verified Registry has 8 tools; the earlier 25–40 target is carried over.
+- The Verified Registry has 7 tools; the earlier 25–40 target is carried over.

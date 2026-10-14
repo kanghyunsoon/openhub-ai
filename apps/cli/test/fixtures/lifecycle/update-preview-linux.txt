@@ -1,17 +1,17 @@
-Memory MCP (memory-mcp) 업데이트 계획
+Fixture NPX MCP (test only) (fixture-npx-mcp) 업데이트 계획
 
 상태         ready
 Backend      npx
-현재 버전    @modelcontextprotocol/server-memory (고정되지 않음)
-목표 버전    @modelcontextprotocol/server-memory@1.2.3
-요청 spec    @modelcontextprotocol/server-memory
-준비 단계    npx --yes --package=@modelcontextprotocol/server-memory@1.2.3 -- node --version — OpenHub가 설정을 바꾸기 전에 이 버전을 npx cache에 받습니다(MCP 서버는 실행하지 않음, 네트워크·다운로드·의존성 설치 스크립트)
+현재 버전    @openhub-fixture/npx-mcp (고정되지 않음)
+목표 버전    @openhub-fixture/npx-mcp@1.2.3
+요청 spec    @openhub-fixture/npx-mcp
+준비 단계    npx --yes --package=@openhub-fixture/npx-mcp@1.2.3 -- node --version — OpenHub가 설정을 바꾸기 전에 이 버전을 npx cache에 받습니다(MCP 서버는 실행하지 않음, 네트워크·다운로드·의존성 설치 스크립트)
 Client 실행 명령
-  현재  npx -y @modelcontextprotocol/server-memory
-  변경  npx -y @modelcontextprotocol/server-memory@1.2.3
+  현재  npx -y @openhub-fixture/npx-mcp
+  변경  npx -y @openhub-fixture/npx-mcp@1.2.3
 
 대상
-  - .mcp.json (Claude Code, 프로젝트 범위) mcpServers.memory 항목 교체 · revision 1
+  - .mcp.json (Claude Code, 프로젝트 범위) mcpServers.fixture-npx 항목 교체 · revision 1
 
 Health Check
   필수 — MCP 서버를 격리 임시 디렉터리에서 실행해 initialize·tools/list 응답을 확인합니다(Client 앱은 실행하지 않음)
