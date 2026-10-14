@@ -97,7 +97,26 @@ CLI의 `openhub doctor`로 어떤 프로그램을 찾았는지 볼 수 있습니
 
 이 절차는 현재 코드로 확인했습니다: 다른 항목은 바이트 단위로 그대로이고, 지운 도구는 `missing-config`로 보이며, 다시 설치하면 `state-consistent`가 됩니다.
 
-앱 제거: Windows는 *설정 → 앱 → OpenHub AI → 제거*, Linux는 AppImage 파일을 지웁니다. 앱을 제거해도 Client 설정 파일은 바뀌지 않습니다. OpenHub 기록은 `~/.openhub`에 남으며, 지우려면 그 폴더를 삭제하세요. 앱 자체 데이터(브라우저 캐시와 선택한 언어)도 Windows는 `%APPDATA%\@openhub\desktop`, Linux는 `~/.config/@openhub/desktop`(`XDG_CONFIG_HOME`을 설정했다면 `$XDG_CONFIG_HOME/@openhub/desktop`)에 남습니다. 원하면 이 폴더도 지우세요. 두 폴더 모두 OpenHub AI를 닫은 뒤 지우세요.
+앱 제거: Windows는 *설정 → 앱 → 설치된 앱 → OpenHub AI → 제거*(또는 *제어판 → 프로그램 및 기능*), Linux는 AppImage 파일을 지웁니다. 앱을 제거해도 Client 설정 파일은 바뀌지 않습니다. OpenHub가 추가한 도구 항목은 위 절차로 지우기 전까지 남습니다. OpenHub 기록(Version State, journal, tool config)은 `~/.openhub`에 남으며, 지우려면 그 폴더를 삭제하세요. 앱 자체 데이터(브라우저 캐시와 선택한 언어)도 Windows는 `%APPDATA%\@openhub\desktop`, Linux는 `~/.config/@openhub/desktop`(`XDG_CONFIG_HOME`을 설정했다면 `$XDG_CONFIG_HOME/@openhub/desktop`)에 남습니다. 원하면 이 폴더도 지우세요. 두 폴더 모두 OpenHub AI를 닫은 뒤 지우세요.
+
+**Windows 설정에 OpenHub AI가 보이지 않을 때.** Windows 11 테스트 PC 한 대에서, 설치된 OpenHub AI 0.2.1이 *설정 → 앱 → 설치된 앱*과 `winget list`에 보이지 않았고 한 번은 *프로그램 및 기능*에도 보이지 않았습니다. 레지스트리에는 제거 항목이 있었고, 같은 방식으로 설치된 다른 앱은 보였습니다. 원인은 아직 모르며 다른 Windows PC에서는 확인하지 않았습니다. 이때는 제거 프로그램을 직접 실행할 수 있습니다.
+
+1. OpenHub AI를 닫습니다.
+2. 설치에 등록된 제거 프로그램을 확인합니다. 아래 PowerShell 명령은 레지스트리를 읽기만 합니다.
+
+   ```powershell
+   Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+     Where-Object DisplayName -like 'OpenHub AI*' |
+     Select-Object DisplayName, DisplayVersion, Publisher, UninstallString
+   ```
+
+   기본값인 "현재 사용자만"(전용) 설치라면 `%LOCALAPPDATA%\Programs\OpenHub AI\Uninstall OpenHub AI.exe`입니다. 설치할 때 다른 폴더를 골랐다면 그 폴더에 있습니다.
+3. 실행하기 전에 이 설치의 제거 프로그램인지 확인합니다. `OpenHub AI.exe`와 같은 폴더에 있어야 하고, *속성 → 자세히*의 *제품 이름*이 "OpenHub AI", 버전이 설치한 버전이어야 합니다. 설치 파일처럼 서명이 없어 Windows가 *알 수 없는 게시자* 보안 경고를 띄울 수 있습니다. 다른 위치의 제거 프로그램은 실행하지 마세요.
+4. 실행해 안내를 따릅니다. 파일이 지워지기까지 몇 분 걸릴 수 있습니다(테스트 PC의 무음 제거에서 약 3분). 끝날 때까지 기다리세요. 끝나면 프로그램 폴더, 시작 메뉴·바탕 화면 바로 가기, 제거 항목이 사라집니다.
+
+제거해도 Client 설정 파일, `~/.openhub`, 위의 앱 데이터 폴더는 지워지지 않습니다.
+
+`%LOCALAPPDATA%\@openhubdesktop-updater\installer.exe`(약 110MB)도 남습니다. 설치 프레임워크(electron-builder)가 업데이트 도구용으로 설치 파일을 그 위치에 복사해 두기 때문입니다. OpenHub는 스스로 업데이트하지 않고 이 파일을 읽지 않으며, 제거 프로그램은 이 파일을 지우지 않습니다. 공간을 비우려면 앱을 제거한 뒤 `@openhubdesktop-updater` 폴더를 지우세요. 그 전에 폴더 안에 `installer.exe`만 있는지 확인하세요. 나중에 다시 설치하면 새 사본이 만들어집니다.
 
 ## 지원 Client와 검증 범위
 
