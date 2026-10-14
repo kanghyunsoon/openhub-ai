@@ -1,9 +1,13 @@
 import { containsAbsolutePath } from "../analyzer/index";
+import { parseNpxArgs } from "./npx-args";
 
 /**
  * Manifest install.options.command strict tokenizer와 floating-artifact 판정(TASK-030, D-012 §7·§8).
  * - shell로 해석하지 않는다. 공백(스페이스·탭)으로만 나누고, 셸 metacharacter·따옴표·줄바꿈·절대 경로 token·".."가 있으면 거부한다.
  * - 첫 token은 선택된 Adapter(npx·uvx)와 같아야 한다.
+ * - npx는 패키지 지정까지 해석한다(v0.2.1 #69 리뷰 P0, ./npx-args.ts): npm Registry 이름·alias만 허용하고 URL·tarball·Git·file:·경로·
+ *   출처를 바꾸는 옵션은 거부한다. 이 함수를 쓰는 Registry 검증·설치 계획·update/rollback/health/repair 재검증·adopt·Client 설정 기록이
+ *   모두 같은 규칙을 따른다.
  * - 모호하면 floating이다. 버전 자동 고정·digest resolution은 하지 않는다(M5 이후).
  */
 
@@ -38,6 +42,10 @@ export function tokenizeManifestCommand(command: string, adapter: "npx" | "uvx",
   for (const token of tokens.slice(1)) {
     if (token.includes("..")) return reject("상위 경로(..) token이 있습니다");
     if (containsAbsolutePath(token) || token.startsWith("/") || token.startsWith("~") || /^[A-Za-z]:/u.test(token)) return reject("절대 경로 token이 있습니다");
+  }
+  if (adapter === "npx") {
+    const parsed = parseNpxArgs(tokens.slice(1));
+    if (!parsed.ok) return reject(parsed.reason);
   }
   return { ok: true, tokens };
 }

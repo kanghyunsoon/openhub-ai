@@ -36,6 +36,11 @@ export interface WithdrawnTool {
     readonly pypiPackages: readonly string[];
     /** npm 패키지 이름(정확히 같은 이름만, 소문자 비교). 같은 scope의 다른 패키지는 해당하지 않는다. */
     readonly npmPackages: readonly string[];
+    /**
+     * Docker image 저장소 이름(Docker Hub 기준, 태그·digest·docker.io/ 접두사를 뗀 정확한 이름). docker 설치 단계의 image 값만 본다.
+     * 같은 서버임을 확인한 이미지만 넣는다(다른 레지스트리의 이미지는 동일성을 알 수 없어 넣지 않는다).
+     */
+    readonly dockerImages: readonly string[];
   };
 }
 
@@ -47,7 +52,7 @@ export const WITHDRAWN_TOOLS: readonly WithdrawnTool[] = [
     reason: "실행에 필요한 의존성(proxy-tools)이 소스 빌드만 제공되고, OpenHub가 그 빌드 입력을 검증할 수 없어 검토되지 않은 빌드 코드를 실행하게 됩니다",
     reasonEn: "a dependency it needs (proxy-tools) is published only as a source distribution, and OpenHub cannot verify the inputs of that build, so it would run unreviewed build code",
     issue: "https://github.com/kanghyunsoon/openhub-ai/issues/59",
-    identity: { repositories: ["oraios/serena"], mcpServerNames: ["serena"], pypiPackages: ["serena-agent"], npmPackages: [] },
+    identity: { repositories: ["oraios/serena"], mcpServerNames: ["serena"], pypiPackages: ["serena-agent"], npmPackages: [], dockerImages: [] },
   },
   {
     toolId: "memory-mcp",
@@ -62,7 +67,9 @@ export const WITHDRAWN_TOOLS: readonly WithdrawnTool[] = [
     adviceEn: "Your client (Claude Code, Codex, Cursor) can still start this server from its existing configuration. Before its next start, back up memory.jsonl outside the npm cache and set MEMORY_FILE_PATH to that absolute path (see the README and known issues)",
     // 저장소 modelcontextprotocol/servers는 여러 MCP 서버가 함께 쓰므로 저장소로 식별하지 않는다. alias "memory"는 무관한 패키지도
     // 쓸 수 있는 흔한 이름이라 식별에 쓰지 않는다(#72 리뷰). Tool ID memory-mcp와 실제 설치 패키지만 본다.
-    identity: { repositories: [], mcpServerNames: [], pypiPackages: [], npmPackages: ["@modelcontextprotocol/server-memory"] },
+    // Docker Hub mcp/memory는 modelcontextprotocol/servers의 src/memory Dockerfile로 빌드한 같은 서버다(Docker Hub 설명, 2026-10-14 확인).
+    // OpenHub의 docker 실행(docker run -i --rm)에서는 기억 파일이 컨테이너와 함께 사라지므로 더 위험하다.
+    identity: { repositories: [], mcpServerNames: [], pypiPackages: [], npmPackages: ["@modelcontextprotocol/server-memory"], dockerImages: ["mcp/memory"] },
   },
 ];
 
@@ -163,8 +170,30 @@ function installNpmPackageNames(manifest: Manifest): string[] {
 }
 
 /**
+ * docker 설치 단계(우선 adapter와 fallback)의 image를 Docker Hub 저장소 이름으로 정규화한다(v0.2.1 #69 리뷰).
+ * "docker.io/mcp/memory:latest", "mcp/memory@sha256:…", "index.docker.io/mcp/memory" → "mcp/memory". 명령 문자열의 다른 token은 보지 않는다.
+ */
+function installDockerImages(manifest: Manifest): string[] {
+  const images: string[] = [];
+  const imageOf = (step: { image?: unknown; options?: Record<string, unknown> | undefined }) => (typeof step.image === "string" ? step.image : typeof step.options?.["image"] === "string" ? (step.options["image"] as string) : undefined);
+  const steps = [{ adapter: manifest.install.preferredAdapter, options: manifest.install.options }, ...manifest.install.fallback];
+  for (const step of steps) {
+    if (step.adapter !== "docker") continue;
+    const raw = imageOf(step as { image?: unknown; options?: Record<string, unknown> });
+    if (raw === undefined) continue;
+    let ref = raw.toLowerCase().split("@")[0]!;
+    const slash = ref.lastIndexOf("/");
+    const colon = ref.lastIndexOf(":");
+    if (colon > slash) ref = ref.slice(0, colon);
+    ref = ref.replace(/^(?:docker\.io|index\.docker\.io|registry-1\.docker\.io)\//u, "");
+    images.push(ref);
+  }
+  return images;
+}
+
+/**
  * 이 Manifest가 지원 중단 도구인가. name, GitHub 저장소(그 도구 전용일 때만), canonical MCP alias(그 도구 전용일 때만),
- * 설치 정보의 PyPI·npm 패키지·git 저장소 중 하나라도 같으면 그렇다.
+ * 설치 정보의 PyPI·npm 패키지·docker image·git 저장소 중 하나라도 같으면 그렇다.
  * 결과는 사유 안내와 차단에만 쓴다.
  */
 export function withdrawnManifestOf(manifest: Manifest): WithdrawnTool | undefined {
@@ -173,12 +202,14 @@ export function withdrawnManifestOf(manifest: Manifest): WithdrawnTool | undefin
   const tokens = installStrings(manifest).flatMap(tokensOf);
   const names = installPackageNames(manifest).map(pep503);
   const npmNames = installNpmPackageNames(manifest);
+  const images = installDockerImages(manifest);
   return WITHDRAWN_TOOLS.find((t) => {
     if (t.toolId === manifest.name) return true;
     const repos = t.identity.repositories.map((r) => r.toLowerCase());
     if (repo !== undefined && repos.includes(repo)) return true;
     if (aliases.some((a) => t.identity.mcpServerNames.includes(a))) return true;
     if (npmNames.some((n) => t.identity.npmPackages.some((p) => p.toLowerCase() === n))) return true;
+    if (images.some((image) => t.identity.dockerImages.includes(image))) return true;
     const pkgs = t.identity.pypiPackages.map(pep503);
     if (tokens.some((token) => repos.some((r) => token.toLowerCase().includes("github.com/" + r)))) return true;
     return names.some((n) => pkgs.includes(n));

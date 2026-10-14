@@ -16,6 +16,7 @@ v0.2.1은 **아직 릴리스되지 않았습니다**. 이 문서는 v0.2.1에 �
 | 환경변수의 index·registry URL에 인증 정보 | Health·Benchmark가 서버를 시작하지 않음 | `uv.toml`이나 `.npmrc`로 옮기기 |
 | 선언하지 않은 환경변수에 기대던 도구 | Health가 실패할 수 있음 | Manifest에 선언하거나 Client 실행에 맡기기 |
 | 사용자 Registry: 일부 uvx 명령 형식 거부 | v0.2.1 정책 | 옵션을 띄어 쓰기 |
+| 사용자 Registry: npx 명령은 npm Registry 패키지 이름만 | v0.2.1 정책 | URL·tarball·Git·경로 대신 `[@scope/]name[@version]` 쓰기 |
 | 사용자 Registry: 고정되지 않은 uvx 도구는 소스 빌드 가능 | 알려진 제한. 고정된 도구만 준비 | 패키지와 모든 `--with` 의존성을 정확한 버전으로 고정 |
 | v0.2.0에서 이어지는 제한 | Cursor·macOS 미검증, Kubernetes 0.0.67만, 설치 파일 미서명, FUSE로 직접 AppImage 실행 미검증 | 릴리스 노트 참고 |
 
@@ -29,7 +30,7 @@ v0.2.1은 **아직 릴리스되지 않았습니다**. 이 문서는 v0.2.1에 �
 
 ## Memory MCP 신규 설치 불가
 
-- **내용:** Memory MCP는 `MEMORY_FILE_PATH`를 지정하지 않으면 npx cache 안의 패키지 폴더에 있는 `memory.jsonl`에 기억을 저장합니다. 고정되지 않은 명령에서 새 버전이 나오면 그 폴더가 바뀌면서 파일이 지워지고, 다른 버전으로 업데이트·롤백하면 이전 기억 없이 서버가 시작됩니다(둘 다 재현함). 그래서 Memory MCP를 Verified Registry에서 뺐습니다. 설치·업데이트·롤백·Health·repair·adopt·benchmark는 이 사유와 함께 거부합니다. 사용자 Registry나 이름이 다른 Manifest가 npm 패키지 `@modelcontextprotocol/server-memory`를 설치하려 해도 마찬가지입니다. 같은 `modelcontextprotocol/servers` 저장소의 다른 서버는 영향을 받지 않습니다.
+- **내용:** Memory MCP는 `MEMORY_FILE_PATH`를 지정하지 않으면 npx cache 안의 패키지 폴더에 있는 `memory.jsonl`에 기억을 저장합니다. 고정되지 않은 명령에서 새 버전이 나오면 그 폴더가 바뀌면서 파일이 지워지고, 다른 버전으로 업데이트·롤백하면 이전 기억 없이 서버가 시작됩니다(둘 다 재현함). 그래서 Memory MCP를 Verified Registry에서 뺐습니다. 설치·업데이트·롤백·Health·repair·adopt·benchmark는 이 사유와 함께 거부합니다. 사용자 Registry나 이름이 다른 Manifest가 npm 패키지 `@modelcontextprotocol/server-memory`나 Docker Hub 이미지 `mcp/memory`(같은 서버로 빌드됨)를 설치하려 해도 마찬가지입니다. URL·tarball·Git 출처로 이 패키지를 가리키는 npx 명령은 아래 npx 규칙으로 거부됩니다. 같은 `modelcontextprotocol/servers` 저장소의 다른 서버는 영향을 받지 않습니다.
 - **이미 Memory MCP를 쓰는 경우:** Client 설정, Version State, 기억 파일은 바꾸거나 옮기거나 지우지 않습니다. `openhub lifecycle status`에 지원 중단 표시와 #69 링크가 나옵니다. OpenHub는 더 이상 이 서버를 실행하지 않지만 Client는 실행할 수 있고, OpenHub는 그 실행을 통제하지 않습니다. 다음 실행 전에 `memory.jsonl`을 백업하세요. 이미 지워진 파일은 OpenHub가 복구할 수 없습니다.
 - **중단된 Memory MCP 작업:** `openhub lifecycle recover memory-mcp`는 Registry 항목 없이도 동작합니다.
 - **기억은 직접 보호해야 합니다.** v0.2.1은 기억 파일을 옮기거나 복사하거나 보호하지 않으며, Client는 기존 설정으로 Memory MCP를 계속 시작합니다. 아무것도 하지 않으면 같은 손실이 여전히 일어날 수 있습니다. Client가 다시 시작하기 전에:
@@ -89,6 +90,13 @@ Health와 Benchmark는 허용 목록에 있는 환경변수만 MCP 서버에 넘
   - **Manifest만으로 패키지를 식별할 수 없음:** URL, 경로, VCS, wheel·압축 파일, `--with-editable`, `--with-requirements`. uv 0.12.3의 `uvx --help`에 없는 옵션도 값을 받는지 알 수 없어 같은 이유로 거부하며, 이후 uv 버전에서 추가된 옵션은 검토 전까지 거부합니다.
   - **패키지는 식별되지만 OpenHub의 Prepare·update 처리 범위 밖인 형식:** `--from=패키지`, `--with=패키지`, `-w패키지`, `-w=패키지`, `-qw` 같은 짧은 플래그 묶음, 쉼표로 이은 `--with` 목록, `--`. uvx는 이 형식을 받고 OpenHub도 그 안의 패키지를 읽습니다(지원 중단 도구를 이렇게 써도 지원 중단으로 알아보고 거부합니다). 다만 Prepare·update·버전 확인은 띄어 쓴 옵션만 다루므로, 일부만 처리하지 않고 거부합니다.
 - **할 수 있는 일:** 옵션을 띄어 쓰고 URL·경로·파일 대신 패키지 이름을 쓰세요. 예: `uvx --from package==1.2.3 --with dependency==4.5.6 command`.
+
+## 사용자 Registry의 npx 패키지 형식
+
+- **증상:** 사용자 Registry Manifest의 npx 명령이 `MANIFEST_COMMAND_REJECTED`로 거부됩니다.
+- **이유:** OpenHub는 npm Registry 이름과 버전으로 식별할 수 있는 npx 패키지만 실행합니다: `[@scope/]name[@version|@tag|@range]` 또는 npm alias. URL·tarball(`--package=<URL>` 포함), Git 출처(`git+…`, `github:`, `gitlab:`, `bitbucket:`, `gist:`, `owner/repo`), `file:`, 경로, `.tgz` 파일, 대문자 이름, 그리고 패키지 앞의 `-y`·`--yes`·`-p`·`--package`·`--` 외 옵션(예: `--registry`, `-c`, `--prefix`)은 거부합니다. URL 안의 글자로 이름을 추측하지 않습니다. 패키지 뒤의 인자는 MCP 서버 인자이며 패키지로 읽지 않습니다.
+- **기록된 명령도 다시 확인:** Health·repair·benchmark는 기록된 실행 명령이 이 규칙을 통과하지 않으면 실행하지 않습니다.
+- **할 수 있는 일:** npm Registry의 패키지를 이름으로 쓰세요. 예: `npx -y @scope/server@1.2.3`, `npx -y -p @scope/server@1.2.3 server-bin`.
 
 ## 사용자 Registry: 고정되지 않은 uvx 도구
 
