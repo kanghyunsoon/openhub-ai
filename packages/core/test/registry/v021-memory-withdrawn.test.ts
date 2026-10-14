@@ -20,6 +20,7 @@ import {
   runInstallTransaction,
   runLifecycleTransaction,
   validateRegistry,
+  withdrawnManifestError,
   withdrawnManifestOf,
   withdrawnToolOf,
   type ExecChild,
@@ -127,9 +128,9 @@ async function legacyUser() {
 }
 
 describe("v0.2.1 #69 Memory MCP 지원 중단: 신규 설치 차단과 기존 사용자 데이터 보존", () => {
-  it("지원 중단 목록: 사유·Issue #69·since 0.2.1, 공유 저장소는 식별에 쓰지 않고 정확한 npm 패키지·Tool ID·alias만 쓴다", () => {
+  it("지원 중단 목록: 사유·Issue #69·since 0.2.1, 공유 저장소와 흔한 alias(memory)는 식별에 쓰지 않고 정확한 npm 패키지·Tool ID만 쓴다", () => {
     const tool = withdrawnToolOf("memory-mcp");
-    expect(tool).toMatchObject({ since: "0.2.1", issue: ISSUE, identity: { repositories: [], mcpServerNames: ["memory"], pypiPackages: [], npmPackages: [PKG] } });
+    expect(tool).toMatchObject({ since: "0.2.1", issue: ISSUE, identity: { repositories: [], mcpServerNames: [], pypiPackages: [], npmPackages: [PKG] } });
     expect(tool!.reason).toContain("memory.jsonl");
     expect(tool!.advice).toContain("MEMORY_FILE_PATH");
   });
@@ -258,6 +259,8 @@ describe("v0.2.1 #69 npm 패키지 식별: 우회 차단과 오탐 방지", () =
       "npx -y npm:@modelcontextprotocol/server-memory",
       "npx -y -- @modelcontextprotocol/server-memory",
       "npx -y @ModelContextProtocol/Server-Memory",
+      "npx --package=@modelcontextprotocol/server-memory@1.0.0 -y -- mcp-server-memory",
+      "npx -y memory@npm:@modelcontextprotocol/server-memory",
     ];
     for (const command of forms) {
       const entry = renamed("notes-mcp", { command });
@@ -271,8 +274,29 @@ describe("v0.2.1 #69 npm 패키지 식별: 우회 차단과 오탐 방지", () =
     }
     expect(withdrawnManifestOf(renamed("notes-mcp", { fallbackPackage: PKG }).manifest)?.toolId).toBe("memory-mcp");
     expect(withdrawnManifestOf(renamed("memory-mcp", {}).manifest)?.toolId).toBe("memory-mcp");
-    // 검토된 canonical MCP alias "memory"는 Memory MCP의 식별자다(D-008: alias가 같으면 같은 도구로 본다).
-    expect(withdrawnManifestOf(renamed("notes-mcp", { alias: "memory" }).manifest)?.toolId).toBe("memory-mcp");
+    // alias가 memory이든 아니든 실제 패키지가 Memory MCP면 막는다.
+    for (const alias of ["memory", "notes"]) expect(withdrawnManifestOf(renamed("notes-mcp", { alias, command: "npx -y " + PKG + "@1.0.0" }).manifest)?.toolId, alias).toBe("memory-mcp");
+  });
+
+  it("alias memory만 같은 무관한 npm 패키지는 막지 않는다(#72 리뷰): 설치 계획이 TOOL_WITHDRAWN이 아니다", async () => {
+    const unrelated = ["npx -y @someone/notes-mcp", "npx -y mcp-memory-lite@1.0.0", "npx -y @acme/memory-server@2.1.0", "npx -y @modelcontextprotocol/server-filesystem"];
+    for (const command of unrelated) {
+      const entry = renamed("my-memory", { command, alias: "memory" });
+      expect(withdrawnManifestOf(entry.manifest), command).toBeUndefined();
+      expect(withdrawnManifestError(entry.manifest), command).toBeUndefined();
+      const h = await createHarness(scratch, { entries: [...seed, entry] });
+      const built = await planInstall(h.request("my-memory", CLAUDE), h.env);
+      expect(built.result, command).toMatchObject({ ok: true });
+    }
+    // 지원 중단 판정을 좁혀도 기존 명령 검증 정책은 그대로다: 절대 경로 인자는 지원 중단이 아니라 명령 검증으로 거부된다.
+    const absolute = renamed("my-memory", { command: "npx -y @modelcontextprotocol/server-filesystem /tmp", alias: "memory" });
+    expect(withdrawnManifestOf(absolute.manifest)).toBeUndefined();
+    const h = await createHarness(scratch, { entries: [...seed, absolute] });
+    const rejected = await planInstall(h.request("my-memory", CLAUDE), h.env);
+    expect(rejected.result.ok).toBe(false);
+    if (!rejected.result.ok) expect(rejected.result.code).not.toBe("TOOL_WITHDRAWN");
+    expect(h.writes).toEqual([]);
+    expect(h.spawns).toEqual([]);
   });
 
   it("공유 저장소 modelcontextprotocol/servers의 다른 서버와 비슷한 이름의 패키지는 막지 않는다", async () => {

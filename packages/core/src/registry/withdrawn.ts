@@ -7,11 +7,12 @@ import { parseUvxArgs, pythonRequirementName } from "../process/uvx-args";
  * - 기존 사용자의 Client 설정·Version State·Journal은 지우지 않는다. 상태 조회와 Journal Recovery는 Manifest 없이 그대로 동작한다.
  * - 설치·update·rollback·health·repair·adopt·benchmark·Pinokio 계획은 TOOL_NOT_FOUND 대신 TOOL_WITHDRAWN과 이 사유를 돌려준다.
  *   판정은 Core의 계획 생성 단계에서 한다(resolveRegistryTool·withdrawnManifestOf). Registry에 같은 Manifest가 있어도(사용자 Registry,
- *   직접 넘긴 Manifest) 막는다. 이름이 달라도 identity(저장소·canonical MCP alias·PyPI 패키지)가 같으면 같은 도구로 본다.
+ *   직접 넘긴 Manifest) 막는다. 이름이 달라도 identity(전용 저장소·전용 canonical MCP alias·PyPI·npm 패키지)가 같으면 같은 도구로 본다.
  * - Registry 검증(validateRegistry)도 다시 들어온 Manifest를 거부하지만, 안전성은 이 계획 단계 판정이 보장한다.
  * - 범용 Registry 확장 기능이 아니며, 항목 추가·삭제는 코드 리뷰 대상이다.
  * - 저장소(repositories)는 그 저장소가 이 도구만 담을 때만 쓴다. 여러 서버가 함께 쓰는 저장소(예: modelcontextprotocol/servers)는
- *   저장소로 식별하지 않고 정확한 패키지 이름(npm·PyPI)과 Tool ID·검토된 MCP alias로만 식별한다(다른 도구 오탐 방지).
+ *   저장소로 식별하지 않는다. alias도 그 도구만의 이름일 때만 넣는다: "memory"처럼 흔한 alias는 무관한 패키지도 쓸 수 있으므로
+ *   Memory MCP는 Tool ID와 정확한 npm 패키지로만 식별한다(v0.2.1 #72 리뷰, 다른 도구 오탐 방지).
  */
 export interface WithdrawnTool {
   readonly toolId: string;
@@ -29,7 +30,7 @@ export interface WithdrawnTool {
   readonly identity: {
     /** GitHub owner/repo(대소문자 무시). 이 도구만 담은 저장소일 때만 넣는다. */
     readonly repositories: readonly string[];
-    /** canonical MCP alias(recommendation.identity.mcpServerNames) */
+    /** canonical MCP alias(recommendation.identity.mcpServerNames). 그 도구만 쓰는 이름일 때만 넣는다(흔한 이름은 비운다). */
     readonly mcpServerNames: readonly string[];
     /** PyPI 패키지 이름(PEP 503 정규화로 비교) */
     readonly pypiPackages: readonly string[];
@@ -59,8 +60,9 @@ export const WITHDRAWN_TOOLS: readonly WithdrawnTool[] = [
     issue: "https://github.com/kanghyunsoon/openhub-ai/issues/69",
     advice: "Client(Claude Code·Codex·Cursor)는 기존 설정으로 이 서버를 계속 시작할 수 있습니다. 다음 실행 전에 memory.jsonl을 npm cache 밖으로 백업하고 MEMORY_FILE_PATH에 그 절대 경로를 지정하세요(README·알려진 문제 참고)",
     adviceEn: "Your client (Claude Code, Codex, Cursor) can still start this server from its existing configuration. Before its next start, back up memory.jsonl outside the npm cache and set MEMORY_FILE_PATH to that absolute path (see the README and known issues)",
-    // 저장소 modelcontextprotocol/servers는 여러 MCP 서버가 함께 쓰므로 저장소로 식별하지 않는다.
-    identity: { repositories: [], mcpServerNames: ["memory"], pypiPackages: [], npmPackages: ["@modelcontextprotocol/server-memory"] },
+    // 저장소 modelcontextprotocol/servers는 여러 MCP 서버가 함께 쓰므로 저장소로 식별하지 않는다. alias "memory"는 무관한 패키지도
+    // 쓸 수 있는 흔한 이름이라 식별에 쓰지 않는다(#72 리뷰). Tool ID memory-mcp와 실제 설치 패키지만 본다.
+    identity: { repositories: [], mcpServerNames: [], pypiPackages: [], npmPackages: ["@modelcontextprotocol/server-memory"] },
   },
 ];
 
@@ -161,8 +163,8 @@ function installNpmPackageNames(manifest: Manifest): string[] {
 }
 
 /**
- * 이 Manifest가 지원 중단 도구인가. name, GitHub 저장소(그 도구 전용일 때만), canonical MCP alias, 설치 정보의 PyPI·npm 패키지·git 저장소
- * 중 하나라도 같으면 그렇다.
+ * 이 Manifest가 지원 중단 도구인가. name, GitHub 저장소(그 도구 전용일 때만), canonical MCP alias(그 도구 전용일 때만),
+ * 설치 정보의 PyPI·npm 패키지·git 저장소 중 하나라도 같으면 그렇다.
  * 결과는 사유 안내와 차단에만 쓴다.
  */
 export function withdrawnManifestOf(manifest: Manifest): WithdrawnTool | undefined {
