@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { ALLOWED_NOT_RUN, REQUIRED_CHECKS, REQUIRED_STEPS, checkRcResult } from "../scripts/rc/check-rc-result.mjs";
+import { loadRegistry, WITHDRAWN_TOOLS } from "../packages/core/src/index";
 
 /** v0.2.0 RC 결과 판정기(fail-closed). 예전 하네스는 FAIL이 있어도 종료 코드 0이었다. */
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -184,7 +185,6 @@ describe("RC workflow·하네스 배선", () => {
   });
 
   it("버전 Update·Rollback·Health·보상 검사의 대상은 실제 Registry의 고정 안 된 npx 도구이고 지원 중단 도구가 아니다(v0.2.1 #69)", async () => {
-    const { loadRegistry, WITHDRAWN_TOOLS } = await import("../packages/core/src/index");
     const constant = (name: string) => harness.match(new RegExp("^const " + name + ' = "([^"]+)";$', "mu"))?.[1];
     const [id, alias, pkg, v1, v2] = ["TOOL_ID", "TOOL_ALIAS", "TOOL_PKG", "TOOL_V1", "TOOL_V2"].map(constant);
     const { entries, issues } = await loadRegistry(path.join(ROOT, "registry"));
