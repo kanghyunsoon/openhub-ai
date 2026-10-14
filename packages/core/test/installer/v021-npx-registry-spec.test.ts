@@ -2,19 +2,24 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  buildInstallPlan,
   checkRegistryConsistency,
   npmRegistrySpec,
+  npxArtifact,
   parseNpxArgs,
   planBenchmark,
   planInstall,
   planLifecycle,
   projectKeyFor,
+  runInstallTransaction,
+  recordInstallInState,
   tokenizeManifestCommand,
   withdrawnManifestOf,
   type RegistryEntry,
 } from "../../src/index";
-import { createHarness, listing, newScratch } from "./harness";
-import { legacyMemoryEntry, seedEntries } from "../recommendation/helpers";
+import { approveAll, createHarness, listing, newScratch, plannedOf } from "./harness";
+import { legacyMemoryEntry, seedEntries, seedWithNpxFixture } from "../recommendation/helpers";
+import { ALL_AVAILABLE, clientProfile, reportFor, target } from "./helpers";
 import { stateOf, toolState } from "../lifecycle/helpers";
 import { rm } from "node:fs/promises";
 
@@ -43,6 +48,20 @@ const renamed = (name: string, install: RegistryEntry["manifest"]["install"]): R
 const npxEntry = (name: string, command: string) => renamed(name, { preferredAdapter: "npx", options: { command }, fallback: [] });
 
 describe("npx 인자 해석: npm Registry 이름만", () => {
+  const ACCEPTED = [
+    ["-y", "pkg"],
+    ["--yes", "pkg@1.2.3"],
+    ["@scope/pkg@latest"],
+    ["-y", "@scope/pkg@1.2.3-rc.1"],
+    ["-y", "pkg@^1.2.0"],
+    ["-y", "pkg@1.x"],
+    ["-p", "@scope/pkg@1.0.0", "pkg-bin"],
+    ["--package", "@scope/pkg", "pkg-bin", "--flag", "value"],
+    ["-y", "--", "@scope/pkg"],
+    ["-y", "alias@npm:@scope/pkg@1.0.0"],
+    ["-y", "npm:@scope/pkg"],
+    ["-y", "pkg", "https://example.com/argument-for-the-server"],
+  ];
   it("실제 Registry의 npx 명령과 지원하는 형식은 통과한다", () => {
     const npx = seed.filter((e) => e.manifest.install.preferredAdapter === "npx");
     expect(npx.length).toBeGreaterThan(0);
@@ -50,22 +69,31 @@ describe("npx 인자 해석: npm Registry 이름만", () => {
       const command = String(e.manifest.install.options?.["command"]).replace("{toolConfig}", "openhub-tool-config-placeholder");
       expect(tokenizeManifestCommand(command, "npx").ok, command).toBe(true);
     }
-    for (const args of [
-      ["-y", "pkg"],
-      ["--yes", "pkg@1.2.3"],
-      ["@scope/pkg@latest"],
-      ["-y", "@scope/pkg@1.2.3-rc.1"],
-      ["-y", "pkg@^1.2.0"],
-      ["-y", "pkg@1.x"],
-      ["-p", "@scope/pkg@1.0.0", "pkg-bin"],
-      ["--package=@scope/pkg", "pkg-bin", "--flag", "value"],
-      ["--package", "@scope/pkg", "pkg-bin"],
-      ["-y", "--", "@scope/pkg"],
-      ["-y", "alias@npm:@scope/pkg@1.0.0"],
-      ["-y", "npm:@scope/pkg"],
-      ["-y", "pkg", "https://example.com/argument-for-the-server"],
-    ]) expect(parseNpxArgs(args).ok, args.join(" ")).toBe(true);
+    for (const args of ACCEPTED) expect(parseNpxArgs(args).ok, args.join(" ")).toBe(true);
     expect(npmRegistrySpec("alias@npm:@scope/pkg@1.0.0")).toEqual({ name: "@scope/pkg", version: "1.0.0" });
+  });
+
+  it("#74 리뷰: npxArtifact는 parseNpxArgs와 같은 패키지를 식별한다(-p의 bin 이름을 패키지로 잡지 않는다)", () => {
+    for (const args of ACCEPTED) {
+      const parsed = parseNpxArgs(args);
+      if (!parsed.ok) throw new Error(args.join(" "));
+      expect(npxArtifact(args), args.join(" ")).toEqual({ spec: parsed.packages[0], unambiguous: parsed.command === null });
+    }
+    expect(npxArtifact(["-y", "-p", "@scope/pkg@1.0.0", "pkg-bin"])).toEqual({ spec: "@scope/pkg@1.0.0", unambiguous: false });
+    // 지원하지 않는 형식은 식별하지 않는다(이전에는 --package= 다음 bin 이름을 패키지로 돌려줬다).
+    for (const args of [["--package=@scope/pkg", "pkg-bin"], ["-p", "a@1.0.0", "-p", "b@1.0.0", "a-bin"], ["--registry", "https://example.com/", "pkg"], ["-y", TARBALL]]) {
+      expect(npxArtifact(args), args.join(" ")).toBeNull();
+    }
+  });
+
+  it("#74 리뷰: 여러 패키지와 --package= 붙여 쓰기는 버전 관리를 일관되게 할 수 없어 지원 범위에서 뺀다", () => {
+    for (const args of [
+      ["-p", "a@1.0.0", "-p", "b@1.0.0", "a-bin"],
+      ["--package", "a", "--package", "b", "a-bin"],
+      ["-y", "-p", "@scope/pkg@1.0.0", "--package", "@modelcontextprotocol/server-memory", "pkg-bin"],
+      ["--package=@scope/pkg", "pkg-bin"],
+      ["-y", "--package=@scope/pkg@1.0.0", "pkg-bin"],
+    ]) expect(parseNpxArgs(args), args.join(" ")).toMatchObject({ ok: false });
   });
 
   it("URL·tarball·Git·file:·경로·출처를 바꾸는 옵션은 거부한다(이름이 문자열에 들어 있어도 추측하지 않는다)", () => {
@@ -99,6 +127,60 @@ describe("npx 인자 해석: npm Registry 이름만", () => {
       ["-p"],
     ]) expect(parseNpxArgs(args).ok, args.join(" ")).toBe(false);
     expect(tokenizeManifestCommand("npx -y " + TARBALL, "npx")).toMatchObject({ ok: false, code: "MANIFEST_COMMAND_REJECTED" });
+  });
+});
+
+describe("#74 리뷰: -p·--package와 alias의 설치 대상·버전·Prepare·update 일관성", () => {
+  const base = async () => (await seedWithNpxFixture()).find((e) => e.manifest.name === "fixture-npx-mcp")!;
+  const withCommand = (entry: RegistryEntry, command: string): RegistryEntry => ({ ...entry, manifest: { ...entry.manifest, install: { preferredAdapter: "npx", options: { command }, fallback: [] } } });
+  const build = async (command: string) => {
+    const entries = (await seedWithNpxFixture()).map((e) => (e.manifest.name === "fixture-npx-mcp" ? withCommand(e, command) : e));
+    return buildInstallPlan({ toolId: "fixture-npx-mcp", entries, report: reportFor(clientProfile(), entries), probes: ALL_AVAILABLE, targets: [target("claude-code")], platform: "linux" });
+  };
+
+  it("고정 버전 위치 인자: Prepare와 Client 설정이 같은 정확한 버전이다", async () => {
+    const built = await build("npx -y @openhub-fixture/npx-mcp@1.2.3");
+    if (!built.ok) throw new Error(built.code);
+    expect(built.planned.plan.artifact).toMatchObject({ spec: "@openhub-fixture/npx-mcp@1.2.3", pinned: true, preparation: "npm-cache" });
+    expect(built.planned.plan.steps[0]).toMatchObject({ args: ["--yes", "--package=@openhub-fixture/npx-mcp@1.2.3", "--", "node", "--version"] });
+    expect(built.planned.plan.launch?.args).toEqual(["-y", "@openhub-fixture/npx-mcp@1.2.3"]);
+  });
+
+  it("-p <패키지> <bin>: artifact는 패키지(bin 아님)이고 floating이라 Prepare하지 않는다", async () => {
+    const built = await build("npx -y -p @openhub-fixture/npx-mcp@1.2.3 npx-mcp");
+    if (!built.ok) throw new Error(built.code);
+    expect(built.planned.plan.artifact).toMatchObject({ spec: "@openhub-fixture/npx-mcp@1.2.3", pinned: false, preparation: "launch-on-demand" });
+    expect(built.planned.plan.steps.map((s) => s.kind)).not.toContain("run");
+  });
+
+  it("npm alias: 대상 패키지를 실행하지만 정확한 버전으로 관리하지 않는다(floating, Prepare 없음)", async () => {
+    const built = await build("npx -y fixture@npm:@openhub-fixture/npx-mcp@1.2.3");
+    if (!built.ok) throw new Error(built.code);
+    expect(built.planned.plan.artifact).toMatchObject({ spec: "fixture@npm:@openhub-fixture/npx-mcp@1.2.3", pinned: false, preparation: "launch-on-demand" });
+  });
+
+  it("--package= 붙여 쓰기와 여러 패키지는 설치 계획을 만들지 않는다(이전에는 bin 이름이 artifact로 기록됐다)", async () => {
+    for (const command of ["npx -y --package=@openhub-fixture/npx-mcp@1.2.3 npx-mcp", "npx -y -p @openhub-fixture/npx-mcp@1.2.3 -p other-pkg@1.0.0 npx-mcp"]) {
+      const built = await build(command);
+      expect(built.ok, command).toBe(false);
+    }
+  });
+
+  it("-p로 설치한 Tool의 update는 bin이 아닌 패키지 token만 정확한 버전으로 바꾼다", async () => {
+    const entry = withCommand(await base(), "npx -y -p @openhub-fixture/npx-mcp npx-mcp");
+    const entries = (await seedWithNpxFixture()).map((e) => (e.manifest.name === "fixture-npx-mcp" ? entry : e));
+    const h = await createHarness(scratch, { entries });
+    const request = h.request("fixture-npx-mcp", CLAUDE);
+    const planned = await plannedOf(h, request);
+    const result = await runInstallTransaction(planned, await approveAll(planned), request, h.env);
+    expect(result.status).toBe("succeeded");
+    expect(await recordInstallInState(planned, result, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date("2026-10-14T00:00:00.000Z") })).toMatchObject({ ok: true });
+    const fetch = async (url: string) =>
+      url === "https://registry.npmjs.org/@openhub-fixture%2fnpx-mcp/latest" ? new Response(JSON.stringify({ name: "@openhub-fixture/npx-mcp", version: "1.2.4" }), { status: 200 }) : new Response("missing", { status: 404 });
+    const update = await planLifecycle({ operation: "update", toolId: "fixture-npx-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, entries, platform: "linux", includeUser: false, fetch, ...(h.env.configFs === undefined ? {} : { fs: h.env.configFs }) });
+    if (!update.ok) throw new Error(update.code + " " + update.message);
+    expect(update.planned.plan.target.clientSpec).toEqual({ command: "npx", args: ["-y", "-p", "@openhub-fixture/npx-mcp@1.2.4", "npx-mcp"] });
+    expect(update.planned.plan.steps.map((s) => s.kind)).not.toContain("run");
   });
 });
 

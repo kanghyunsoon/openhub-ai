@@ -1,8 +1,11 @@
 /**
  * npx 인자 해석(v0.2.1, #69 리뷰 P0). npm이 받는 패키지 지정 형식 가운데 OpenHub가 패키지 이름과 버전을 확정할 수 있는
  * npm Registry 형식만 허용하고 나머지는 거부한다(fail-closed). uvx의 parseUvxArgs와 같은 원칙이다.
- * - 패키지 앞 옵션: -y, --yes, -p <spec>, --package <spec>, --package=<spec>, --만. 그 밖의 옵션(--registry, -c/--call, --prefix,
+ * - 패키지 앞 옵션: -y, --yes, -p <spec>, --package <spec>, --만. 그 밖의 옵션(--registry, -c/--call, --prefix,
  *   --userconfig, --node-options 등)은 출처나 실행 내용을 바꿀 수 있어 거부한다.
+ * - 패키지는 하나만 받는다. OpenHub는 Tool마다 artifact 하나(Version State·Prepare·update·rollback)를 관리하므로, -p를 여러 번 쓰면
+ *   두 번째 패키지부터 버전 관리 밖에 남는다(#74 리뷰). --package=<spec> 붙여 쓰기도 update가 artifact token을 바꿀 수 없어 거부한다
+ *   (uvx의 --from= 붙여 쓰기 거부와 같은 원칙). 이 형식들은 지원 범위 밖이며 실행할 수 없다(fail-closed).
  * - 패키지 spec: [@scope/]name[@version|@tag|@range] 또는 npm alias(alias@npm:<위 형식>, npm:<위 형식>). 이름은 npm 규칙의 소문자만.
  *   URL(http·https·tarball), Git(git+…, github:·gitlab:·bitbucket:·gist:, owner/repo 줄임), file:·link:, 상대·절대 경로, .tgz 파일은
  *   이름을 확정할 수 없거나 Registry 밖 출처라 거부한다. 문자열에 들어 있는 이름으로 추측하지 않는다.
@@ -73,14 +76,12 @@ export function parseNpxArgs(args: readonly string[]): NpxArgsResult {
     if (a === "-p" || a === "--package") {
       const value = args[i + 1];
       if (value === undefined) return { ok: false, reason: a + " 뒤에 패키지가 없습니다" };
+      if (packages.length > 0) return { ok: false, reason: "npx 패키지는 하나만 쓸 수 있습니다(-p·--package를 여러 번 쓰면 OpenHub가 버전을 관리할 수 없습니다)" };
       packages.push(value);
       i++;
       continue;
     }
-    if (a.startsWith("--package=")) {
-      packages.push(a.slice("--package=".length));
-      continue;
-    }
+    if (a.startsWith("--package=")) return { ok: false, reason: "--package=<패키지> 붙여 쓰기는 지원하지 않습니다. --package <패키지>처럼 띄어 쓰세요" };
     if (a.startsWith("-")) return { ok: false, reason: "npx 옵션(" + a.split("=")[0] + ")은 지원하지 않습니다. 패키지 앞에는 -y, --yes, -p, --package, --만 쓸 수 있습니다" };
     break;
   }

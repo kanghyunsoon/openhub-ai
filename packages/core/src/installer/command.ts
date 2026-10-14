@@ -99,18 +99,15 @@ export interface ArtifactRef {
   unambiguous: boolean;
 }
 
-/** npx args에서 패키지 token: 앞쪽 플래그(-y, --yes)를 건너뛴 첫 token. -p·--package가 있으면 모호하다. */
+/**
+ * npx args에서 패키지 token. 설치·update·rollback·adopt·fingerprint가 같은 해석을 쓰도록 parseNpxArgs 결과를 쓴다(#74 리뷰).
+ * - 첫 위치 인자가 패키지면 그것(unambiguous). -p·--package <spec>이면 그 spec이며, 실행할 bin이 따로 있어 floating(모호)으로 본다.
+ * - 지원하지 않는 형식(여러 패키지, --package= 붙여 쓰기, Registry 밖 spec, 그 밖 옵션)은 null이다. bin 이름을 패키지로 잘못 잡지 않는다.
+ */
 export function npxArtifact(args: readonly string[]): ArtifactRef | null {
-  let unambiguous = true;
-  for (const arg of args) {
-    if (arg === "-y" || arg === "--yes") continue;
-    if (arg.startsWith("-")) {
-      unambiguous = false;
-      continue;
-    }
-    return { spec: arg, unambiguous };
-  }
-  return null;
+  const parsed = parseNpxArgs(args);
+  if (!parsed.ok) return null;
+  return { spec: parsed.packages[0]!, unambiguous: parsed.command === null };
 }
 
 /**
