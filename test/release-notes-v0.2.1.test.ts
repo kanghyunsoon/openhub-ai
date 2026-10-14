@@ -78,6 +78,11 @@ describe("v0.2.1 Release Notes", () => {
   });
 
   it("버전 고정 안 된 npx 도구 목록과 측정 범위가 실제 Registry와 같다(#70): Context7은 4.1.0 고정·Prepare, 나머지 둘은 미측정", async () => {
+    // (#69 리뷰 P0) 사용자 Registry npx 규칙과 Memory MCP Docker 이미지 식별을 문서가 말한다.
+    expect(notes).toContain("**Custom Registries with npx tools:** an npx command must name an npm Registry package");
+    expect(notes).toContain("uses its Docker Hub image `mcp/memory`");
+    expect(knownEn).toContain("## Custom Registries: npx package forms");
+    expect(knownKo).toContain("## 사용자 Registry의 npx 패키지 형식");
     const { entries } = await loadRegistry(path.join(ROOT, "registry"));
     const unpinned = entries
       .filter((e) => e.manifest.install.preferredAdapter === "npx")
