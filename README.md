@@ -97,7 +97,26 @@ There is no remove command yet. To stop using a tool OpenHub installed:
 
 This procedure was checked against the current code: the other entries stay byte-for-byte the same, the removed tool shows `missing-config`, and a later install returns it to `state-consistent`.
 
-To remove the app: on Windows use *Settings → Apps → OpenHub AI → Uninstall*; on Linux delete the AppImage file. Your client configuration files are not changed by uninstalling. OpenHub's records stay in `~/.openhub`; delete that folder if you want to remove them too. The app's own data (browser cache and the language you chose) also stays, in `%APPDATA%\@openhub\desktop` on Windows and `~/.config/@openhub/desktop` on Linux (`$XDG_CONFIG_HOME/@openhub/desktop` if you set `XDG_CONFIG_HOME`); delete that folder too if you want. Close OpenHub AI before deleting either folder.
+To remove the app: on Windows use *Settings → Apps → Installed apps → OpenHub AI → Uninstall* (or *Control Panel → Programs and Features*); on Linux delete the AppImage file. Your client configuration files are not changed by uninstalling: tool entries OpenHub added stay until you remove them as described above. OpenHub's records (Version State, journals, tool configs) stay in `~/.openhub`; delete that folder if you want to remove them too. The app's own data (browser cache and the language you chose) also stays, in `%APPDATA%\@openhub\desktop` on Windows and `~/.config/@openhub/desktop` on Linux (`$XDG_CONFIG_HOME/@openhub/desktop` if you set `XDG_CONFIG_HOME`); delete that folder too if you want. Close OpenHub AI before deleting either folder.
+
+**If OpenHub AI is not listed in Windows Settings.** On one Windows 11 test PC, an installed OpenHub AI 0.2.1 did not appear in *Settings → Apps → Installed apps* or in `winget list`, and once also not in *Programs and Features*, although its uninstall entry was in the registry. Other apps installed the same way were listed. The cause is not known, and no other Windows PC has been checked yet. You can run the uninstaller directly:
+
+1. Close OpenHub AI.
+2. Find the uninstaller registered for your installation. This PowerShell command only reads the registry:
+
+   ```powershell
+   Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+     Where-Object DisplayName -like 'OpenHub AI*' |
+     Select-Object DisplayName, DisplayVersion, Publisher, UninstallString
+   ```
+
+   For the default "Only for me" installation it is `%LOCALAPPDATA%\Programs\OpenHub AI\Uninstall OpenHub AI.exe`. If you chose another folder during setup, it is in that folder.
+3. Before you run it, check that it belongs to this installation: it is in the same folder as `OpenHub AI.exe`, and *Properties → Details* shows *Product name* "OpenHub AI" and the version you installed. Like the installer it is unsigned, so Windows may show a security warning with *Unknown Publisher*. Do not run an uninstaller from any other location.
+4. Run it and follow the wizard. It can take a minute or two before the files are removed. Afterwards the program folder, the Start menu and desktop shortcuts and the uninstall entry are gone.
+
+Uninstalling does not delete your client configuration files, `~/.openhub` or the app data folder described above.
+
+It also leaves `%LOCALAPPDATA%\@openhubdesktop-updater\installer.exe` (about 110 MB). The installer framework (electron-builder) copies the setup file there for its update tools. OpenHub does not update itself and does not read this file, and the uninstaller does not remove it. To free the space, delete the `@openhubdesktop-updater` folder after uninstalling. First check that it contains only `installer.exe`. If you install OpenHub AI again later, setup writes a new copy.
 
 ## Supported Clients and Verification
 
