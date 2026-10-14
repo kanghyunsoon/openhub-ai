@@ -23,24 +23,24 @@ import {
   type UpdateImpactInput,
 } from "../../src/index";
 import { approveAll, createHarness, plannedOf } from "../installer/harness";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { newScratch } from "../lifecycle/helpers";
 
 /** TASK-050 UpdateImpact v1. 네트워크·env 값·LLM 없이 고정 입력만 쓴다. */
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await newScratch("impact-test");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 const SRC = path.resolve(import.meta.dirname, "../../src");
 const SHA = (c: string) => "sha256:" + c.repeat(64);
 const manifestOf = (name: string): Manifest => structuredClone(seed.find((e) => e.manifest.name === name)!.manifest);
-const MEMORY = "@modelcontextprotocol/server-memory";
+const MEMORY = "@openhub-fixture/npx-mcp";
 
 function npmState(version: string | null, over: Partial<ToolStateCore> = {}): ToolStateCore {
   return {
-    toolId: "memory-mcp",
+    toolId: "fixture-npx-mcp",
     backend: "npx",
     revision: 2,
-    target: { client: "claude-code", scope: "project", file: ".mcp.json", serverName: "memory", projectName: "demo", projectKey: "0123456789abcdef" },
+    target: { client: "claude-code", scope: "project", file: ".mcp.json", serverName: "fixture-npx", projectName: "demo", projectKey: "0123456789abcdef" },
     artifact: { requested: MEMORY, resolved: version === null ? null : { kind: "npm-package", spec: MEMORY + "@" + version, version, digest: null, integrity: null, source: "npm-registry" } },
     launch: { platform: "linux", clientSpec: { command: "npx", args: ["-y", MEMORY + (version === null ? "" : "@" + version)] } },
     config: { entryDigest: SHA("e"), tomlBlockDigest: null },
@@ -66,7 +66,7 @@ const entry = (version: string, over: Partial<ReleaseEntry> = {}, notes: string 
 function snap(current: string | null, between: ReleaseEntry[], over: Partial<ReleaseSnapshotV1> = {}): ReleaseSnapshotV1 {
   return releaseSnapshotSchema.parse({
     schemaVersion: 1,
-    toolId: "memory-mcp",
+    toolId: "fixture-npx-mcp",
     versionSource: "npm",
     notesSource: "github-release",
     current: { spec: MEMORY + (current === null ? "" : "@" + current), version: current, digest: null },
@@ -82,7 +82,7 @@ const NODE_OK = { node: "22.11.0" };
 const base = (current: string, between: ReleaseEntry[], over: Partial<UpdateImpactInput> = {}): UpdateImpactInput => ({
   state: npmState(current),
   configEnvNames: [],
-  manifest: manifestOf("memory-mcp"),
+  manifest: manifestOf("fixture-npx-mcp"),
   snapshot: snap(current, between),
   runtimes: NODE_OK,
   ...over,
@@ -137,7 +137,7 @@ describe("REQ-042 Update Impact Analyzer", () => {
   });
 
   it("AC-050-06 목표 Manifest required env가 현재 config env 이름에 없으면 high다(env 값은 읽지 않는다)", () => {
-    const manifest = manifestOf("memory-mcp");
+    const manifest = manifestOf("fixture-npx-mcp");
     manifest.env = [{ name: "MEMORY_FILE_PATH", required: true }, { name: "MEMORY_DEBUG", required: false }];
     const original = process.env;
     const touched: PropertyKey[] = [];
@@ -158,7 +158,7 @@ describe("REQ-042 Update Impact Analyzer", () => {
   it("AC-050-07 backend가 바뀌면 high다", () => {
     const toDocker = { backend: "docker" as const, clientSpec: { command: "docker", args: ["run", "-i", "--rm", "mcp/memory@" + SHA("1")] } };
     expect(codes(base("2.0.0", [entry("2.1.0")], { targetLaunch: toDocker })).codes).toEqual(["backend-changed", "launch-args-changed", "version-minor"]);
-    const manifest = manifestOf("memory-mcp");
+    const manifest = manifestOf("fixture-npx-mcp");
     manifest.install = { preferredAdapter: "docker", fallback: [] };
     expect(codes(base("2.0.0", [entry("2.1.0")], { manifest }))).toEqual({ verdict: "high", status: "WARNING", codes: ["backend-changed", "version-minor"] });
     // artifact만 바뀐 launch는 변경이 아니고 artifact 외 인자 변경은 medium이다.
@@ -204,7 +204,7 @@ describe("REQ-042 Update Impact Analyzer", () => {
   });
 
   it("AC-050-10 입력 순서를 바꿔도 reasons·evidence·판정 byte가 같다", () => {
-    const manifest = manifestOf("memory-mcp");
+    const manifest = manifestOf("fixture-npx-mcp");
     manifest.env = [{ name: "B_KEY", required: true }, { name: "A_KEY", required: true }];
     const reversed = structuredClone(manifest);
     reversed.env.reverse();
@@ -220,11 +220,11 @@ describe("REQ-042 Update Impact Analyzer", () => {
 
   it("AC-050-11 Impact를 계산해도 LifecyclePlan v1·InstallPlan v1·LifecycleStateFile v1 byte가 같고 LifecyclePlan에 impact 필드가 없다", async () => {
     const h = await createHarness(scratch, { entries: seed });
-    const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }], false);
+    const request = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }], false);
     const install = await plannedOf(h, request);
     // InstallPlan은 설치 전 상태의 별도 harness에서 Impact 계산 전후로 비교한다.
     const fresh = await createHarness(scratch, { entries: seed });
-    const freshRequest = fresh.request("memory-mcp", [{ client: "claude-code", scope: "project" }], false);
+    const freshRequest = fresh.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }], false);
     const installBytes = serializeInstallPlan((await plannedOf(fresh, freshRequest)).plan);
     const result = await runInstallTransaction(install, await approveAll(install), request, h.env);
     expect(result.status).toBe("succeeded");
@@ -232,8 +232,8 @@ describe("REQ-042 Update Impact Analyzer", () => {
     const stateFile = path.join(h.homeDir, ".openhub", "state", "lifecycle.json");
     const stateBytes = await readFile(stateFile, "utf8");
     const fetch = async (url: string) =>
-      url === "https://registry.npmjs.org/@modelcontextprotocol%2fserver-memory/latest" ? new Response(JSON.stringify({ name: MEMORY, version: "1.2.3" }), { status: 200 }) : new Response("missing", { status: 404 });
-    const options = { operation: "update" as const, toolId: "memory-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, entries: seed, platform: "linux" as const, includeUser: false, fetch, ...(h.env.configFs === undefined ? {} : { fs: h.env.configFs }) };
+      url === "https://registry.npmjs.org/@openhub-fixture%2fnpx-mcp/latest" ? new Response(JSON.stringify({ name: MEMORY, version: "1.2.3" }), { status: 200 }) : new Response("missing", { status: 404 });
+    const options = { operation: "update" as const, toolId: "fixture-npx-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, entries: seed, platform: "linux" as const, includeUser: false, fetch, ...(h.env.configFs === undefined ? {} : { fs: h.env.configFs }) };
     const before = await planLifecycle(options);
     if (!before.ok) throw new Error(before.code);
     const lifecycleBytes = serializeLifecyclePlan(before.planned.plan);
@@ -241,7 +241,7 @@ describe("REQ-042 Update Impact Analyzer", () => {
     const read = await readLifecycleState({ homeDir: h.homeDir });
     if (!read.ok) throw new Error(read.code);
     const state = Object.values(read.state.entries)[0]!;
-    const impact = analyzeUpdateImpact({ state, configEnvNames: [], manifest: manifestOf("memory-mcp"), snapshot: snap(null, [entry("1.2.3")]), runtimes: NODE_OK, targetLaunch: { backend: "npx", clientSpec: before.planned.plan.target.clientSpec } });
+    const impact = analyzeUpdateImpact({ state, configEnvNames: [], manifest: manifestOf("fixture-npx-mcp"), snapshot: snap(null, [entry("1.2.3")]), runtimes: NODE_OK, targetLaunch: { backend: "npx", clientSpec: before.planned.plan.target.clientSpec } });
     expect(impact.affectedFiles).toEqual([".mcp.json"]);
 
     const after = await planLifecycle(options);

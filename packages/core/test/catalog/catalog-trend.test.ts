@@ -16,11 +16,13 @@ import {
   type MetadataSnapshot,
   type RegistryEntry,
 } from "../../src/index";
-import { REPO_ROOT, seedEntries } from "../recommendation/helpers";
+import { REPO_ROOT, npxFixtureEntry, seedEntries } from "../recommendation/helpers";
 import { newScratch } from "../lifecycle/helpers";
 
 /** TASK-061 Catalog Metadata v1·OpenHub Trend Score. 임시 Registry 사본과 synthetic metadata만 쓴다(network 0). */
 const seed = await seedEntries();
+/** 공유 저장소 npx 도구 예시(테스트 전용 fixture, v0.2.1 #69: Memory MCP 지원 중단). */
+const sharedRepoTool = await npxFixtureEntry();
 const scratch = await newScratch("catalog-trend-test");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 // 기준일은 Registry catalog의 가장 최근 addedAt 이후여야 한다(v0.2.0 P0-2: mongodb-mcp-server가 2026-10-10에 등록).
@@ -145,7 +147,7 @@ describe("REQ-060 Catalog Metadata v1과 Trend Score", () => {
   });
 
   it("AC-061-07 shared-repo는 Popularity가 절반(내림)이고 shared-repository flag가 붙는다", () => {
-    const [m] = trendingTools(seed.filter((e) => e.manifest.name === "memory-mcp"), snapshotOf({ [repoOf("memory-mcp")]: meta(99999) }));
+    const [m] = trendingTools([sharedRepoTool], snapshotOf({ [sharedRepoTool.manifest.repository.github]: meta(99999) }));
     expect(m!.components!.popularity).toBe(25);
     expect(m!.flags).toEqual(["shared-repository"]);
     expect(popularityPoints(999, true)).toBe(15);

@@ -11,12 +11,14 @@ import { CANDIDATE_PREPARE_CHANNEL, DISCOVER_VIEW_CHANNEL, TOOL_DETAIL_CHANNEL, 
 import { InstallSession, type NativeDialogLike } from "../src/install";
 import { PROJECT_SCAN_CHANNEL, fixedDirectory, registerProjectScan } from "../src/project-scan";
 import { RecommendSession } from "../src/recommend";
+import { registryWithNpxFixture } from "./npx-fixture-registry";
 
 /** TASK-070 Desktop DISCOVER·Tool 상세·Adopt·Benchmark·onboarding. 임시 project·home, 가짜 MCP 서버·대화상자만 쓴다(network·실제 spawn 0). */
 const ROOT = path.resolve(import.meta.dirname, "../../..");
-const REGISTRY = path.join(ROOT, "registry");
+// 실제 Registry + 테스트 전용 npx fixture(v0.2.1 #69: Memory MCP 지원 중단으로 버전 미고정 npx 도구 역할을 대신한다)
+const REGISTRY = registryWithNpxFixture();
 const SEED_SNAPSHOT = path.join(ROOT, "packages/core/test/fixtures/recommendation/metadata.seed-synthetic.json");
-const MEMORY = "@modelcontextprotocol/server-memory";
+const MEMORY = "@openhub-fixture/npx-mcp";
 const read = (rel: string) => readFile(path.resolve(import.meta.dirname, "..", rel), "utf8");
 const scratch = await mkdtemp(path.join(tmpdir(), "openhub-desktop-m7-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));
@@ -35,7 +37,7 @@ class FakeServer extends EventEmitter implements HealthChild {
         const m = JSON.parse(line) as Record<string, unknown>;
         queueMicrotask(() => {
           const out = (o: unknown) => this.stdout.emit("data", Buffer.from(JSON.stringify(o) + "\n"));
-          if (m["method"] === "initialize") out({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18", serverInfo: { name: "memory", version: "1.2.3" }, capabilities: {} } });
+          if (m["method"] === "initialize") out({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18", serverInfo: { name: "fixture-npx", version: "1.2.3" }, capabilities: {} } });
           if (m["method"] === "tools/list") out({ jsonrpc: "2.0", id: 2, result: { tools: [{ name: "a" }] } });
         });
       }
@@ -186,25 +188,25 @@ describe("REQ-060·REQ-063 TASK-070 Desktop", () => {
   });
 
   it("AC-070-05 Adopt는 미관리 exact·strong 표현 가능 항목에만 있고 승인은 네이티브 대화상자이며 weak·unresolved에는 없다", async () => {
-    const exact = await wired({ memory: { command: "npx", args: ["-y", MEMORY + "@1.2.3"] }, foo: { command: "npx", args: ["-y", "unknown-pkg"] } });
+    const exact = await wired({ "fixture-npx": { command: "npx", args: ["-y", MEMORY + "@1.2.3"] }, foo: { command: "npx", args: ["-y", "unknown-pkg"] } });
     await exact.scan();
-    expect(await exact.call<AdoptCandidatesResponse>(ADOPT_CANDIDATES_CHANNEL)).toMatchObject({ status: "ok", items: [{ id: "project:claude-code:memory", toolId: "memory-mcp", grade: "exact" }] });
+    expect(await exact.call<AdoptCandidatesResponse>(ADOPT_CANDIDATES_CHANNEL)).toMatchObject({ status: "ok", items: [{ id: "project:claude-code:fixture-npx", toolId: "fixture-npx-mcp", grade: "exact" }] });
     const strong = await wired({ "my-memory": { command: "npx", args: ["-y", MEMORY + "@1.2.3"] } });
     await strong.scan();
     expect(await strong.call<AdoptCandidatesResponse>(ADOPT_CANDIDATES_CHANNEL)).toMatchObject({ status: "ok", items: [{ id: "project:claude-code:my-memory", grade: "strong", title: expect.stringContaining("strong") }] });
-    const weak = await wired({ "memory-mcp": { command: "npx", args: ["-y", "unrelated-pkg"] }, foo: { command: "npx", args: ["-y", "unknown-pkg"] } });
+    const weak = await wired({ "fixture-npx-mcp": { command: "npx", args: ["-y", "unrelated-pkg"] }, foo: { command: "npx", args: ["-y", "unknown-pkg"] } });
     await weak.scan();
     expect(await weak.call(ADOPT_CANDIDATES_CHANNEL)).toEqual({ status: "ok", items: [], benchmark: [] });
     expect(await weak.call(ADOPT_RUN_CHANNEL, "project:claude-code:foo")).toMatchObject({ status: "error", code: "ADOPT_TARGET_NOT_FOUND" });
     expect(weak.dialogs).toEqual([]);
-    const done = await exact.call<AdoptRunResponse>(ADOPT_RUN_CHANNEL, "project:claude-code:memory");
+    const done = await exact.call<AdoptRunResponse>(ADOPT_RUN_CHANNEL, "project:claude-code:fixture-npx");
     expect(done).toMatchObject({ status: "done", adopted: true });
     expect(exact.dialogs).toEqual(["OpenHub Adopt 승인"]);
     expect(await readFile(path.join(exact.project, ".mcp.json"), "utf8")).toBe(exact.mcpText);
     expect(await exact.call(ADOPT_CANDIDATES_CHANNEL)).toMatchObject({ status: "ok", items: [] });
-    const rejected = await wired({ memory: { command: "npx", args: ["-y", MEMORY + "@1.2.3"] } }, { accept: false });
+    const rejected = await wired({ "fixture-npx": { command: "npx", args: ["-y", MEMORY + "@1.2.3"] } }, { accept: false });
     await rejected.scan();
-    expect(await rejected.call(ADOPT_RUN_CHANNEL, "project:claude-code:memory")).toEqual({ status: "rejected" });
+    expect(await rejected.call(ADOPT_RUN_CHANNEL, "project:claude-code:fixture-npx")).toEqual({ status: "rejected" });
     expect(await readdir(rejected.home)).toEqual([]);
     for (const bad of [{ id: "x" }, "user:claude-code:memory", "project:vscode:memory"]) expect(await exact.call(ADOPT_RUN_CHANNEL, bad)).toMatchObject({ status: "error", code: "invalid-id" });
     const js = await read("renderer/adopt.js");
@@ -213,19 +215,19 @@ describe("REQ-060·REQ-063 TASK-070 Desktop", () => {
   });
 
   it("AC-070-06 Benchmark는 승인이 필요한 실행이며 승인 뒤에만 실행되고 결과는 median·min·max·실패 수뿐이고 unlocked는 비활성 + 이유다", async () => {
-    const unlocked = await wired({ memory: { command: "npx", args: ["-y", MEMORY] } });
+    const unlocked = await wired({ "fixture-npx": { command: "npx", args: ["-y", MEMORY] } });
     await unlocked.scan();
-    expect(await unlocked.call(ADOPT_RUN_CHANNEL, "project:claude-code:memory")).toMatchObject({ status: "done", adopted: true });
-    expect(await unlocked.call(ADOPT_CANDIDATES_CHANNEL)).toMatchObject({ status: "ok", benchmark: [{ id: "project:claude-code:memory", ready: false, reasons: [expect.stringContaining("BENCHMARK_ARTIFACT_UNLOCKED")] }] });
-    expect((await unlocked.call<BenchmarkRunResponse>(BENCHMARK_RUN_CHANNEL, "project:claude-code:memory")).status).toBe("blocked");
+    expect(await unlocked.call(ADOPT_RUN_CHANNEL, "project:claude-code:fixture-npx")).toMatchObject({ status: "done", adopted: true });
+    expect(await unlocked.call(ADOPT_CANDIDATES_CHANNEL)).toMatchObject({ status: "ok", benchmark: [{ id: "project:claude-code:fixture-npx", ready: false, reasons: [expect.stringContaining("BENCHMARK_ARTIFACT_UNLOCKED")] }] });
+    expect((await unlocked.call<BenchmarkRunResponse>(BENCHMARK_RUN_CHANNEL, "project:claude-code:fixture-npx")).status).toBe("blocked");
     expect(unlocked.dialogs).toEqual(["OpenHub Adopt 승인"]);
     expect(unlocked.spawns).toEqual([]);
 
-    const locked = await wired({ memory: { command: "npx", args: ["-y", MEMORY + "@1.2.3"] } });
+    const locked = await wired({ "fixture-npx": { command: "npx", args: ["-y", MEMORY + "@1.2.3"] } });
     await locked.scan();
-    await locked.call(ADOPT_RUN_CHANNEL, "project:claude-code:memory");
+    await locked.call(ADOPT_RUN_CHANNEL, "project:claude-code:fixture-npx");
     expect(await locked.call(ADOPT_CANDIDATES_CHANNEL)).toMatchObject({ benchmark: [{ ready: true, reasons: [] }] });
-    const r = await locked.call<BenchmarkRunResponse>(BENCHMARK_RUN_CHANNEL, "project:claude-code:memory");
+    const r = await locked.call<BenchmarkRunResponse>(BENCHMARK_RUN_CHANNEL, "project:claude-code:fixture-npx");
     if (r.status !== "done") throw new Error(JSON.stringify(r));
     expect(locked.dialogs).toEqual(["OpenHub Adopt 승인", "OpenHub Benchmark 승인"]);
     expect(locked.spawns).toHaveLength(6);
@@ -234,12 +236,12 @@ describe("REQ-060·REQ-063 TASK-070 Desktop", () => {
     for (const l of r.lines.slice(1, 6)) expect(l).toMatch(/median \d+ ms · min \d+ · max \d+|측정 실패/u);
     expect(r.lines.join("\n")).not.toMatch(/tools\/call/u);
 
-    const rejected = await wired({ memory: { command: "npx", args: ["-y", MEMORY + "@1.2.3"] } });
+    const rejected = await wired({ "fixture-npx": { command: "npx", args: ["-y", MEMORY + "@1.2.3"] } });
     await rejected.scan();
-    await rejected.call(ADOPT_RUN_CHANNEL, "project:claude-code:memory");
-    const deny = await wired({ memory: { command: "npx", args: ["-y", MEMORY + "@1.2.3"] } }, { accept: false });
+    await rejected.call(ADOPT_RUN_CHANNEL, "project:claude-code:fixture-npx");
+    const deny = await wired({ "fixture-npx": { command: "npx", args: ["-y", MEMORY + "@1.2.3"] } }, { accept: false });
     await deny.scan();
-    expect(await deny.call(BENCHMARK_RUN_CHANNEL, "project:claude-code:memory")).toMatchObject({ status: "blocked" });
+    expect(await deny.call(BENCHMARK_RUN_CHANNEL, "project:claude-code:fixture-npx")).toMatchObject({ status: "blocked" });
     expect(deny.spawns).toEqual([]);
     const js = await read("renderer/adopt.js");
     expect(js).toContain('button("benchmark-run", t("benchmark.run")');

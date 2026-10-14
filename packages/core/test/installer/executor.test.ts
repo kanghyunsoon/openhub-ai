@@ -21,10 +21,10 @@ import {
   type PlannedInstall,
   type VerifiedPlan,
 } from "../../src/index";
-import { REPO_ROOT, item, seedEntries } from "../recommendation/helpers";
+import { REPO_ROOT, item, seedWithNpxFixture } from "../recommendation/helpers";
 import { ALL_AVAILABLE, clientProfile, entryOf, planFor, reportFor, target, verifiedPlanOf } from "./helpers";
 
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await mkdtemp(path.join(os.tmpdir(), "openhub-exec-test-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 afterEach(() => {
@@ -207,7 +207,7 @@ describe("REQ-031 REQ-033 Process Executor와 npx·uvx·docker Adapter", () => {
 
   it("AC-031-06 준비 단계는 floating npx 0개(launch-on-demand), 정확한 버전 uvx는 uvx Prepare 1개(v0.2.1), docker는 docker pull 1개이고 npm·cache add·cmd.exe가 0건이다", async () => {
     const spawner = fakeSpawner();
-    for (const toolId of ["memory-mcp", "context7"]) {
+    for (const toolId of ["fixture-npx-mcp", "context7"]) {
       const verified = await verifiedOf(toolId);
       expect(verified.plan.artifact?.preparation, toolId).toBe("launch-on-demand");
       expect(await executeVerifiedPlan(verified, { projectRoot: scratch, spawner, isolatedDir: isolated })).toMatchObject({ ok: true, prepared: true });
@@ -251,7 +251,7 @@ describe("REQ-031 REQ-033 Process Executor와 npx·uvx·docker Adapter", () => {
   });
 
   it("AC-031-08 Adapter의 update·uninstall·healthCheck는 UNSUPPORTED_IN_M4이고 spawn 0회다", async () => {
-    const memory = entryOf(seed, "memory-mcp").manifest;
+    const memory = entryOf(seed, "fixture-npx-mcp").manifest;
     const target0 = { manifest: memory, step: { adapter: "npx" as const, options: memory.install.options } };
     const ctx = { platform: "linux" as const, availableAdapters: new Set(["npx" as const]) };
     for (const adapter of [npxAdapter, uvxAdapter, dockerAdapter]) {

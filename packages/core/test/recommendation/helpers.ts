@@ -108,6 +108,34 @@ export async function legacySerenaEntry(): Promise<RegistryEntry> {
 }
 
 /**
+ * v0.2.0~v0.2.1 main Registry의 Memory MCP Manifest(테스트 전용 fixture, v0.2.1 #69). 실제 registry/에는 없다(지원 중단 도구).
+ * "예전에 설치된 Memory MCP" 호환·식별 테스트에만 쓴다.
+ */
+export async function legacyMemoryEntry(): Promise<RegistryEntry> {
+  const { entries, issues } = await loadRegistry(path.join(REPO_ROOT, "packages", "core", "test", "fixtures", "registry-legacy"));
+  const memory = entries.find((e) => e.manifest.name === "memory-mcp");
+  if (issues.length > 0 || memory === undefined) throw new Error("legacy memory fixture 검증 실패");
+  return memory;
+}
+
+/**
+ * 테스트 전용 npx fixture(v0.2.1 #69): 버전이 고정되지 않은 npx MCP 도구 `fixture-npx-mcp`(합성 패키지 @openhub-fixture/npx-mcp).
+ * Memory MCP가 지원 중단되면서 "launch-on-demand npx 도구"의 설치·update·rollback·Health·승인·보상 테스트를 이 fixture가 맡는다.
+ * 실제 Registry 검증(seedEntries)과 섞지 않는다. 필요한 테스트만 seedWithNpxFixture()를 쓴다.
+ */
+export async function npxFixtureEntry(): Promise<RegistryEntry> {
+  const { entries, issues } = await loadRegistry(path.join(REPO_ROOT, "packages", "core", "test", "fixtures", "registry-npx-fixture"));
+  const fixture = entries.find((e) => e.manifest.name === "fixture-npx-mcp");
+  if (issues.length > 0 || fixture === undefined) throw new Error("npx fixture 검증 실패: " + JSON.stringify(issues));
+  return fixture;
+}
+
+/** 실제 seed Registry + 테스트 전용 npx fixture. */
+export async function seedWithNpxFixture(): Promise<RegistryEntry[]> {
+  return [...(await seedEntries()), await npxFixtureEntry()];
+}
+
+/**
  * registry/<category>/<name>.yaml Manifest 파일 수. v0.2.0 P0-2부터 Registry가 묶음 단위로 늘어나므로
  * 테스트는 "7개" 같은 숫자 대신 디스크의 Manifest 수와 비교한다(loader 결과와 독립된 기준).
  */

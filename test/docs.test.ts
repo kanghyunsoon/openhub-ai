@@ -92,7 +92,7 @@ describe("REQ-062 TASK-073 문서·demo·최종 회귀", () => {
     const b = await runDemo();
     expect(a.lines).toEqual(b.lines);
     expect(a.spawned).toEqual([]);
-    expect(a.fetched.every((u) => u.startsWith("https://registry.npmjs.org/") || u.startsWith("https://api.github.com/repos/modelcontextprotocol/servers/releases"))).toBe(true);
+    expect(a.fetched.every((u) => u.startsWith("https://registry.npmjs.org/") || u.startsWith("https://api.github.com/repos/upstash/context7/releases"))).toBe(true);
     const text = a.lines.join("\n") + "\n";
     const steps = ["1. Analyze", "2. Existing tools", "3. Recommend", "4. Install preview", "5. Adopt", "6. Releases", "7. Impact", "8. Update preview", "9. Discover", "10. Benchmark preview"];
     let at = -1;

@@ -1,15 +1,15 @@
 {
   "entries": {
-    "project:<projectKey>:claude-code:memory": {
-      "appliedPlanDigest": "sha256:d05706fe985f69ccc2ae12e9e8a3f8d9105467b305f2fc2902747df3a1313a13",
+    "project:<projectKey>:claude-code:fixture-npx": {
+      "appliedPlanDigest": "sha256:408ae07f2b51090be84630c487f36302908ac16fe0a5cbed653be6158c891f76",
       "artifact": {
-        "requested": "@modelcontextprotocol/server-memory",
+        "requested": "@openhub-fixture/npx-mcp",
         "resolved": null
       },
       "backend": "npx",
       "committedAt": "2026-10-07T01:02:03.000Z",
       "config": {
-        "entryDigest": "sha256:6dbcc13b0ece8d3788eb0a72464736a74bf543df7b2ada71fab79baece5164f3",
+        "entryDigest": "sha256:115aeb12f4f8a2b0013545c077b4170b76de533675822bf4e666c21dfd2642cd",
         "tomlBlockDigest": null
       },
       "lastHealth": null,
@@ -17,7 +17,7 @@
         "clientSpec": {
           "args": [
             "-y",
-            "@modelcontextprotocol/server-memory"
+            "@openhub-fixture/npx-mcp"
           ],
           "command": "npx"
         },
@@ -31,9 +31,9 @@
         "projectKey": "<projectKey>",
         "projectName": "project",
         "scope": "project",
-        "serverName": "memory"
+        "serverName": "fixture-npx"
       },
-      "toolId": "memory-mcp"
+      "toolId": "fixture-npx-mcp"
     }
   },
   "kind": "openhub-lifecycle-state",

@@ -3,7 +3,7 @@
   "generatedFrom": {
     "profileSchemaVersion": 1,
     "taxonomyVersion": 2,
-    "registryDigest": "sha256:a4e526bd4531e4512dea277785a636e81ad363a9487cb99b0a1723e6d96c7d84",
+    "registryDigest": "sha256:f8e73e6cbd72519548d7014ab1f87a97e821e6bb5105675324625626c9707852",
     "metadataCollectedAt": null
   },
   "project": {
@@ -43,7 +43,7 @@
     "warnings": [
       {
         "code": "identity-strong-match",
-        "message": "team-memory(project) 서버를 alias 대신 실행 artifact(npm:@modelcontextprotocol/server-memory)로 memory-mcp로 식별했습니다(후보 1개)"
+        "message": "team-memory(project) 서버를 alias 대신 실행 artifact(npm:@openhub-fixture/npx-mcp)로 fixture-npx-mcp로 식별했습니다(후보 1개)"
       }
     ]
   },
@@ -63,7 +63,7 @@
     {
       "serverName": "team-memory",
       "kind": "mcp-server",
-      "toolId": "memory-mcp",
+      "toolId": "fixture-npx-mcp",
       "resolution": "resolved",
       "strength": "strong",
       "scope": "project",
@@ -95,14 +95,14 @@
       ],
       "satisfiedBy": [
         {
-          "toolId": "memory-mcp",
+          "toolId": "fixture-npx-mcp",
           "serverName": "team-memory",
           "scope": "project"
         }
       ],
       "candidates": [
         {
-          "toolId": "memory-mcp",
+          "toolId": "fixture-npx-mcp",
           "status": "installed",
           "excludedBy": [
             "installed"

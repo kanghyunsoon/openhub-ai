@@ -7,6 +7,7 @@ import {
   createTreeKiller,
   healthArgv,
   locateWindowsNpxLauncher,
+  mcpPackageSourceCheck,
   nodeExecSpawner,
   npmChildEnv,
   planLifecycle,
@@ -81,9 +82,13 @@ function docker(args: string[]): { status: number | null; stdout: string } {
   return { status: r.status, stdout: (r.stdout ?? "") + (r.stderr ?? "") };
 }
 
+// v0.2.1(#46): Health는 MCP 실행 환경 원본이 없으면 서버를 띄우지 않는다(fail-closed). 제품 경로(planLifecycleRequest·CLI·Desktop)처럼
+// 같은 원본으로 계획의 패키지 출처 digest와 Health 실행 환경을 만든다. #46 이후 이 값이 없어 아래 Health가 launch-failed였다.
+const source = () => process.env;
+
 /**
  * Registry sandbox install test(TASK-054, D-025 §9). registry-remote.yml의 sandbox job에서만 실행한다(OPENHUB_E2E=1).
- * CI runner 안에서 secret 없이 seed 도구(memory-mcp, npx)를 실제 설정에 적고 M5 Health(MCP handshake)를 실제로 실행한다.
+ * CI runner 안에서 secret 없이 seed 도구(context7, 고정 안 된 npx. v0.2.1부터 Memory MCP는 지원 중단 #69)를 실제 설정에 적고 M5 Health(MCP handshake)를 실제로 실행한다.
  * 기본 테스트·PR CI에서는 skip이다.
  */
 describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("REQ-051 Registry sandbox install", () => {
@@ -92,24 +97,24 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("REQ-051 Registry sandbox in
     expect("injected failure").toBe("no failure");
   });
 
-  it("AC-054-08 sandbox: memory-mcp를 설치 계획대로 적고 실제 npx로 Health handshake를 통과한다", async () => {
+  it("AC-054-08 sandbox: context7을 설치 계획대로 적고 실제 npx로 Health handshake를 통과한다", async () => {
     const seed = await seedEntries();
     const scratch = await mkdtemp(path.join(os.tmpdir(), "openhub-sandbox-"));
     try {
       const h = await createHarness(scratch, { entries: seed });
-      const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+      const request = h.request("context7", [{ client: "claude-code", scope: "project" }]);
       const planned = await plannedOf(h, request);
       const result = await runInstallTransaction(planned, await approveAll(planned), request, h.env);
       expect(result.status).toBe("succeeded");
       expect(await recordInstallInState(planned, result, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() })).toMatchObject({ ok: true });
-      const regen = () => planLifecycle({ operation: "health", toolId: "memory-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, entries: seed, platform: "linux", includeUser: false });
+      const regen = () => planLifecycle({ operation: "health", toolId: "context7", projectRoot: h.projectRoot, homeDir: h.homeDir, entries: seed, platform: "linux", includeUser: false, packageSource: { npx: mcpPackageSourceCheck(source, "npx"), uvx: mcpPackageSourceCheck(source, "uvx") } });
       const first = await regen();
       if (!first.ok) throw new Error(first.code);
       const outcome = await requestLifecycleApproval(first.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
       if (outcome.status !== "approved") throw new Error(outcome.status);
       const gate = await verifyApprovedLifecyclePlan(outcome.approval, regen);
       if (!gate.ok) throw new Error(gate.code);
-      const health = await runHealthCheck(gate.verified, { healthCheckType: "mcp-handshake", tempBase: os.tmpdir() });
+      const health = await runHealthCheck(gate.verified, { healthCheckType: "mcp-handshake", tempBase: os.tmpdir(), sourceEnv: source });
       expect(health).toMatchObject({ ok: true, result: { status: "healthy" } });
     } finally {
       await rm(scratch, { recursive: true, force: true });
@@ -176,7 +181,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("REQ-051 Registry sandbox in
       expect(JSON.stringify(result)).not.toContain(PASSWORD);
       expect(await recordInstallInState(planned, result, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() })).toMatchObject({ ok: true });
 
-      const regen = () => planLifecycle({ operation: "health", toolId: "mongodb-mcp-server", projectRoot: h.projectRoot, homeDir: h.homeDir, entries: seed, platform, includeUser: false });
+      const regen = () => planLifecycle({ operation: "health", toolId: "mongodb-mcp-server", projectRoot: h.projectRoot, homeDir: h.homeDir, entries: seed, platform, includeUser: false, packageSource: { npx: mcpPackageSourceCheck(source, "npx"), uvx: mcpPackageSourceCheck(source, "uvx") } });
       const first = await regen();
       if (!first.ok) throw new Error(first.code);
       const outcome = await requestLifecycleApproval(first.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
@@ -184,7 +189,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("REQ-051 Registry sandbox in
       const gate = await verifyApprovedLifecyclePlan(outcome.approval, regen);
       if (!gate.ok) throw new Error(gate.code);
       const t1 = Date.now();
-      const health = await runHealthCheck(gate.verified, { healthCheckType: "mcp-handshake", tempBase: os.tmpdir(), windowsNpx });
+      const health = await runHealthCheck(gate.verified, { healthCheckType: "mcp-handshake", tempBase: os.tmpdir(), windowsNpx, sourceEnv: source });
       console.log("mongodb health ms " + String(Date.now() - t1) + " " + JSON.stringify(health.ok ? { status: health.result.status, toolCount: health.result.toolCount } : health));
       expect(health).toMatchObject({ ok: true, result: { status: "healthy" } });
       expect(JSON.stringify(health)).not.toContain(PASSWORD);

@@ -22,7 +22,7 @@ import {
   type RegistryEntry,
 } from "../../src/index";
 import { approveAll, createHarness, plannedOf } from "../installer/harness";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 
 /**
  * v0.2.1 외부 MCP 실행 환경 최소화(process/mcp-env.ts). 합성 API key·token만 쓴다(실제 자격증명 0).
@@ -98,8 +98,8 @@ describe("mcpServerChildEnv(허용 목록)", () => {
     expect(mcpServerChildEnv(source, { backend: "npx", declaredNames: injection })).toEqual({});
     for (const n of injection) expect(isCodeInjectionEnvName(n.toLowerCase()), n).toBe(true);
     expect(isCodeInjectionEnvName("DATABASE_URI")).toBe(false);
-    const seed = await seedEntries();
-    const memory = seed.find((e) => e.manifest.name === "memory-mcp")!.manifest;
+    const seed = await seedWithNpxFixture();
+    const memory = seed.find((e) => e.manifest.name === "fixture-npx-mcp")!.manifest;
     for (const n of ["NODE_OPTIONS", "PYTHONPATH", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES"]) {
       const issues = fastManifestIssues({ ...memory, env: [{ name: n, required: false, description: "x" }] });
       expect(issues.map((i) => i.path), n).toContain("env[0].name");
@@ -231,7 +231,7 @@ describe("실제 자식 process가 받는 환경", () => {
 
   for (const mode of ["source", "empty", "missing"] as const) it("Lifecycle Health(" + ({ source: "CLI·Desktop 경로, mcpSourceEnv 있음", empty: "명시적인 빈 원본, fail-closed", missing: "mcpSourceEnv 누락 → 실행 0" })[mode] + "): 실제 MCP 서버 process에는 합성 key 0개, 결과에도 값 0개", async () => {
     const withSource = mode === "source";
-    const seed = await seedEntries();
+    const seed = await seedWithNpxFixture();
     const PIN = "uvx --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted";
     const entries: RegistryEntry[] = seed.map((e) => (e.manifest.name === "postgres-mcp" ? { ...e, manifest: { ...e.manifest, install: { ...e.manifest.install, options: { command: PIN } } } } : e));
     const CURSOR = [{ client: "cursor" as const, scope: "project" as const }];

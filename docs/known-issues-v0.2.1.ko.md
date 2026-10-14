@@ -7,6 +7,7 @@ v0.2.1은 **아직 릴리스되지 않았습니다**. 이 문서는 v0.2.1에 �
 | 문제 | 상태 | 할 수 있는 일 |
 | --- | --- | --- |
 | Serena 신규 설치 불가 | v0.2.1 정책, 재지원은 #59 | 기존 항목은 유지하거나 직접 제거. 복구는 가능 |
+| Memory MCP 신규 설치 불가 | v0.2.1 정책, 저장 경로 해결은 #69 | Client가 다시 시작하기 전에 `memory.jsonl` 백업. 복구는 가능 |
 | Windows에서 Postgres MCP Pro 첫 Health가 시간 제한에 가까움 | 미수정, 20초 중 약 15초 측정 | Health 다시 실행 |
 | 중단된 작업 복구는 CLI만 | v0.2.1 정책 | INSTALLED에 보이는 명령 실행 |
 | Health·Benchmark 환경 제한은 sandbox가 아님 | 알려진 제한 | 아래 참고 |
@@ -24,6 +25,14 @@ v0.2.1은 **아직 릴리스되지 않았습니다**. 이 문서는 v0.2.1에 �
 - **중단된 Serena 작업:** `openhub lifecycle recover serena`는 Registry 항목 없이도 동작합니다.
 - **제거:** README의 수동 제거 절차를 따르세요(Client 설정 파일을 먼저 백업).
 - **상태:** 재지원은 [#59](https://github.com/kanghyunsoon/openhub-ai/issues/59)에서 다룹니다. 이전 Serena 시험에서 Windows Prepare가 6번 중 1번 실패한 원인은 밝히지 못했으며, v0.2.1에서는 더 이상 쓰지 않는 경로입니다.
+
+## Memory MCP 신규 설치 불가
+
+- **내용:** Memory MCP는 `MEMORY_FILE_PATH`를 지정하지 않으면 npx cache 안의 패키지 폴더에 있는 `memory.jsonl`에 기억을 저장합니다. 고정되지 않은 명령에서 새 버전이 나오면 그 폴더가 바뀌면서 파일이 지워지고, 다른 버전으로 업데이트·롤백하면 이전 기억 없이 서버가 시작됩니다(둘 다 재현함). 그래서 Memory MCP를 Verified Registry에서 뺐습니다. 설치·업데이트·롤백·Health·repair·adopt·benchmark는 이 사유와 함께 거부합니다. 사용자 Registry나 이름이 다른 Manifest가 npm 패키지 `@modelcontextprotocol/server-memory`를 설치하려 해도 마찬가지입니다. 같은 `modelcontextprotocol/servers` 저장소의 다른 서버는 영향을 받지 않습니다.
+- **이미 Memory MCP를 쓰는 경우:** Client 설정, Version State, 기억 파일은 바꾸거나 옮기거나 지우지 않습니다. `openhub lifecycle status`에 지원 중단 표시와 #69 링크가 나옵니다. OpenHub는 더 이상 이 서버를 실행하지 않지만 Client는 실행할 수 있고, OpenHub는 그 실행을 통제하지 않습니다. 다음 실행 전에 `memory.jsonl`을 백업하세요. 이미 지워진 파일은 OpenHub가 복구할 수 없습니다.
+- **중단된 Memory MCP 작업:** `openhub lifecycle recover memory-mcp`는 Registry 항목 없이도 동작합니다.
+- **제거:** README의 수동 제거 절차를 따르세요(Client 설정 파일을 먼저 백업). Client 항목을 지워도 기억 파일은 지워지지 않습니다.
+- **상태:** npm cache 밖의 안정적인 저장 경로와 승인을 거친 기존 기억 복사는 [#69](https://github.com/kanghyunsoon/openhub-ai/issues/69)에서 다룹니다.
 
 ## Windows에서 Postgres MCP Pro 첫 Health
 
@@ -78,4 +87,4 @@ Health와 Benchmark는 허용 목록에 있는 환경변수만 MCP 서버에 넘
 - Kubernetes MCP Server는 0.0.67만 허용합니다.
 - Windows 설치 파일은 미서명이며, SmartScreen·Smart App Control 반응은 관찰하지 않았습니다.
 - Linux AppImage는 압축을 풀어 시험했고, FUSE로 직접 실행하는 경우는 시험하지 않았습니다.
-- Verified Registry는 8개이며 이전 목표 25~40개는 이월됩니다.
+- Verified Registry는 7개이며 이전 목표 25~40개는 이월됩니다.

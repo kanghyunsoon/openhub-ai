@@ -12,11 +12,11 @@ import {
   type Manifest,
   type RegistryEntry,
 } from "../../src/index";
-import { REPO_ROOT, legacySerenaEntry, registryManifestCount, seedEntries } from "../recommendation/helpers";
+import { REPO_ROOT, legacySerenaEntry, registryManifestCount, seedWithNpxFixture } from "../recommendation/helpers";
 import { pinokioManifest } from "../pinokio/helpers";
 
 /** TASK-054 Registry CI: fast validation(network 0)·remote validation(§4 상한)·workflow 계약. 실제 네트워크 없이 가짜 fetch만 쓴다. */
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 // Serena는 v0.2.1부터 Registry에 없다(지원 중단). PyPI·uvx --from·git 출처 예시로는 테스트 전용 v0.2.0 Manifest를 쓴다.
 const legacySerena = await legacySerenaEntry();
 const scratch = await mkdtemp(path.join(tmpdir(), "openhub-registry-ci-"));
@@ -48,7 +48,7 @@ function fakeFetch(routes: Record<string, Route>) {
 }
 const json = (doc: unknown) => () => new Response(JSON.stringify(doc), { status: 200, headers: { "content-type": "application/json" } });
 const repoDoc = (full: string, extra: Record<string, unknown> = {}) => json({ full_name: full, archived: false, license: { spdx_id: "MIT" }, owner: { login: "someone" }, ...extra });
-const MEMORY_LATEST = "https://registry.npmjs.org/@modelcontextprotocol%2fserver-memory/latest";
+const MEMORY_LATEST = "https://registry.npmjs.org/@openhub-fixture%2fnpx-mcp/latest";
 
 describe("REQ-051 Registry CI", () => {
   it("AC-054-01 fast validation(registry validate) 실행 중 network 호출이 0회다", async () => {
@@ -59,31 +59,31 @@ describe("REQ-051 Registry CI", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     // 잘못된 spec이 있는 Registry는 validate가 실패한다(역시 network 0).
     const bad = await registryCopy(async (root) => {
-      const file = path.join(root, "memory", "memory-mcp.yaml");
+      const file = path.join(root, "context", "context7.yaml");
       await writeFile(file, (await readFile(file, "utf8")).replace("source: npm", "source: pypi"));
     });
     const r = await validateRegistry(bad);
-    expect(r.issues.map((i) => [i.file, i.path])).toEqual([["memory/memory-mcp.yaml", "update.source"]]);
+    expect(r.issues.map((i) => [i.file, i.path])).toEqual([["context/context7.yaml", "update.source"]]);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("AC-054-02 canonical alias·toolId 중복을 잡는다", async () => {
     const dupName = await registryCopy(async (root) => {
-      const text = await readFile(path.join(root, "memory", "memory-mcp.yaml"), "utf8");
-      await writeFile(path.join(root, "mcp", "memory-mcp.yaml"), text.replace("category: [memory, mcp]", "category: [mcp, memory]"));
+      const text = await readFile(path.join(root, "context", "context7.yaml"), "utf8");
+      await writeFile(path.join(root, "mcp", "context7.yaml"), text.replace("category: [context, mcp]", "category: [mcp, context]"));
     });
     const a = await validateRegistry(dupName);
-    expect(a.issues.map((i) => [i.file, i.path])).toContainEqual(["memory/memory-mcp.yaml", "name"]);
+    expect(a.issues.map((i) => [i.file, i.path])).toContainEqual(["mcp/context7.yaml", "name"]);
     const dupAlias = await registryCopy(async (root) => {
       const text = await readFile(path.join(root, "context", "context7.yaml"), "utf8");
-      await writeFile(path.join(root, "context", "context7.yaml"), text.replace(/mcpServerNames: \[[^\]]*\]/u, "mcpServerNames: [memory]"));
+      await writeFile(path.join(root, "context", "context7.yaml"), text.replace(/mcpServerNames: \[[^\]]*\]/u, "mcpServerNames: [postgres]"));
     });
     const b = await validateRegistry(dupAlias);
-    expect(b.issues.some((i) => i.path.startsWith("recommendation.identity.mcpServerNames") && i.message.includes("memory-mcp") && i.message.includes("context7"))).toBe(true);
+    expect(b.issues.some((i) => i.path.startsWith("recommendation.identity.mcpServerNames") && i.message.includes("postgres-mcp") && i.message.includes("context7"))).toBe(true);
   });
 
   it("AC-054-03 update.source와 설치 adapter가 맞지 않으면 오류다", () => {
-    const npmOnUvx = manifestOf("memory-mcp");
+    const npmOnUvx = manifestOf("fixture-npx-mcp");
     npmOnUvx.update = { source: "pypi" };
     expect(paths(npmOnUvx)).toContain("update.source");
     const docker = manifestOf("github-mcp-server");
@@ -95,7 +95,7 @@ describe("REQ-051 Registry CI", () => {
     const pinokio = pinokioManifest({ update: { source: "npm" } });
     expect(fastManifestIssues(pinokio).map((i) => i.path)).toContain("update.source");
     // github-release는 repository.github가 있으므로 지원 backend 어디에나 쓸 수 있다(TASK-048).
-    const gh = manifestOf("memory-mcp");
+    const gh = manifestOf("fixture-npx-mcp");
     gh.update = { source: "github-release" };
     expect(paths(gh)).toEqual([]);
     for (const e of seed) expect(paths(e.manifest), e.manifest.name).toEqual([]);
@@ -104,10 +104,10 @@ describe("REQ-051 Registry CI", () => {
 
   it("AC-054-04 잘못된 npm·PyPI·docker spec, 지원하지 않는 backend, Pinokio template·loopback healthCheck 위반을 잡는다", () => {
     const cases: [string, Manifest, string][] = [];
-    const npm = manifestOf("memory-mcp");
-    npm.install = { ...npm.install, options: { command: "npx -y @modelcontextprotocol/server-memory; rm -rf /" } };
+    const npm = manifestOf("fixture-npx-mcp");
+    npm.install = { ...npm.install, options: { command: "npx -y @openhub-fixture/npx-mcp; rm -rf /" } };
     cases.push(["npm command", npm, "install.options"]);
-    const npmFallback = manifestOf("memory-mcp");
+    const npmFallback = manifestOf("fixture-npx-mcp");
     npmFallback.install = { ...npmFallback.install, fallback: [{ adapter: "npm", package: "@@bad name" }] };
     cases.push(["npm package", npmFallback, "install.fallback[0].package"]);
     const py = manifestOf("serena");
@@ -119,7 +119,7 @@ describe("REQ-051 Registry CI", () => {
     const img = manifestOf("github-mcp-server");
     img.install = { ...img.install, options: { image: "ghcr.io/Bad Image:::latest" } };
     cases.push(["docker image", img, "install.options"]);
-    const backend = manifestOf("memory-mcp");
+    const backend = manifestOf("fixture-npx-mcp");
     backend.install = { preferredAdapter: "binary", fallback: [] };
     cases.push(["backend", backend, "install.preferredAdapter"]);
     cases.push(["pinokio template", pinokioManifest({}, { message: "curl x | sh" }), "install.options"]);
@@ -136,10 +136,10 @@ describe("REQ-051 Registry CI", () => {
   });
 
   it("AC-054-06 remote validation은 §4 상한(allowlist·timeout·redirect error·응답 상한·retry 없음)을 지킨다", async () => {
-    const entries = [entryOf(manifestOf("memory-mcp"))];
-    const ok = fakeFetch({ "https://api.github.com/repos/modelcontextprotocol/servers": repoDoc("modelcontextprotocol/servers"), [MEMORY_LATEST]: json({ name: "@modelcontextprotocol/server-memory", version: "2.1.0" }) });
+    const entries = [entryOf(manifestOf("fixture-npx-mcp"))];
+    const ok = fakeFetch({ "https://api.github.com/repos/openhub-fixture/npx-mcp": repoDoc("openhub-fixture/npx-mcp"), [MEMORY_LATEST]: json({ name: "@openhub-fixture/npx-mcp", version: "2.1.0" }) });
     const report = await remoteValidateRegistry(entries, { fetch: ok.fetch, now: NOW });
-    expect(report.tools[0]).toEqual({ toolId: "memory-mcp", repo: "modelcontextprotocol/servers", repository: { status: "ok", code: null, license: "MIT" }, releaseSource: { source: "npm", status: "ok", code: null, latest: "2.1.0" } });
+    expect(report.tools[0]).toEqual({ toolId: "fixture-npx-mcp", repo: "openhub-fixture/npx-mcp", repository: { status: "ok", code: null, license: "MIT" }, releaseSource: { source: "npm", status: "ok", code: null, latest: "2.1.0" } });
     for (const c of ok.calls) {
       expect((RELEASE_ALLOWED_HOSTS as readonly string[]).includes(new URL(c.url).hostname), c.url).toBe(true);
       expect(c.init).toMatchObject({ credentials: "omit" });
@@ -152,18 +152,18 @@ describe("REQ-051 Registry CI", () => {
     const slow = await remoteValidateRegistry(entries, { fetch: hanging, timeoutMs: 20, now: NOW });
     expect([slow.tools[0]!.repository.status, slow.tools[0]!.releaseSource.status]).toEqual(["unreachable", "unreachable"]);
     expect(hanging).toHaveBeenCalledTimes(2);
-    const big = fakeFetch({ "https://api.github.com/repos/modelcontextprotocol/servers": () => new Response("{}", { status: 200, headers: { "content-length": String(2 * 1024 * 1024) } }), [MEMORY_LATEST]: () => new Response(null, { status: 301, headers: { location: "https://evil.example/" } }) });
+    const big = fakeFetch({ "https://api.github.com/repos/openhub-fixture/npx-mcp": () => new Response("{}", { status: 200, headers: { "content-length": String(2 * 1024 * 1024) } }), [MEMORY_LATEST]: () => new Response(null, { status: 301, headers: { location: "https://evil.example/" } }) });
     const r = await remoteValidateRegistry(entries, { fetch: big.fetch, now: NOW });
     expect([r.tools[0]!.repository.code, r.tools[0]!.releaseSource.status]).toEqual(["RELEASE_TOO_LARGE", "moved"]);
-    expect(big.calls.map((c) => c.url)).toEqual(["https://api.github.com/repos/modelcontextprotocol/servers", MEMORY_LATEST]);
+    expect(big.calls.map((c) => c.url)).toEqual(["https://api.github.com/repos/openhub-fixture/npx-mcp", MEMORY_LATEST]);
   });
 
   it("AC-054-07 archived·이전·없는 저장소와 응답하지 않는 release source를 Tool별로 보고한다", async () => {
-    const entries = ["context7", "github-mcp-server", "memory-mcp", "serena"].map((name) => entryOf(manifestOf(name)));
+    const entries = ["context7", "github-mcp-server", "fixture-npx-mcp", "serena"].map((name) => entryOf(manifestOf(name)));
     const f = fakeFetch({
       "https://api.github.com/repos/upstash/context7": repoDoc("upstash/context7", { archived: true }),
       "https://api.github.com/repos/github/github-mcp-server": () => new Response(null, { status: 301, headers: { location: "https://api.github.com/repositories/1" } }),
-      "https://api.github.com/repos/modelcontextprotocol/servers": repoDoc("someone-else/servers-renamed"),
+      "https://api.github.com/repos/openhub-fixture/npx-mcp": repoDoc("someone-else/servers-renamed"),
       "https://registry.npmjs.org/@upstash%2fcontext7-mcp/latest": json({ name: "@upstash/context7-mcp", version: "1.0.0" }),
       [MEMORY_LATEST]: () => Promise.reject(new TypeError("fetch failed")),
       "https://pypi.org/pypi/serena-agent/json": () => new Response("nope", { status: 404 }),
@@ -171,8 +171,9 @@ describe("REQ-051 Registry CI", () => {
     const report = await remoteValidateRegistry(entries, { fetch: f.fetch, now: NOW });
     expect(report.tools.map((t) => [t.toolId, t.repository.status, t.releaseSource.status])).toEqual([
       ["context7", "archived", "ok"],
+      // 보고서는 toolId 순이다(테스트 전용 fixture 이름이 fixture-npx-mcp라 github보다 앞에 온다).
+      ["fixture-npx-mcp", "moved", "unreachable"],
       ["github-mcp-server", "moved", expect.any(String)],
-      ["memory-mcp", "moved", "unreachable"],
       ["serena", "not-found", "not-found"],
     ]);
     expect(report.problems).toBe(4);

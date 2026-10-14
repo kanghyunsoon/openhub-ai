@@ -8,14 +8,14 @@
     "clientSpec": {
       "args": [
         "-y",
-        "@modelcontextprotocol/server-memory"
+        "@openhub-fixture/npx-mcp"
       ],
       "command": "npx"
     },
     "identity": null,
-    "requested": "@modelcontextprotocol/server-memory"
+    "requested": "@openhub-fixture/npx-mcp"
   },
-  "displayName": "Memory MCP",
+  "displayName": "Fixture NPX MCP (test only)",
   "healthPolicy": {
     "gate": "required",
     "timeouts": {
@@ -35,7 +35,7 @@
     "process-launch"
   ],
   "source": {
-    "manifestDigest": "sha256:b669e396f7dcbd05e48a75440e334fe73432256cd9d249e2b253cb290ce54a1c",
+    "manifestDigest": "sha256:f12cf607a36a93a4c5f315a6d0ae486cc3919dd9a1b6716e020b68fca0e8ea3e",
     "registryDigest": "sha256:2df6f08f60debc8fb17eac3a401d0e440c0e63da6781ad04c0f92f39dbb36258",
     "stateDigest": "<stateDigest: Version State 파일 byte의 sha256, projectKey에 따라 다름>"
   },
@@ -44,7 +44,7 @@
     {
       "args": [
         "--yes",
-        "--package=@modelcontextprotocol/server-memory@1.2.3",
+        "--package=@openhub-fixture/npx-mcp@1.2.3",
         "--",
         "node",
         "--version"
@@ -58,19 +58,19 @@
     },
     {
       "client": "claude-code",
-      "expectedEntryDigest": "sha256:6dbcc13b0ece8d3788eb0a72464736a74bf543df7b2ada71fab79baece5164f3",
+      "expectedEntryDigest": "sha256:115aeb12f4f8a2b0013545c077b4170b76de533675822bf4e666c21dfd2642cd",
       "file": ".mcp.json",
       "id": "config-claude-code-project",
       "kind": "config-replace",
       "path": [
         "mcpServers",
-        "memory"
+        "fixture-npx"
       ],
       "scope": "project",
       "value": {
         "args": [
           "-y",
-          "@modelcontextprotocol/server-memory@1.2.3"
+          "@openhub-fixture/npx-mcp@1.2.3"
         ],
         "command": "npx"
       }
@@ -78,7 +78,7 @@
     {
       "args": [
         "-y",
-        "@modelcontextprotocol/server-memory@1.2.3"
+        "@openhub-fixture/npx-mcp@1.2.3"
       ],
       "cwd": "isolated",
       "envNames": [],
@@ -93,7 +93,7 @@
     },
     {
       "entries": [
-        "project:<projectKey>:claude-code:memory"
+        "project:<projectKey>:claude-code:fixture-npx"
       ],
       "id": "state-commit",
       "kind": "state-commit"
@@ -103,7 +103,7 @@
     "clientSpec": {
       "args": [
         "-y",
-        "@modelcontextprotocol/server-memory@1.2.3"
+        "@openhub-fixture/npx-mcp@1.2.3"
       ],
       "command": "npx"
     },
@@ -112,26 +112,26 @@
       "integrity": null,
       "kind": "npm-package",
       "source": "npm-registry",
-      "spec": "@modelcontextprotocol/server-memory@1.2.3",
+      "spec": "@openhub-fixture/npx-mcp@1.2.3",
       "version": "1.2.3"
     },
-    "requested": "@modelcontextprotocol/server-memory"
+    "requested": "@openhub-fixture/npx-mcp"
   },
   "targets": [
     {
       "client": "claude-code",
-      "entryKey": "project:<projectKey>:claude-code:memory",
+      "entryKey": "project:<projectKey>:claude-code:fixture-npx",
       "file": ".mcp.json",
       "precondition": {
-        "entryDigest": "sha256:6dbcc13b0ece8d3788eb0a72464736a74bf543df7b2ada71fab79baece5164f3",
-        "fileDigest": "sha256:904100005deabc2a6f00d88c8fd76d3150bfdad6bf2ff1322f3841b294496ed8"
+        "entryDigest": "sha256:115aeb12f4f8a2b0013545c077b4170b76de533675822bf4e666c21dfd2642cd",
+        "fileDigest": "sha256:bf2003ffd8f3e77207b6beea3940f5eb5d87a5a277003cb5655ef6638164d314"
       },
       "scope": "project",
-      "serverName": "memory",
+      "serverName": "fixture-npx",
       "stateRevision": 1
     }
   ],
-  "toolId": "memory-mcp",
+  "toolId": "fixture-npx-mcp",
   "warnings": [
     {
       "code": "health-execution",

@@ -8,7 +8,7 @@ import { AI_SUMMARY_CHANNEL, AiSummarySession, aiSummaryConsentLines, registerAi
 /** TASK-063 Desktop AI Summary. 가짜 IPC·가짜 fetch·가짜 대화상자만 쓴다(실제 network·key 없음). */
 const read = (rel: string) => readFile(path.resolve(import.meta.dirname, "..", rel), "utf8");
 const KEY = "sk-proj-" + "Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2Ji1Hg0FeDcBa12";
-const ID = "project:claude-code:memory";
+const ID = "project:claude-code:fixture-npx";
 const entry = (version: string, notes: string): ReleaseEntry => ({
   version,
   tag: "v" + version,
@@ -24,10 +24,10 @@ const entry = (version: string, notes: string): ReleaseEntry => ({
 });
 const snapshot: ReleaseSnapshotV1 = releaseSnapshotSchema.parse({
   schemaVersion: 1,
-  toolId: "memory-mcp",
+  toolId: "fixture-npx-mcp",
   versionSource: "npm",
   notesSource: "github-release",
-  current: { spec: "@modelcontextprotocol/server-memory@2.0.3", version: "2.0.3", digest: null },
+  current: { spec: "@openhub-fixture/npx-mcp@2.0.3", version: "2.0.3", digest: null },
   target: entry("2.1.0", "- BREAKING: removed --legacy\n- Fixed crash"),
   between: [entry("2.1.0", "- BREAKING: removed --legacy\n- Fixed crash")],
   selection: { includePrerelease: false, comparable: true, skippedDrafts: 0, skippedPrereleases: 0, truncated: false },
@@ -155,14 +155,14 @@ describe("REQ-060 REQ-041 Desktop AI Summary", () => {
     expect(await cancel.ask(ID, "gpt-test")).toMatchObject({ status: "cancelled" });
     expect(cancel.fetches).toHaveLength(0);
     expect(cancel.dialogs[0]!.join("\n")).toContain("api.openai.com");
-    expect(cancel.dialogs[0]!.join("\n")).toContain("memory-mcp (2.0.3 → 2.1.0)");
+    expect(cancel.dialogs[0]!.join("\n")).toContain("fixture-npx-mcp (2.0.3 → 2.1.0)");
     expect(cancel.dialogs[0]!.join("\n")).not.toContain(KEY);
     const ok = wired();
     ok.session.remember(ID, snapshot, summary);
     await ok.ask(ID, "gpt-test");
     await ok.ask(ID, "gpt-test");
     expect([ok.dialogs.length, ok.fetches.length]).toEqual([1, 2]);
-    expect(aiSummaryConsentLines({ toolId: "memory-mcp", snapshot })).toContain("보내지 않는 것: 설정 파일, 경로, 환경변수 값, Version State");
+    expect(aiSummaryConsentLines({ toolId: "fixture-npx-mcp", snapshot })).toContain("보내지 않는 것: 설정 파일, 경로, 환경변수 값, Version State");
   });
 });
 

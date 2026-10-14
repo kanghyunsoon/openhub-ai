@@ -17,7 +17,7 @@ projects:
     gaps: { db-schema-access: likely-gap }
   claude-mcp:
     dir: ../projects/claude-mcp
-    relevant: [memory-mcp, serena]
+    relevant: [fixture-npx-mcp, serena]
     gaps: { e2e-testing: satisfied, browser-automation: satisfied, knowledge-graph-memory: likely-gap }
   react-spring-monorepo:
     dir: ../projects/react-spring-monorepo

@@ -80,10 +80,10 @@ const entry = (version: string, notes: string | null, extra: Partial<ReleaseEntr
 function snapshot(between: ReleaseEntry[]): ReleaseSnapshotV1 {
   return releaseSnapshotSchema.parse({
     schemaVersion: 1,
-    toolId: "memory-mcp",
+    toolId: "fixture-npx-mcp",
     versionSource: "npm",
     notesSource: "github-release",
-    current: { spec: "@modelcontextprotocol/server-memory@2.0.3", version: "2.0.3", digest: null },
+    current: { spec: "@openhub-fixture/npx-mcp@2.0.3", version: "2.0.3", digest: null },
     target: between[0] ?? null,
     between,
     selection: { includePrerelease: false, comparable: true, skippedDrafts: 0, skippedPrereleases: 0, truncated: false },

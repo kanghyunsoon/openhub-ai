@@ -24,7 +24,7 @@ import {
 } from "../../src/index";
 import { approveAll, createHarness, plannedOf, type Harness } from "../installer/harness";
 import { fakeNpmSpawner } from "../process/fake-npm";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { newScratch } from "../lifecycle/helpers";
 import { FakeWindowsFs } from "./fake-windows-fs";
 
@@ -34,7 +34,7 @@ import { FakeWindowsFs } from "./fake-windows-fs";
  */
 const scratch = await newScratch("client-launcher");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
-const entries: RegistryEntry[] = await seedEntries();
+const entries: RegistryEntry[] = await seedWithNpxFixture();
 const K8S = "kubernetes-mcp-server";
 const CLIENTS = (["claude-code", "codex", "cursor"] as const).map((client) => ({ client, scope: "project" as const }));
 const FILES = { "claude-code": ".mcp.json", cursor: path.join(".cursor", "mcp.json"), codex: path.join(".codex", "config.toml") } as const;
@@ -196,7 +196,7 @@ describe("v0.2.0 lifecycle status: client-launcher-invalid", () => {
   it("일반 npx Tool(cmd 래퍼)과 Linux 플랫폼은 실행 경로를 검사하지 않는다(기존 판정 그대로)", async () => {
     const h = await createHarness(scratch, { entries });
     const win = new FakeWindowsFs();
-    const request = { ...h.request("memory-mcp", CLIENTS), platform: "windows" as const };
+    const request = { ...h.request("fixture-npx-mcp", CLIENTS), platform: "windows" as const };
     const planned = await plannedOf(h, request);
     const result = await runInstallTransaction(planned, await approveAll(planned), request, h.env);
     await recordInstallInState(planned, result, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() });
@@ -400,11 +400,11 @@ describe("v0.2.0 launcher 승인 경계: 검증된 실행 경로 없이는 Clien
     expect(health.planned.plan.status).toBe("ready");
     expect(health.planned.plan.targets.map((t) => t.launcher)).toEqual(Array(3).fill({ recorded: "valid", replacementDigest: null }));
     const h = await createHarness(scratch, { entries });
-    const request = { ...h.request("memory-mcp", CLIENTS), platform: "windows" as const };
+    const request = { ...h.request("fixture-npx-mcp", CLIENTS), platform: "windows" as const };
     const planned = await plannedOf(h, request);
     await recordInstallInState(planned, await runInstallTransaction(planned, await approveAll(planned), request, h.env), { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() });
     const memEnv: LifecycleEnvironment = { loadEntries: async () => entries, probe: h.env.probe, tempBase: os.tmpdir(), now: () => new Date(), runHealth: async () => healthy, mcpSourceEnv: () => ({}) };
-    const mem = await planLifecycleRequest({ operation: "health", toolId: "memory-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, platform: "windows", includeUser: false }, memEnv);
+    const mem = await planLifecycleRequest({ operation: "health", toolId: "fixture-npx-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, platform: "windows", includeUser: false }, memEnv);
     expect(mem.ok && mem.planned.plan.status).toBe("ready");
     expect(mem.ok && mem.planned.plan.targets.every((t) => t.launcher === undefined)).toBe(true);
     expect(mem.ok && mem.planned.plan.target.clientSpec.command).toBe("cmd");

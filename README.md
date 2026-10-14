@@ -32,7 +32,7 @@ The app itself needs nothing else. Each MCP server, however, is started by a pro
 
 | To install | You need | Check with |
 | --- | --- | --- |
-| Memory MCP, Context7, Playwright MCP, Chrome DevTools MCP, MongoDB MCP Server, Kubernetes MCP Server | [Node.js](https://nodejs.org/) (includes npm and npx) | `npx --version` |
+| Context7, Playwright MCP, Chrome DevTools MCP, MongoDB MCP Server, Kubernetes MCP Server (and Memory MCP in v0.2.0 only, see below) | [Node.js](https://nodejs.org/) (includes npm and npx) | `npx --version` |
 | Postgres MCP Pro (and Serena in v0.2.0 only, see below) | [uv](https://docs.astral.sh/uv/) (provides uvx) | `uvx --version` |
 | GitHub MCP Server (and Postgres MCP Pro if uv is missing) | [Docker](https://docs.docker.com/get-docker/), running | `docker info` |
 
@@ -125,6 +125,7 @@ The download is v0.2.0. This README also describes the code on `main`, which is 
 | Environment passed to MCP servers during Health and Benchmark | Your whole environment | Only OS and path variables, proxy/CA and the backend's own settings, and the variables the tool declares. If a package index or registry setting in your environment cannot be passed as-is (for example a URL with credentials), Health and Benchmark do not run; put it in `uv.toml` or `.npmrc` instead ([security model](docs/security-model.md)) |
 | First start of Postgres MCP Pro on Windows | Can hit the Health time limit | The exact version (`postgres-mcp==0.3.0`, `mcp==1.30.0`, wheels only) is prepared before the configuration is written; the client also runs it with `--no-build` |
 | Serena | Installable; the client builds a dependency (`proxy-tools`) from source on first start | **No new installs, updates, rollback, Health, repair, adopt or Benchmark**: that build cannot be verified. An existing Serena entry and its Version State are kept and shown as withdrawn; an interrupted operation can still be recovered; remove it with [the manual steps](#removing-a-tool-or-openhub) if you want. Re-support: [#59](https://github.com/kanghyunsoon/openhub-ai/issues/59) |
+| Memory MCP | Installable; memories are stored in `memory.jsonl` inside the npx cache by default | **No new installs, updates, rollback, Health, repair, adopt or Benchmark**: a new upstream version deletes that file, and another version starts without the earlier memories. An existing entry, its Version State and the memory file are kept and shown as withdrawn; an interrupted operation can still be recovered. Your client can still start it, so back up `memory.jsonl` first ([known issues](docs/known-issues-v0.2.1.md)). Storage fix: [#69](https://github.com/kanghyunsoon/openhub-ai/issues/69) |
 
 ## Demo
 

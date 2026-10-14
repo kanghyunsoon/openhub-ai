@@ -61,7 +61,8 @@ describe("REQ-002 Registry 적재와 검증", () => {
     expect(r.issues).toEqual([]);
     expect(r.entries.length).toBeGreaterThanOrEqual(5);
     const dirs = new Set(r.entries.map((e) => e.directory));
-    expect(dirs.size).toBeGreaterThanOrEqual(5);
+    // v0.2.1 #69: memory 카테고리의 유일한 도구(memory-mcp)가 지원 중단으로 빠져 4개 카테고리에 걸친다. 개수 하한 대신 실제 집합을 고정한다.
+    expect([...dirs].sort()).toEqual(["browser", "context", "database", "mcp"]);
     for (const d of dirs) expect(CATEGORIES).toContain(d);
     for (const e of r.entries) expect(e.manifest.verification).not.toBe("draft");
   });

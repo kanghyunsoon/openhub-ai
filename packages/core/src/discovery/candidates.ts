@@ -7,6 +7,7 @@ import { buildFingerprintIndex, dockerKey, isKnownArtifact, npmKey, pypiKey } fr
 import { canonicalize } from "../installer/plan";
 import { TOKEN_PATTERN, URL_CREDENTIAL_PATTERN, redactSensitive } from "../recommendation/index";
 import type { RegistryEntry } from "../registry/index";
+import { WITHDRAWN_TOOLS } from "../registry/withdrawn";
 import { ReleaseError, boundedRequest, parseJsonObject, type ReleaseFetchOptions } from "../release/fetch";
 
 /**
@@ -195,10 +196,14 @@ export async function discoverCandidates(entries: readonly RegistryEntry[], opti
 
   const index = buildFingerprintIndex(entries);
   const knownRepos = new Set(entries.map((e) => e.manifest.repository.github.toLowerCase()));
+  // v0.2.1 #69: 지원 중단 도구의 package와 그 도구 전용 저장소는 Registry에서 빠졌어도 Candidate로 다시 내놓지 않는다
+  // (지원 중단 사유가 해결될 때까지). 공유 저장소는 지원 중단 목록에 없으므로 같은 저장소의 다른 package는 그대로 후보가 된다.
+  const withdrawnKeys = new Set(WITHDRAWN_TOOLS.flatMap((t) => [...t.identity.npmPackages.map(npmKey), ...t.identity.pypiPackages.map(pypiKey)]).filter((k): k is string => k !== null));
+  const withdrawnRepos = new Set(WITHDRAWN_TOOLS.flatMap((t) => t.identity.repositories.map((r) => r.toLowerCase())));
   const groups = new Map<string, Raw[]>();
   for (const raw of raws) {
-    if (raw.package !== null && isKnownArtifact(raw.package.key, index)) continue;
-    if (raw.package === null && raw.repository !== null && knownRepos.has(raw.repository.toLowerCase())) continue;
+    if (raw.package !== null && (isKnownArtifact(raw.package.key, index) || withdrawnKeys.has(raw.package.key))) continue;
+    if (raw.package === null && raw.repository !== null && (knownRepos.has(raw.repository.toLowerCase()) || withdrawnRepos.has(raw.repository.toLowerCase()))) continue;
     const key = raw.package?.key ?? "repo:" + (raw.repository ?? "").toLowerCase();
     if (key === "repo:") continue;
     groups.set(key, [...(groups.get(key) ?? []), raw]);

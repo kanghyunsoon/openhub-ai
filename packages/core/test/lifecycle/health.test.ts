@@ -23,11 +23,11 @@ import {
   type VerifiedLifecyclePlan,
 } from "../../src/index";
 import { approveAll, createHarness, plannedOf, type Harness } from "../installer/harness";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { newScratch } from "./helpers";
 
 /** TASK-041 MCP Health Check. 가짜 MCP 서버(child)와 실제 node 프로세스 1개로 handshake·종료를 확인한다. */
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await newScratch("health-test");
 const tempBase = await mkdtemp(path.join(scratch, "tmp-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));
@@ -39,7 +39,7 @@ const HOST = process.platform === "win32" ? "windows" : process.platform === "da
 function registry() {
   return vi.fn(async (url: string) => {
     const json = (doc: unknown) => new Response(JSON.stringify(doc), { status: 200 });
-    if (url.endsWith("server-memory/latest")) return json({ name: "@modelcontextprotocol/server-memory", version: "1.2.3" });
+    if (url.endsWith("npx-mcp/latest")) return json({ name: "@openhub-fixture/npx-mcp", version: "1.2.3" });
     if (url === "https://pypi.org/pypi/postgres-mcp/json") return json({ info: { name: "postgres-mcp", version: "0.3.0" } });
     if (url.startsWith("https://ghcr.io/token")) return json({ token: "anon" });
     if (url.includes("/manifests/")) return new Response(null, { status: 200, headers: { "docker-content-digest": DIGEST } });
@@ -159,19 +159,19 @@ describe("REQ-044 MCP Health Check", () => {
   it("AC-041-01 backend·OS별 argv가 정확하고 모두 shell:false이며 cmd·cmd.exe·.cmd 실행이 0건이다", async () => {
     const all: string[][] = [];
     const posix = fake();
-    await posix.run(await verifiedFor("memory-mcp"));
-    expect(posix.spawns[0]).toEqual(["npx", "-y", "@modelcontextprotocol/server-memory"]);
+    await posix.run(await verifiedFor("fixture-npx-mcp"));
+    expect(posix.spawns[0]).toEqual(["npx", "-y", "@openhub-fixture/npx-mcp"]);
     expect(posix.options[0]).toMatchObject({ shell: false, detached: true, stdio: ["pipe", "pipe", "pipe"] });
 
     const launcher = { node: "C:\\nodejs\\node.exe", npxCli: "C:\\nodejs\\node_modules\\npm\\bin\\npx-cli.js" };
     const win = fake();
-    const winPlan = await verifiedFor("memory-mcp", "health", "windows");
+    const winPlan = await verifiedFor("fixture-npx-mcp", "health", "windows");
     expect(winPlan.plan.target.clientSpec.command).toBe("cmd");
     await win.run(winPlan, { windowsNpx: launcher });
-    expect(win.spawns[0]).toEqual([launcher.node, launcher.npxCli, "-y", "@modelcontextprotocol/server-memory"]);
+    expect(win.spawns[0]).toEqual([launcher.node, launcher.npxCli, "-y", "@openhub-fixture/npx-mcp"]);
     expect(win.options[0]).toMatchObject({ shell: false, detached: false });
     const missing = fake();
-    expect(await healthOf(await missing.run(await verifiedFor("memory-mcp", "health", "windows")))).toMatchObject({ status: "launch-failed", reason: "launcher-not-found" });
+    expect(await healthOf(await missing.run(await verifiedFor("fixture-npx-mcp", "health", "windows")))).toMatchObject({ status: "launch-failed", reason: "launcher-not-found" });
     expect(missing.spawns).toEqual([]);
 
     const uvx = fake();
@@ -194,7 +194,7 @@ describe("REQ-044 MCP Health Check", () => {
 
   it("AC-041-02 initialize·tools/list에 정상 응답하면 healthy이고 toolCount가 기록된다", async () => {
     const f = fake();
-    const result = await healthOf(await f.run(await verifiedFor("memory-mcp")));
+    const result = await healthOf(await f.run(await verifiedFor("fixture-npx-mcp")));
     expect(result).toEqual({ status: "healthy", reason: null, toolCount: 2, environmentUnverified: false, terminated: true, excerpt: null });
     expect(f.children[0]!.sent.map((m) => m["method"])).toEqual(["initialize", "notifications/initialized", "tools/list"]);
     expect(f.children[0]!.ended).toBe(true);
@@ -202,7 +202,7 @@ describe("REQ-044 MCP Health Check", () => {
   });
 
   it("AC-041-03 startup·handshake 시간 안에 응답이 없으면 timeout이고 process tree kill이 호출된다", async () => {
-    const verified = await verifiedFor("memory-mcp");
+    const verified = await verifiedFor("fixture-npx-mcp");
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const silent = fake({ init: "none" });
     const pending = silent.run(verified);
@@ -216,7 +216,7 @@ describe("REQ-044 MCP Health Check", () => {
     const slowTools = fake({ tools: "none" });
     const pending2 = slowTools.run(await (async () => {
       vi.useRealTimers();
-      const v = await verifiedFor("memory-mcp");
+      const v = await verifiedFor("fixture-npx-mcp");
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       return v;
     })());
@@ -229,7 +229,7 @@ describe("REQ-044 MCP Health Check", () => {
   it("AC-041-04 initialize 전에 프로세스가 끝나면 launch-failed이고 redact한 1KB 이하 출력이 남는다", async () => {
     const noisy = "x".repeat(3000) + "\nerror: cannot open /home/alice/.config/secret.json\ntoken ghp_" + "A".repeat(36) + "\nfatal: missing module\n";
     const f = fake({ exitEarly: noisy });
-    const result = await healthOf(await f.run(await verifiedFor("memory-mcp")));
+    const result = await healthOf(await f.run(await verifiedFor("fixture-npx-mcp")));
     expect(result).toMatchObject({ status: "launch-failed", reason: "process-exited", terminated: true });
     expect(Buffer.byteLength(result.excerpt ?? "")).toBeLessThanOrEqual(1024);
     expect(result.excerpt).toContain("fatal: missing module");
@@ -239,19 +239,19 @@ describe("REQ-044 MCP Health Check", () => {
     const throwing = (() => {
       throw Object.assign(new Error("spawn npx ENOENT"), { code: "ENOENT" });
     }) as never;
-    expect(await healthOf(await enoent.run(await verifiedFor("memory-mcp"), { spawner: throwing }))).toMatchObject({ status: "launch-failed", reason: "spawn-failed" });
+    expect(await healthOf(await enoent.run(await verifiedFor("fixture-npx-mcp"), { spawner: throwing }))).toMatchObject({ status: "launch-failed", reason: "spawn-failed" });
   });
 
   it("AC-041-05 JSON-RPC 형식 오류는 handshake-failed, tools/list 오류 응답은 unhealthy다", async () => {
-    expect(await healthOf(await fake({ init: "bad" }).run(await verifiedFor("memory-mcp")))).toMatchObject({ status: "handshake-failed", reason: "invalid-message" });
-    expect(await healthOf(await fake({ init: "error" }).run(await verifiedFor("memory-mcp")))).toMatchObject({ status: "handshake-failed", reason: "initialize-error" });
-    expect(await healthOf(await fake({ tools: "bad" }).run(await verifiedFor("memory-mcp")))).toMatchObject({ status: "handshake-failed", reason: "invalid-message" });
-    expect(await healthOf(await fake({ tools: "error" }).run(await verifiedFor("memory-mcp")))).toMatchObject({ status: "unhealthy", reason: "tools-list-error", toolCount: null });
+    expect(await healthOf(await fake({ init: "bad" }).run(await verifiedFor("fixture-npx-mcp")))).toMatchObject({ status: "handshake-failed", reason: "invalid-message" });
+    expect(await healthOf(await fake({ init: "error" }).run(await verifiedFor("fixture-npx-mcp")))).toMatchObject({ status: "handshake-failed", reason: "initialize-error" });
+    expect(await healthOf(await fake({ tools: "bad" }).run(await verifiedFor("fixture-npx-mcp")))).toMatchObject({ status: "handshake-failed", reason: "invalid-message" });
+    expect(await healthOf(await fake({ tools: "error" }).run(await verifiedFor("fixture-npx-mcp")))).toMatchObject({ status: "unhealthy", reason: "tools-list-error", toolCount: null });
   });
 
   it("AC-041-06 출력이 1MB를 넘으면 kill하고 handshake-failed(output-limit)다", async () => {
     const f = fake({ flood: true });
-    expect(await healthOf(await f.run(await verifiedFor("memory-mcp")))).toMatchObject({ status: "handshake-failed", reason: "output-limit", terminated: true });
+    expect(await healthOf(await f.run(await verifiedFor("fixture-npx-mcp")))).toMatchObject({ status: "handshake-failed", reason: "output-limit", terminated: true });
     expect(f.kills).toHaveLength(1);
   });
 
@@ -278,7 +278,7 @@ describe("REQ-044 MCP Health Check", () => {
 
     // 종료 실패는 Health 실패다(healthy여도 unhealthy·termination-failed).
     const stuck = fake({ linger: true }, false);
-    expect(await healthOf(await stuck.run(await verifiedFor("memory-mcp")))).toMatchObject({ status: "unhealthy", reason: "termination-failed", terminated: false, toolCount: 2 });
+    expect(await healthOf(await stuck.run(await verifiedFor("fixture-npx-mcp")))).toMatchObject({ status: "unhealthy", reason: "termination-failed", terminated: false, toolCount: 2 });
 
     // 실제 node 프로세스: stdin을 닫아도 끝나지 않고 손자 프로세스를 띄운 가짜 MCP 서버를 실제 tree kill로 정리한다.
     const script = path.join(scratch, "fake-mcp-server.cjs");
@@ -339,27 +339,27 @@ describe("REQ-044 MCP Health Check", () => {
     expect(touched).toEqual([]);
     expect(f.options[0]!).toHaveProperty("env", {});
     expect(result).toMatchObject({ status: "healthy", environmentUnverified: true });
-    expect((await healthOf(await fake().run(await verifiedFor("memory-mcp")))).environmentUnverified).toBe(false);
+    expect((await healthOf(await fake().run(await verifiedFor("fixture-npx-mcp")))).environmentUnverified).toBe(false);
   });
 
   it("AC-041-09 cwd는 OpenHub가 만든 격리 임시 디렉터리이고 healthCheck가 mcp-handshake가 아니면 unsupported·spawn 0회다", async () => {
     const f = fake();
     const base = await mkdtemp(path.join(scratch, "iso-"));
-    await f.run(await verifiedFor("memory-mcp"), { tempBase: base });
+    await f.run(await verifiedFor("fixture-npx-mcp"), { tempBase: base });
     const cwd = f.options[0]!.cwd;
     expect(path.basename(cwd)).toMatch(/^openhub-health-/u);
     expect(path.dirname(cwd)).toBe(await realpath(base));
     expect(await readdir(base)).toEqual([]);
     const unsupported = fake();
     for (const type of ["process", "http", "command", undefined]) {
-      expect(await healthOf(await unsupported.run(await verifiedFor("memory-mcp"), { healthCheckType: type }))).toMatchObject({ status: "unsupported", reason: "unsupported-health-check" });
+      expect(await healthOf(await unsupported.run(await verifiedFor("fixture-npx-mcp"), { healthCheckType: type }))).toMatchObject({ status: "unsupported", reason: "unsupported-health-check" });
     }
     expect(unsupported.spawns).toEqual([]);
   });
 
   it("AC-041-10 health 단계를 포함한 VerifiedPlan 없이 실행하면 APPROVAL_REQUIRED이고 spawn 0회다", async () => {
     const f = fake();
-    const verified = await verifiedFor("memory-mcp");
+    const verified = await verifiedFor("fixture-npx-mcp");
     const forged = { plan: verified.plan, planDigest: verified.planDigest, acknowledgements: verified.acknowledgements, channel: "cli-tty" } as VerifiedLifecyclePlan;
     expect(await f.run(forged)).toMatchObject({ ok: false, code: "APPROVAL_REQUIRED" });
     // v0.2.1: postgres Manifest가 0.3.0으로 고정돼 있어 새 정확한 버전을 지정한다(--to).
@@ -367,7 +367,7 @@ describe("REQ-044 MCP Health Check", () => {
     expect(skipped.plan.steps.some((s) => s.kind === "health")).toBe(false);
     expect(await f.run(skipped)).toMatchObject({ ok: false, code: "APPROVAL_REQUIRED" });
     const h = await createHarness(scratch, { entries: seed });
-    const install = await plannedOf(h, h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]));
+    const install = await plannedOf(h, h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]));
     const { verifyApprovedPlan } = await import("../../src/index");
     const gate = await verifyApprovedPlan(await approveAll(install), () => install);
     if (!gate.ok) throw new Error(gate.code);

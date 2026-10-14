@@ -21,10 +21,10 @@ import {
   type IdentityHint,
   type RegistryEntry,
 } from "../../src/index";
-import { expectGolden, item, legacySerenaEntry, profile, seedEntries, tool } from "../recommendation/helpers";
+import { expectGolden, item, legacySerenaEntry, profile, seedWithNpxFixture, tool } from "../recommendation/helpers";
 
 /** TASK-051 Identity Fingerprint. 임시 project·home과 seed Registry만 쓴다. network·spawn 없음. */
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const legacySerena = await legacySerenaEntry();
 const scratch = await mkdtemp(path.join(tmpdir(), "openhub-identity-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));
@@ -50,7 +50,7 @@ const grade = (s: ConfiguredServer, idx = index) => {
   const m = gradeServer(s, idx);
   return [m.grade, m.toolId, m.reason];
 };
-const MEMORY = "@modelcontextprotocol/server-memory";
+const MEMORY = "@openhub-fixture/npx-mcp";
 const withEntry = (base: string, name: string, install: RegistryEntry["manifest"]["install"]): RegistryEntry => {
   const e = structuredClone(seed.find((x) => x.manifest.name === base)!);
   e.manifest.name = name;
@@ -61,18 +61,18 @@ const withEntry = (base: string, name: string, install: RegistryEntry["manifest"
 
 describe("REQ-046 Identity Fingerprint", () => {
   it("AC-051-01 alias가 다른 서버라도 npx package가 같고 후보가 하나면 strong·resolved, alias까지 같으면 exact다", async () => {
-    expect(grade(server("my-memory", "npx", ["-y", MEMORY]))).toEqual(["strong", "memory-mcp", "artifact-only"]);
-    expect(grade(server("memory", "npx", ["-y", MEMORY]))).toEqual(["exact", "memory-mcp", "alias-and-artifact"]);
-    const r = await roots({ ".mcp.json": { mcpServers: { "my-memory": { command: "npx", args: ["-y", MEMORY] }, memory: { command: "npx", args: ["-y", MEMORY] } } } });
+    expect(grade(server("my-memory", "npx", ["-y", MEMORY]))).toEqual(["strong", "fixture-npx-mcp", "artifact-only"]);
+    expect(grade(server("fixture-npx", "npx", ["-y", MEMORY]))).toEqual(["exact", "fixture-npx-mcp", "alias-and-artifact"]);
+    const r = await roots({ ".mcp.json": { mcpServers: { "my-memory": { command: "npx", args: ["-y", MEMORY] }, "fixture-npx": { command: "npx", args: ["-y", MEMORY] } } } });
     const matches = fingerprintServers(await readConfiguredServers({ ...r, includeUser: false }), seed);
     expect(matches.map((m) => [m.serverName, m.grade, m.toolId])).toEqual([
-      ["memory", "exact", "memory-mcp"],
-      ["my-memory", "strong", "memory-mcp"],
+      ["fixture-npx", "exact", "fixture-npx-mcp"],
+      ["my-memory", "strong", "fixture-npx-mcp"],
     ]);
     const hints = identityHintsFrom(matches);
     const p = profile({ aiTools: [tool("my-memory")] });
     expect(resolveInstalledTools(p, seed).map((t) => [t.serverName, t.resolution, t.toolId])).toEqual([["my-memory", "unresolved", null]]);
-    expect(resolveInstalledTools(p, seed, hints).map((t) => [t.serverName, t.resolution, t.toolId])).toEqual([["my-memory", "resolved", "memory-mcp"]]);
+    expect(resolveInstalledTools(p, seed, hints).map((t) => [t.serverName, t.resolution, t.toolId])).toEqual([["my-memory", "resolved", "fixture-npx-mcp"]]);
   });
 
   it("AC-051-02 scoped npm이 버전·tag를 떼고 정확히 매칭된다", () => {
@@ -111,35 +111,35 @@ describe("REQ-046 Identity Fingerprint", () => {
   });
 
   it("AC-051-05 Windows cmd /d /c npx -y <pkg> 항목도 같은 package로 매칭된다", () => {
-    expect(grade(server("mem", "cmd", ["/d", "/c", "npx", "-y", MEMORY]))).toEqual(["strong", "memory-mcp", "artifact-only"]);
-    expect(grade(server("memory", "cmd", ["/c", "npx", "-y", MEMORY + "@2025.9.1"]))).toEqual(["exact", "memory-mcp", "alias-and-artifact"]);
-    expect(grade(server("mem", "C:\\Windows\\System32\\cmd.exe", ["/d", "/c", "npx.cmd", "-y", MEMORY]))).toEqual(["strong", "memory-mcp", "artifact-only"]);
+    expect(grade(server("mem", "cmd", ["/d", "/c", "npx", "-y", MEMORY]))).toEqual(["strong", "fixture-npx-mcp", "artifact-only"]);
+    expect(grade(server("fixture-npx", "cmd", ["/c", "npx", "-y", MEMORY + "@2025.9.1"]))).toEqual(["exact", "fixture-npx-mcp", "alias-and-artifact"]);
+    expect(grade(server("mem", "C:\\Windows\\System32\\cmd.exe", ["/d", "/c", "npx.cmd", "-y", MEMORY]))).toEqual(["strong", "fixture-npx-mcp", "artifact-only"]);
     expect(artifactKeyFromLaunch("cmd", ["/d", "npx", "-y", MEMORY])).toBeNull();
     expect(artifactKeyFromLaunch("npx.cmd", ["-y", MEMORY])).toBe("npm:" + MEMORY);
   });
 
   it("AC-051-06 같은 package·image를 가진 Registry 후보가 둘 이상이면 unresolved(ambiguous)다", () => {
-    const twin = withEntry("memory-mcp", "memory-twin", { preferredAdapter: "npx", options: { command: "npx -y " + MEMORY }, fallback: [] });
+    const twin = withEntry("fixture-npx-mcp", "memory-twin", { preferredAdapter: "npx", options: { command: "npx -y " + MEMORY }, fallback: [] });
     const idx = buildFingerprintIndex([...seed, twin]);
     const m = gradeServer(server("mem", "npx", ["-y", MEMORY]), idx);
-    expect([m.grade, m.reason, m.toolId, m.candidates]).toEqual(["unresolved", "ambiguous", null, ["memory-mcp", "memory-twin"]]);
+    expect([m.grade, m.reason, m.toolId, m.candidates]).toEqual(["unresolved", "ambiguous", null, ["fixture-npx-mcp", "memory-twin"]]);
     expect(identityHintsFrom([m])).toEqual([]);
     // alias가 가리키는 Tool과 artifact가 다른 Tool이면 확정하지 않는다.
-    expect(grade(server("memory", "npx", ["-y", "@upstash/context7-mcp"]))).toEqual(["unresolved", null, "alias-artifact-conflict"]);
+    expect(grade(server("fixture-npx", "npx", ["-y", "@upstash/context7-mcp"]))).toEqual(["unresolved", null, "alias-artifact-conflict"]);
   });
 
   it("AC-051-07 weak 일치는 resolved가 아니며 Version State 편입·untracked-adoptable 판정이 0건이다", async () => {
-    const weak = gradeServer(server("servers", "node", ["dist/index.js"]), index);
-    expect([weak.grade, weak.reason, weak.toolId, weak.candidates]).toEqual(["weak", "name-only", null, ["memory-mcp"]]);
-    const weakByArtifact = gradeServer(server("x", "npx", ["-y", "@someone/memory-mcp"]), index);
+    const weak = gradeServer(server("npx-mcp", "node", ["dist/index.js"]), index);
+    expect([weak.grade, weak.reason, weak.toolId, weak.candidates]).toEqual(["weak", "name-only", null, ["fixture-npx-mcp"]]);
+    const weakByArtifact = gradeServer(server("x", "npx", ["-y", "@someone/fixture-npx-mcp"]), index);
     expect([weakByArtifact.grade, weakByArtifact.toolId]).toEqual(["weak", null]);
     expect(identityHintsFrom([weak, weakByArtifact])).toEqual([]);
-    const forged = [{ serverName: "servers", scope: "project", toolId: "memory-mcp", grade: "weak", artifact: "npm:x" }] as unknown as IdentityHint[];
-    expect(resolveInstalledTools(profile({ aiTools: [tool("servers")] }), seed, forged)[0]).toMatchObject({ resolution: "unresolved", toolId: null });
-    const r = await roots({ ".mcp.json": { mcpServers: { servers: { command: "node", args: ["dist/index.js"] }, memory: { command: "node", args: ["memory.js"] } } } });
+    const forged = [{ serverName: "npx-mcp", scope: "project", toolId: "fixture-npx-mcp", grade: "weak", artifact: "npm:x" }] as unknown as IdentityHint[];
+    expect(resolveInstalledTools(profile({ aiTools: [tool("npx-mcp")] }), seed, forged)[0]).toMatchObject({ resolution: "unresolved", toolId: null });
+    const r = await roots({ ".mcp.json": { mcpServers: { "npx-mcp": { command: "node", args: ["dist/index.js"] }, "fixture-npx": { command: "node", args: ["memory.js"] } } } });
     const st = await lifecycleStatus({ ...r, entries: seed, platform: "linux", includeUser: false });
     if (!st.ok) throw new Error(st.code);
-    expect(st.items.map((i) => [i.serverName, i.state, i.toolId, i.identity])).toEqual([["memory", "untracked-foreign", null, "unresolved"]]);
+    expect(st.items.map((i) => [i.serverName, i.state, i.toolId, i.identity])).toEqual([["fixture-npx", "untracked-foreign", null, "unresolved"]]);
     expect(st.items.filter((i) => i.state === "untracked-adoptable")).toEqual([]);
     await expect(readFile(path.join(r.homeDir, ".openhub", "state", "lifecycle.json"))).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -189,15 +189,15 @@ describe("REQ-046 Identity Fingerprint", () => {
   it("AC-051-10 RecommendationReport v1 schema가 그대로이고 strong 일치가 resolved로 나오는 시나리오 골든이 고정된다", async () => {
     const r = await roots({ ".mcp.json": { mcpServers: { "team-memory": { command: "npx", args: ["-y", MEMORY + "@2025.9.1"] }, ctx: { command: "node", args: ["ctx.js"] } } } });
     const hints = identityHintsFrom(fingerprintServers(await readConfiguredServers({ ...r, includeUser: false }), seed));
-    expect(hints).toEqual([{ serverName: "team-memory", scope: "project", toolId: "memory-mcp", grade: "strong", artifact: "npm:" + MEMORY }]);
+    expect(hints).toEqual([{ serverName: "team-memory", scope: "project", toolId: "fixture-npx-mcp", grade: "strong", artifact: "npm:" + MEMORY }]);
     const p = profile({ name: "identity-strong", aiClients: [item("claude-code", "Claude Code", "config", { file: ".mcp.json" })], aiTools: [tool("team-memory"), tool("ctx")] });
     const report = recommend(p, seed, undefined, { platform: "linux" }, { identityHints: hints });
     expect(report.installedTools.map((t) => [t.serverName, t.resolution, t.toolId])).toEqual([
       ["ctx", "unresolved", null],
-      ["team-memory", "resolved", "memory-mcp"],
+      ["team-memory", "resolved", "fixture-npx-mcp"],
     ]);
-    expect(report.assessment.warnings).toContainEqual({ code: "identity-strong-match", message: "team-memory(project) 서버를 alias 대신 실행 artifact(npm:" + MEMORY + ")로 memory-mcp로 식별했습니다(후보 1개)" });
-    expect(report.recommendations.map((x) => x.toolId)).not.toContain("memory-mcp");
+    expect(report.assessment.warnings).toContainEqual({ code: "identity-strong-match", message: "team-memory(project) 서버를 alias 대신 실행 artifact(npm:" + MEMORY + ")로 fixture-npx-mcp로 식별했습니다(후보 1개)" });
+    expect(report.recommendations.map((x) => x.toolId)).not.toContain("fixture-npx-mcp");
     expect(Object.keys(recommendationReportSchema.shape)).toEqual(["schemaVersion", "generatedFrom", "project", "assessment", "installedTools", "needs", "recommendations"]);
     expect(recommendationReportSchema.safeParse(report).success).toBe(true);
     // hint가 없으면 M3와 byte가 같다.

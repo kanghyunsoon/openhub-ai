@@ -25,10 +25,10 @@ import {
   type InstallClient,
   type InstallPlanV1,
 } from "../../src/index";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { ALL_AVAILABLE, clientProfile, entryOf, reportFor, verifiedPlanOf } from "./helpers";
 
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await mkdtemp(path.join(os.tmpdir(), "openhub-config-test-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 afterEach(() => vi.unstubAllEnvs());
@@ -68,16 +68,16 @@ describe("REQ-036 Agent Client Config Writer", () => {
     expect(configTargetFor("claude-code", "user")).toMatchObject({ writable: false, logical: "~/.claude.json" });
     const r = await roots();
     await writeFile(path.join(r.homeDir, ".claude.json"), '{"mcpServers":{}}');
-    expect(await inspectConfigTarget("claude-code", "user", "memory", r)).toMatchObject({ file: "~/.claude.json", envReference: "manual" });
-    const plan = await planWith("memory-mcp", [["claude-code", "user"]], r);
+    expect(await inspectConfigTarget("claude-code", "user", "fixture-npx", r)).toMatchObject({ file: "~/.claude.json", envReference: "manual" });
+    const plan = await planWith("fixture-npx-mcp", [["claude-code", "user"]], r);
     expect(plan.steps.filter((s) => s.kind === "config-patch")).toEqual([]);
     expect(plan.warnings.map((w) => w.code)).toContain("manual-setup-required");
-    const [valid] = await stepsFor("memory-mcp", [["claude-code", "project"]], r);
+    const [valid] = await stepsFor("fixture-npx-mcp", [["claude-code", "project"]], r);
     const forged = [
       { ...valid!, scope: "user" as const, file: "~/.claude.json" },
       { ...valid!, file: ".vscode/mcp.json" },
       { ...valid!, file: "../outside/.mcp.json" },
-      { ...valid!, path: ["mcpServers", "memory", "command"] },
+      { ...valid!, path: ["mcpServers", "fixture-npx", "command"] },
     ];
     for (const step of forged) await expect(apply(step, r), step.file).rejects.toMatchObject({ code: "MANUAL_SETUP_REQUIRED" });
     expect(await readFile(path.join(r.homeDir, ".claude.json"), "utf8")).toBe('{"mcpServers":{}}');
@@ -93,15 +93,15 @@ describe("REQ-036 Agent Client Config Writer", () => {
     };
     const file = path.join(r.projectRoot, ".mcp.json");
     await writeFile(file, JSON.stringify(original, null, 4) + "\n");
-    const [step] = await stepsFor("memory-mcp", [["claude-code", "project"]], r);
+    const [step] = await stepsFor("fixture-npx-mcp", [["claude-code", "project"]], r);
     await apply(step!, r);
     const text = await readFile(file, "utf8");
     const doc = JSON.parse(text);
     expect(doc.$schema).toEqual(original.$schema);
     expect(doc.unknownTop).toEqual(original.unknownTop);
     expect(doc.mcpServers.existing).toEqual(original.mcpServers.existing);
-    expect(Object.keys(doc.mcpServers)).toEqual(["existing", "memory"]);
-    expect(doc.mcpServers.memory).toEqual({ args: ["-y", "@modelcontextprotocol/server-memory"], command: "npx" });
+    expect(Object.keys(doc.mcpServers)).toEqual(["existing", "fixture-npx"]);
+    expect(doc.mcpServers["fixture-npx"]).toEqual({ args: ["-y", "@openhub-fixture/npx-mcp"], command: "npx" });
     expect(text.split("\n")[1]).toMatch(/^ {4}"\$schema"/u);
     expect(text.endsWith("}\n")).toBe(true);
   });
@@ -111,17 +111,17 @@ describe("REQ-036 Agent Client Config Writer", () => {
     await mkdir(path.join(r.projectRoot, ".cursor"));
     const cursor = path.join(r.projectRoot, ".cursor", "mcp.json");
     await writeFile(cursor, "\uFEFF{\r\n\t\"mcpServers\": {\r\n\t\t\"a\": {\"command\": \"x\", \"args\": []}\r\n\t}\r\n}\r\n");
-    const [cursorStep] = await stepsFor("memory-mcp", [["cursor", "project"]], r);
+    const [cursorStep] = await stepsFor("fixture-npx-mcp", [["cursor", "project"]], r);
     await apply(cursorStep!, r);
     const text = await readFile(cursor, "utf8");
     expect(text.startsWith("\uFEFF{\r\n\t\"mcpServers\"")).toBe(true);
     expect(text.replace(/\r\n/gu, "")).not.toContain("\n");
-    expect(JSON.parse(text.slice(1)).mcpServers).toMatchObject({ a: { command: "x" }, memory: { command: "npx" } });
+    expect(JSON.parse(text.slice(1)).mcpServers).toMatchObject({ a: { command: "x" }, "fixture-npx": { command: "npx" } });
 
     const fresh = await roots();
-    const [step] = await stepsFor("memory-mcp", [["claude-code", "project"], ["codex", "project"]], fresh);
+    const [step] = await stepsFor("fixture-npx-mcp", [["claude-code", "project"], ["codex", "project"]], fresh);
     await apply(step!, fresh);
-    expect(JSON.parse(await readFile(path.join(fresh.projectRoot, ".mcp.json"), "utf8"))).toEqual({ mcpServers: { memory: { args: ["-y", "@modelcontextprotocol/server-memory"], command: "npx" } } });
+    expect(JSON.parse(await readFile(path.join(fresh.projectRoot, ".mcp.json"), "utf8"))).toEqual({ mcpServers: { "fixture-npx": { args: ["-y", "@openhub-fixture/npx-mcp"], command: "npx" } } });
   });
 
   it("AC-032-03 TOML은 블록을 원본 뒤에 덧붙이기만 하고 원본 byte가 prefix이며 smol-toml로 다시 parse된다", async () => {
@@ -148,7 +148,7 @@ describe("REQ-036 Agent Client Config Writer", () => {
     const file = path.join(r.projectRoot, ".codex", "config.toml");
     const inline = 'mcp_servers = { other = { command = "node", args = [] } }\n';
     await writeFile(file, inline);
-    const [step] = await stepsFor("memory-mcp", [["codex", "project"]], r);
+    const [step] = await stepsFor("fixture-npx-mcp", [["codex", "project"]], r);
     await expect(apply(step!, r)).rejects.toMatchObject({ code: "CONFIG_UNPARSEABLE" });
     expect(await readFile(file, "utf8")).toBe(inline);
     await writeFile(file, "this is = = not toml");
@@ -158,12 +158,12 @@ describe("REQ-036 Agent Client Config Writer", () => {
   it("AC-032-04 같은 key가 있으면 CONFIG_KEY_EXISTS이고 파일에 쓰지 않는다", async () => {
     const r = await roots();
     const json = path.join(r.projectRoot, ".mcp.json");
-    await writeFile(json, '{ "mcpServers": { "memory": { "command": "mine" } } }');
+    await writeFile(json, '{ "mcpServers": { "fixture-npx": { "command": "mine" } } }');
     await mkdir(path.join(r.projectRoot, ".codex"));
     const toml = path.join(r.projectRoot, ".codex", "config.toml");
-    await writeFile(toml, '[mcp_servers.memory]\ncommand = "mine"\n');
+    await writeFile(toml, '[mcp_servers.fixture-npx]\ncommand = "mine"\n');
     // Plan 단계에서 이미 막힌다(precondition.keyAbsent=false). v0.2.0: 있는 항목의 Plan 형태 digest(entryDigest)가 표준 항목과 달라 충돌이다.
-    const plan = await planWith("memory-mcp", [["claude-code", "project"], ["codex", "project"]], r);
+    const plan = await planWith("fixture-npx-mcp", [["claude-code", "project"], ["codex", "project"]], r);
     expect(plan.status).toBe("blocked");
     expect(plan.warnings.filter((w) => w.code === "CONFIG_KEY_EXISTS")).toHaveLength(2);
     const mine = entryPlanDigest({ command: "mine" });
@@ -173,10 +173,10 @@ describe("REQ-036 Agent Client Config Writer", () => {
     ]);
     // 쓰기 직전 다시 확인해도 같은 key면 거부한다.
     const empty = await roots();
-    const steps = await stepsFor("memory-mcp", [["claude-code", "project"], ["codex", "project"]], empty);
+    const steps = await stepsFor("fixture-npx-mcp", [["claude-code", "project"], ["codex", "project"]], empty);
     for (const step of steps) await expect(apply(step, r)).rejects.toMatchObject({ code: "CONFIG_KEY_EXISTS" });
-    expect(await readFile(json, "utf8")).toBe('{ "mcpServers": { "memory": { "command": "mine" } } }');
-    expect(await readFile(toml, "utf8")).toBe('[mcp_servers.memory]\ncommand = "mine"\n');
+    expect(await readFile(json, "utf8")).toBe('{ "mcpServers": { "fixture-npx": { "command": "mine" } } }');
+    expect(await readFile(toml, "utf8")).toBe('[mcp_servers.fixture-npx]\ncommand = "mine"\n');
   });
 
   it("AC-032-05 같은 디렉터리 임시 파일에 쓴 뒤 rename하고 rename 실패를 주입해도 원본 byte가 그대로다", async () => {
@@ -193,7 +193,7 @@ describe("REQ-036 Agent Client Config Writer", () => {
         throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
       },
     };
-    const [step] = await stepsFor("memory-mcp", [["claude-code", "project"]], r);
+    const [step] = await stepsFor("fixture-npx-mcp", [["claude-code", "project"]], r);
     await expect(applyConfigPatch(step!, { ...r, fs: failing, acknowledgements: ["base", "floating-artifact"] })).rejects.toMatchObject({ code: "CONFIG_WRITE_FAILED" });
     expect(await readFile(file, "utf8")).toBe(original);
     expect(calls[0]).toMatch(/^write:\.\.mcp\.json\.openhub-[0-9a-f]{12}\.tmp$/u);
@@ -205,7 +205,7 @@ describe("REQ-036 Agent Client Config Writer", () => {
     expect(await restoreConfig(receipt)).toBe(true);
     expect(await readFile(file, "utf8")).toBe(original);
     const fresh = await roots();
-    const [cursorStep] = await stepsFor("memory-mcp", [["cursor", "project"]], fresh);
+    const [cursorStep] = await stepsFor("fixture-npx-mcp", [["cursor", "project"]], fresh);
     const created = await apply(cursorStep!, fresh);
     expect(created.original).toBeNull();
     expect(await restoreConfig(created)).toBe(true);
@@ -218,16 +218,16 @@ describe("REQ-036 Agent Client Config Writer", () => {
     await mkdir(outside);
     await symlink(outside, path.join(r.projectRoot, ".cursor"), "junction");
     await symlink(outside, path.join(r.homeDir, ".codex"), "junction");
-    await expect(inspectConfigTarget("cursor", "project", "memory", r)).rejects.toMatchObject({ code: "CONFIG_PATH_ESCAPE" });
+    await expect(inspectConfigTarget("cursor", "project", "fixture-npx", r)).rejects.toMatchObject({ code: "CONFIG_PATH_ESCAPE" });
     const ok = await roots();
-    const steps = await stepsFor("memory-mcp", [["cursor", "project"], ["codex", "user"]], ok);
+    const steps = await stepsFor("fixture-npx-mcp", [["cursor", "project"], ["codex", "user"]], ok);
     for (const step of steps) await expect(apply(step, r), step.file).rejects.toMatchObject({ code: "CONFIG_PATH_ESCAPE" });
     expect(await listing(outside)).toEqual([]);
     // root 안을 가리키는 junction은 허용한다.
     const inside = await roots();
     await mkdir(path.join(inside.projectRoot, "real-cursor"));
     await symlink(path.join(inside.projectRoot, "real-cursor"), path.join(inside.projectRoot, ".cursor"), "junction");
-    const [cursorStep] = await stepsFor("memory-mcp", [["cursor", "project"]], inside);
+    const [cursorStep] = await stepsFor("fixture-npx-mcp", [["cursor", "project"]], inside);
     await apply(cursorStep!, inside);
     expect(await listing(path.join(inside.projectRoot, "real-cursor"))).toEqual(["mcp.json"]);
   });
@@ -264,7 +264,7 @@ describe("REQ-036 Agent Client Config Writer", () => {
 
   it("AC-032-09 user scope 대상은 user-scope-config 승인이 없으면 쓰지 않는다", async () => {
     const r = await roots();
-    const plan = await planWith("memory-mcp", [["cursor", "user"]], r);
+    const plan = await planWith("fixture-npx-mcp", [["cursor", "user"]], r);
     expect(plan.approvalRequirements).toContain("user-scope-config");
     const [step] = plan.steps.filter((s): s is ConfigPatchStep => s.kind === "config-patch");
     await expect(apply(step!, r, ["base", "floating-artifact"])).rejects.toMatchObject({ code: "USER_SCOPE_NOT_APPROVED" });
@@ -374,8 +374,8 @@ describe("REQ-036 Agent Client Config Writer", () => {
 
   it("AC-032-13 안전하게 표현할 수 없는 Windows wrapper는 자동 완화하지 않고 manual-setup-required 또는 Plan 차단이다", async () => {
     const r = await roots();
-    const [step] = await stepsFor("memory-mcp", [["claude-code", "project"]], r, "windows");
-    expect(step!.value).toEqual({ command: "cmd", args: ["/d", "/c", "npx", "-y", "@modelcontextprotocol/server-memory"] });
+    const [step] = await stepsFor("fixture-npx-mcp", [["claude-code", "project"]], r, "windows");
+    expect(step!.value).toEqual({ command: "cmd", args: ["/d", "/c", "npx", "-y", "@openhub-fixture/npx-mcp"] });
     const tail = step!.value.args.slice(3);
     const tampered = [
       { command: "C:\\Windows\\System32\\cmd.exe", args: step!.value.args },
@@ -395,9 +395,9 @@ describe("REQ-036 Agent Client Config Writer", () => {
     }
     expect(await listing(r.projectRoot)).toEqual([]);
     // Manifest 쪽에서 들어온 위험 인자는 Plan 단계에서 막힌다(완화해서 쓰지 않는다).
-    const memory = entryOf(seed, "memory-mcp");
+    const memory = entryOf(seed, "fixture-npx-mcp");
     const risky = [{ ...memory, manifest: { ...memory.manifest, install: { preferredAdapter: "npx" as const, options: { command: "npx -y pkg %COMSPEC%" }, fallback: [] } } }, ...seed.filter((e) => e !== memory)];
-    const blocked = buildInstallPlan({ toolId: "memory-mcp", entries: risky, report: reportFor(clientProfile(), risky), probes: ALL_AVAILABLE, targets: [await inspectConfigTarget("claude-code", "project", "memory", r)], platform: "windows" });
+    const blocked = buildInstallPlan({ toolId: "fixture-npx-mcp", entries: risky, report: reportFor(clientProfile(), risky), probes: ALL_AVAILABLE, targets: [await inspectConfigTarget("claude-code", "project", "fixture-npx", r)], platform: "windows" });
     expect(blocked).toMatchObject({ ok: false, code: "MANIFEST_COMMAND_REJECTED" });
   });
 });

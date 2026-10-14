@@ -18,12 +18,12 @@ import {
   type LifecycleStateFile,
   type RegistryEntry,
 } from "../../src/index";
-import { seedEntries } from "../recommendation/helpers";
+import { seedEntries, seedWithNpxFixture } from "../recommendation/helpers";
 import { ALL_AVAILABLE, clientProfile, expectInstallerGolden, reportFor, target } from "../installer/helpers";
 import { approveAll, createHarness, plannedOf, type Harness } from "../installer/harness";
 import { newScratch } from "./helpers";
 
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await newScratch("status-test");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 afterEach(() => vi.unstubAllGlobals());
@@ -76,13 +76,13 @@ describe("REQ-043 Install 연계·Status·Drift", () => {
     const failed = await createHarness(scratch, { entries: seed, exitCode: 1 });
     expect((await installed(failed, "github-mcp-server", [{ client: "cursor", scope: "project" }])).recorded).toEqual({ ok: true, recorded: 0 });
     const partial = await createHarness(scratch, { entries: seed, failRenameFor: ".cursor/mcp.json" });
-    const p = await installed(partial, "memory-mcp", [{ client: "claude-code", scope: "project" }, { client: "cursor", scope: "project" }]);
+    const p = await installed(partial, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }, { client: "cursor", scope: "project" }]);
     expect(p.result.status).toBe("partial-compensated");
     expect(p.recorded).toEqual({ ok: true, recorded: 0 });
     const noop = await createHarness(scratch, { entries: seed });
     // v0.2.0 범위별 판정: no-op은 고른 대상에 같은 항목이 있을 때다.
-    await writeFile(path.join(noop.projectRoot, ".mcp.json"), '{ "mcpServers": { "memory": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"] } } }\n');
-    const n = await installed(noop, "memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    await writeFile(path.join(noop.projectRoot, ".mcp.json"), '{ "mcpServers": { "fixture-npx": { "command": "npx", "args": ["-y", "@openhub-fixture/npx-mcp"] } } }\n');
+    const n = await installed(noop, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     expect(n.result.status).toBe("no-op");
     for (const h of [failed, partial, noop]) expect(Object.keys((await stateOf(h)).entries)).toEqual([]);
   });
@@ -93,7 +93,8 @@ describe("REQ-043 Install 연계·Status·Drift", () => {
       if (!built.ok) throw new Error(built.code);
       return built.planned.plan;
     };
-    const ids = seed.map((e) => e.manifest.name).sort();
+    // seed Registry launch spec 골든은 실제 Registry만 본다(테스트 전용 npx fixture 제외, plan-builder AC-030-05와 같은 golden).
+    const ids = (await seedEntries()).map((e) => e.manifest.name).sort();
     const specsFor = (platform: "linux" | "windows") => Object.fromEntries(ids.map((id) => [id, { backend: plan(id, platform).backend?.adapter, launch: plan(id, platform).launch }]));
     const { canonicalize } = await import("../../src/index");
     await expectInstallerGolden("seed-launch-specs.json", JSON.stringify(canonicalize({ linux: specsFor("linux"), windows: specsFor("windows") }), null, 2) + "\n");
@@ -101,58 +102,58 @@ describe("REQ-043 Install 연계·Status·Drift", () => {
 
   it("AC-038-03 config 항목 digest가 state와 같으면 state-consistent다", async () => {
     const h = await createHarness(scratch, { entries: seed });
-    await installed(h, "memory-mcp", [{ client: "claude-code", scope: "project" }]);
-    expect((await items(h)).map((i) => [i.serverName, i.state, i.revision])).toEqual([["memory", "state-consistent", 1]]);
+    await installed(h, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
+    expect((await items(h)).map((i) => [i.serverName, i.state, i.revision])).toEqual([["fixture-npx", "state-consistent", 1]]);
   });
 
   it("AC-038-04 항목을 수동 수정하면 config-drift, key나 파일을 지우면 missing-config다", async () => {
     const h = await createHarness(scratch, { entries: seed });
-    await installed(h, "memory-mcp", [{ client: "claude-code", scope: "project" }, { client: "cursor", scope: "project" }]);
+    await installed(h, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }, { client: "cursor", scope: "project" }]);
     const claude = path.join(h.projectRoot, ".mcp.json");
     const doc = JSON.parse(await readFile(claude, "utf8"));
-    doc.mcpServers.memory.args.push("--extra");
+    doc.mcpServers["fixture-npx"].args.push("--extra");
     await writeFile(claude, JSON.stringify(doc));
     await unlink(path.join(h.projectRoot, ".cursor", "mcp.json"));
     expect((await items(h)).map((i) => [i.client, i.state])).toEqual([
       ["claude-code", "config-drift"],
       ["cursor", "missing-config"],
     ]);
-    delete doc.mcpServers.memory;
+    delete doc.mcpServers["fixture-npx"];
     await writeFile(claude, JSON.stringify(doc));
     expect((await items(h))[0]!.state).toBe("missing-config");
   });
 
   it("AC-038-05 state 없이 표준 항목과 같으면 untracked-adoptable, 다르면 untracked-foreign이며 자동 편입하지 않는다", async () => {
     const h = await createHarness(scratch, { entries: seed });
-    const memory = seed.find((e) => e.manifest.name === "memory-mcp")!.manifest;
+    const memory = seed.find((e) => e.manifest.name === "fixture-npx-mcp")!.manifest;
     const [standard] = standardEntries(memory, "claude-code", "linux");
-    await writeFile(path.join(h.projectRoot, ".mcp.json"), JSON.stringify({ mcpServers: { memory: standard, context7: { command: "node", args: ["my-context7.js"] } } }, null, 2));
+    await writeFile(path.join(h.projectRoot, ".mcp.json"), JSON.stringify({ mcpServers: { "fixture-npx": standard, context7: { command: "node", args: ["my-context7.js"] } } }, null, 2));
     expect((await items(h)).map((i) => [i.serverName, i.state, i.toolId])).toEqual([
       ["context7", "untracked-foreign", null],
-      ["memory", "untracked-adoptable", "memory-mcp"],
+      ["fixture-npx", "untracked-adoptable", "fixture-npx-mcp"],
     ]);
     expect(Object.keys((await stateOf(h)).entries)).toEqual([]);
   });
 
   it("AC-038-06 floating은 artifact-unlocked, 고정 spec은 artifact-locked, docker 로컬 존재는 artifact-unknown이다", async () => {
     const pinned: RegistryEntry[] = seed.map((e) =>
-      e.manifest.name === "memory-mcp" ? { ...e, manifest: { ...e.manifest, install: { ...e.manifest.install, options: { command: "npx -y @modelcontextprotocol/server-memory@2025.9.1" } } } } : e,
+      e.manifest.name === "fixture-npx-mcp" ? { ...e, manifest: { ...e.manifest, install: { ...e.manifest.install, options: { command: "npx -y @openhub-fixture/npx-mcp@2025.9.1" } } } } : e,
     );
     const h = await createHarness(scratch, { entries: pinned });
-    await installed(h, "memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    await installed(h, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     await installed(h, "context7", [{ client: "claude-code", scope: "project" }]);
     await installed(h, "github-mcp-server", [{ client: "cursor", scope: "project" }]);
     const byName = Object.fromEntries((await items(h, { entries: pinned })).map((i) => [i.serverName, i.artifact]));
-    expect(byName["memory"]).toEqual({ lock: "artifact-locked", presence: "launch-on-demand", requested: "@modelcontextprotocol/server-memory@2025.9.1", resolved: "@modelcontextprotocol/server-memory@2025.9.1" });
+    expect(byName["fixture-npx"]).toEqual({ lock: "artifact-locked", presence: "launch-on-demand", requested: "@openhub-fixture/npx-mcp@2025.9.1", resolved: "@openhub-fixture/npx-mcp@2025.9.1" });
     expect(byName["context7"]).toMatchObject({ lock: "artifact-unlocked", presence: "launch-on-demand", resolved: null });
     expect(byName["github"]).toMatchObject({ lock: "artifact-unlocked", presence: "artifact-unknown" });
-    const memory = Object.values((await stateOf(h)).entries).find((e) => e.target.serverName === "memory")!;
-    expect(memory.artifact.resolved).toEqual({ kind: "npm-package", spec: "@modelcontextprotocol/server-memory@2025.9.1", version: "2025.9.1", digest: null, integrity: null, source: "npm-registry" });
+    const memory = Object.values((await stateOf(h)).entries).find((e) => e.target.serverName === "fixture-npx")!;
+    expect(memory.artifact.resolved).toEqual({ kind: "npm-package", spec: "@openhub-fixture/npx-mcp@2025.9.1", version: "2025.9.1", digest: null, integrity: null, source: "npm-registry" });
   });
 
   it("AC-038-07 status 계산 중 fetch·spawn·write가 0회다", async () => {
     const h = await createHarness(scratch, { entries: seed });
-    await installed(h, "memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    await installed(h, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const writes: string[] = [];
@@ -172,7 +173,7 @@ describe("REQ-043 Install 연계·Status·Drift", () => {
 
   it("AC-038-08 project status에 다른 projectKey의 entry가 없고 user scope는 따로 구분된다", async () => {
     const a = await createHarness(scratch, { entries: seed });
-    await installed(a, "memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    await installed(a, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     await installed(a, "context7", [{ client: "cursor", scope: "user" }], true);
     // 같은 home에 다른 프로젝트 설치 기록을 더한다.
     const b = await createHarness(scratch, { entries: seed });
@@ -183,11 +184,11 @@ describe("REQ-043 Install 연계·Status·Drift", () => {
     await recordInstallInState(planned, result, { projectRoot: b.projectRoot, homeDir: a.homeDir, now: NOW });
     expect(Object.keys((await stateOf(a)).entries)).toHaveLength(3);
     expect((await items(a)).map((i) => [i.scope, i.serverName, i.state])).toEqual([
-      ["project", "memory", "state-consistent"],
+      ["project", "fixture-npx", "state-consistent"],
       ["user", "context7", "not-inspected"],
     ]);
     expect((await items(a, { includeUser: true })).map((i) => [i.scope, i.serverName, i.state])).toEqual([
-      ["project", "memory", "state-consistent"],
+      ["project", "fixture-npx", "state-consistent"],
       ["user", "context7", "state-consistent"],
     ]);
   });
@@ -206,8 +207,8 @@ describe("REQ-043 Install 연계·Status·Drift", () => {
 
   it("AC-038-01 같은 EntryKey를 다시 설치하면 새 기록(revision 1)으로 바꾸고 다른 entry는 그대로다", async () => {
     const h = await createHarness(scratch, { entries: seed });
-    await installed(h, "memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    await installed(h, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     await installed(h, "context7", [{ client: "claude-code", scope: "project" }]);
-    expect(Object.values((await stateOf(h)).entries).map((e) => e.target.serverName).sort()).toEqual(["context7", "memory"]);
+    expect(Object.values((await stateOf(h)).entries).map((e) => e.target.serverName).sort()).toEqual(["context7", "fixture-npx"]);
   });
 });

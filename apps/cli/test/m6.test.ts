@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -48,18 +48,21 @@ async function ctx(): Promise<Ctx> {
   await mkdir(c.project);
   await mkdir(c.home);
   await cp(path.join(REPO, "registry"), path.join(c.repo, "registry"), { recursive: true });
+  // 테스트 전용 npx fixture(v0.2.1 #69: Memory MCP 지원 중단으로 버전 미고정 npx 도구 역할을 대신한다)
+  await cp(path.join(REPO, "packages", "core", "test", "fixtures", "registry-npx-fixture", "mcp", "fixture-npx-mcp.yaml"), path.join(c.repo, "registry", "mcp", "fixture-npx-mcp.yaml"));
+  await appendFile(path.join(c.repo, "registry", "catalog.yaml"), "  fixture-npx-mcp: { addedAt: null }\n");
   // YAML은 JSON의 상위 집합이다(CLI 패키지에 yaml 의존성을 더하지 않는다).
   await writeFile(path.join(c.repo, "registry", "mcp", "local-llm-ui.yaml"), JSON.stringify(pinokioManifest(), null, 2));
   await writeFile(path.join(c.project, "package.json"), '{ "name": "api" }\n');
   const fetch = async (url: string, init?: RequestInit) => {
     const headers = (init?.headers ?? {}) as Record<string, string>;
     c.fetches.push({ url, auth: Object.keys(headers).some((k) => k.toLowerCase() === "authorization") });
-    if (url.endsWith("server-memory/latest")) return json({ name: "@modelcontextprotocol/server-memory", version: c.latest, engines: { node: ">=18" } });
-    if (url.startsWith("https://api.github.com/repos/modelcontextprotocol/servers/releases")) {
+    if (url.endsWith("npx-mcp/latest")) return json({ name: "@openhub-fixture/npx-mcp", version: c.latest, engines: { node: ">=18" } });
+    if (url.startsWith("https://api.github.com/repos/openhub-fixture/npx-mcp/releases")) {
       return json([
-        { tag_name: "2025.9.25", name: "2025.9.25", body: NOTES_NEW, draft: false, prerelease: false, published_at: "2025-09-25T00:00:00Z", html_url: "https://github.com/modelcontextprotocol/servers/releases/tag/2025.9.25" },
-        { tag_name: "2025.9.1", name: "2025.9.1", body: NOTES_MID, draft: false, prerelease: false, published_at: "2025-09-01T00:00:00Z", html_url: "https://github.com/modelcontextprotocol/servers/releases/tag/2025.9.1" },
-        { tag_name: "2025.8.4", name: "2025.8.4", body: "- old", draft: false, prerelease: false, published_at: "2025-08-04T00:00:00Z", html_url: "https://github.com/modelcontextprotocol/servers/releases/tag/2025.8.4" },
+        { tag_name: "2025.9.25", name: "2025.9.25", body: NOTES_NEW, draft: false, prerelease: false, published_at: "2025-09-25T00:00:00Z", html_url: "https://github.com/openhub-fixture/npx-mcp/releases/tag/2025.9.25" },
+        { tag_name: "2025.9.1", name: "2025.9.1", body: NOTES_MID, draft: false, prerelease: false, published_at: "2025-09-01T00:00:00Z", html_url: "https://github.com/openhub-fixture/npx-mcp/releases/tag/2025.9.1" },
+        { tag_name: "2025.8.4", name: "2025.8.4", body: "- old", draft: false, prerelease: false, published_at: "2025-08-04T00:00:00Z", html_url: "https://github.com/openhub-fixture/npx-mcp/releases/tag/2025.8.4" },
       ]);
     }
     if (url === "https://api.openai.com/v1/responses") return json({ output: [{ type: "message", content: [{ type: "output_text", text: "Memory 2025.9.25: 버그 수정과 검색 개선." }] }] });
@@ -115,10 +118,10 @@ async function ctx(): Promise<Ctx> {
   };
   return c;
 }
-/** memory-mcp를 설치하고 2025.8.4로 업데이트해 둔 상태(Version State resolved 2025.8.4). */
+/** fixture-npx-mcp를 설치하고 2025.8.4로 업데이트해 둔 상태(Version State resolved 2025.8.4). */
 async function installedAt(c: Ctx) {
-  expect(await c.run(["install", "memory-mcp", "--client", "claude-code", "--project", c.project])).toBe(0);
-  expect(await c.run(["update", "memory-mcp", "--project", c.project])).toBe(0);
+  expect(await c.run(["install", "fixture-npx-mcp", "--client", "claude-code", "--project", c.project])).toBe(0);
+  expect(await c.run(["update", "fixture-npx-mcp", "--project", c.project])).toBe(0);
   c.latest = "2025.9.25";
   c.fetches.length = 0;
   c.spawns.length = 0;
@@ -139,11 +142,11 @@ describe("REQ-045 REQ-041 REQ-042 REQ-052 REQ-032 M6 CLI", () => {
   it("AC-056-01 openhub releases 출력(current → target, 결정론 요약, notes 원문 일부, 링크)이 golden과 같다", async () => {
     const c = await ctx();
     await installedAt(c);
-    expect(await c.run(["releases", "memory-mcp", "--project", c.project])).toBe(0);
+    expect(await c.run(["releases", "fixture-npx-mcp", "--project", c.project])).toBe(0);
     expect(c.stdout.join("\n")).toContain("현재        2025.8.4");
     expect(c.stdout.join("\n")).toContain("  | <script>alert(1)</script>");
     await golden("releases-memory.txt", c.stdout.join("\n") + "\n");
-    expect(await c.run(["releases", "memory-mcp", "--project", c.project, "--json"])).toBe(0);
+    expect(await c.run(["releases", "fixture-npx-mcp", "--project", c.project, "--json"])).toBe(0);
     const doc = JSON.parse(c.stdout.join("\n")) as { snapshot: { target: { version: string } }; summary: { categories: Record<string, unknown[]> } };
     expect([doc.snapshot.target.version, doc.summary.categories["breaking"]!.length]).toEqual(["2025.9.25", 1]);
   });
@@ -151,17 +154,17 @@ describe("REQ-045 REQ-041 REQ-042 REQ-052 REQ-032 M6 CLI", () => {
   it("AC-056-02 openhub impact 출력(판정·reasons·evidence·영향 파일)이 golden과 같다", async () => {
     const c = await ctx();
     await installedAt(c);
-    expect(await c.run(["impact", "memory-mcp", "--project", c.project])).toBe(0);
+    expect(await c.run(["impact", "fixture-npx-mcp", "--project", c.project])).toBe(0);
     expect(c.stdout).toContain("판정        HIGH (WARNING)");
     await golden("impact-memory.txt", c.stdout.join("\n") + "\n");
-    expect(await c.run(["impact", "memory-mcp", "--project", c.project, "--to", "2025.9.1", "--json"])).toBe(0);
+    expect(await c.run(["impact", "fixture-npx-mcp", "--project", c.project, "--to", "2025.9.1", "--json"])).toBe(0);
     expect(JSON.parse(c.stdout.join("\n"))).toMatchObject({ to: { version: "2025.9.1" }, verdict: "high", affectedFiles: [".mcp.json"] });
   });
 
   it("AC-056-03 openhub update Preview 앞에 Update available·Impact·Reasons·Summary가 붙고 LifecyclePlan JSON은 그대로다", async () => {
     const c = await ctx();
     await installedAt(c);
-    expect(await c.run(["update", "memory-mcp", "--project", c.project], { answer: () => "n" })).toBe(1);
+    expect(await c.run(["update", "fixture-npx-mcp", "--project", c.project], { answer: () => "n" })).toBe(1);
     const title = c.stdout.findIndex((l) => / 업데이트 계획$/u.test(l));
     expect(c.stdout.slice(0, 4)).toEqual([
       "Update available: 2025.8.4 → 2025.9.25",
@@ -171,7 +174,7 @@ describe("REQ-045 REQ-041 REQ-042 REQ-052 REQ-032 M6 CLI", () => {
     ]);
     expect(title).toBeGreaterThan(4);
     const digest = c.stdout.find((l) => l.startsWith("Plan digest"))!.split(/\s+/u).at(-1);
-    expect(await c.run(["update", "memory-mcp", "--project", c.project, "--json"])).toBe(0);
+    expect(await c.run(["update", "fixture-npx-mcp", "--project", c.project, "--json"])).toBe(0);
     const doc = JSON.parse(c.stdout.join("\n")) as { planDigest: string; plan: Record<string, unknown> };
     expect(doc.planDigest).toBe(digest);
     expect(JSON.stringify(doc.plan)).not.toMatch(/impact|Impact|summary/u);
@@ -182,7 +185,7 @@ describe("REQ-045 REQ-041 REQ-042 REQ-052 REQ-032 M6 CLI", () => {
     const c = await ctx();
     await installedAt(c);
     const stateBefore = await readFile(path.join(c.home, ".openhub", "state", "lifecycle.json"), "utf8");
-    for (const args of [["releases", "memory-mcp"], ["impact", "memory-mcp"], ["update", "memory-mcp"], ["install", "local-llm-ui", "--backend", "pinokio", "--client", "claude-code"], ["discover"]]) {
+    for (const args of [["releases", "fixture-npx-mcp"], ["impact", "fixture-npx-mcp"], ["update", "fixture-npx-mcp"], ["install", "local-llm-ui", "--backend", "pinokio", "--client", "claude-code"], ["discover"]]) {
       expect(await c.run([...args, "--project", c.project, "--json"].filter((a, i, arr) => !(args[0] === "discover" && (a === "--project" || arr[i - 1] === "--project")))), args.join(" ")).toBe(0);
       expect(() => JSON.parse(c.stdout.join("\n")), args.join(" ")).not.toThrow();
     }
@@ -194,7 +197,7 @@ describe("REQ-045 REQ-041 REQ-042 REQ-052 REQ-032 M6 CLI", () => {
 
   it("AC-056-05 --yes·-y·--approve는 exit 2다", async () => {
     const c = await ctx();
-    for (const cmd of [["releases", "memory-mcp"], ["impact", "memory-mcp"], ["discover"], ["pinokio", "inspect", "someone/pinokio-app@" + COMMIT], ["install", "local-llm-ui", "--backend", "pinokio"], ["update", "memory-mcp"]]) {
+    for (const cmd of [["releases", "fixture-npx-mcp"], ["impact", "fixture-npx-mcp"], ["discover"], ["pinokio", "inspect", "someone/pinokio-app@" + COMMIT], ["install", "local-llm-ui", "--backend", "pinokio"], ["update", "fixture-npx-mcp"]]) {
       for (const flag of ["--yes", "-y", "--approve", "--approve=sha256:abc"]) expect(await c.run([...cmd, flag]), cmd.join(" ") + " " + flag).toBe(2);
     }
     expect([c.spawns, c.writes, c.fetches]).toEqual([[], [], []]);
@@ -204,7 +207,7 @@ describe("REQ-045 REQ-041 REQ-042 REQ-052 REQ-032 M6 CLI", () => {
     const c = await ctx();
     expect(await c.run(["install", "local-llm-ui", "--backend", "pinokio", "--project", c.project], { tty: false })).toBe(3);
     expect(c.stderr.join("\n")).toContain("APPROVAL_REQUIRED");
-    expect(await c.run(["update", "memory-mcp", "--project", c.project], { tty: false })).toBe(3);
+    expect(await c.run(["update", "fixture-npx-mcp", "--project", c.project], { tty: false })).toBe(3);
     expect([c.spawns, c.writes]).toEqual([[], []]);
   });
 
@@ -227,7 +230,7 @@ describe("REQ-045 REQ-041 REQ-042 REQ-052 REQ-032 M6 CLI", () => {
     const c = await ctx();
     await installedAt(c);
     const outputs: string[] = [];
-    for (const args of [["releases", "memory-mcp", "--llm-summary", "--llm-model", "gpt-test"], ["releases", "memory-mcp", "--json", "--llm-summary", "--llm-model", "gpt-test"], ["impact", "memory-mcp"], ["impact", "memory-mcp", "--json"], ["update", "memory-mcp", "--json"]]) {
+    for (const args of [["releases", "fixture-npx-mcp", "--llm-summary", "--llm-model", "gpt-test"], ["releases", "fixture-npx-mcp", "--json", "--llm-summary", "--llm-model", "gpt-test"], ["impact", "fixture-npx-mcp"], ["impact", "fixture-npx-mcp", "--json"], ["update", "fixture-npx-mcp", "--json"]]) {
       await c.run([...args, "--project", c.project]);
       outputs.push(all(c));
     }

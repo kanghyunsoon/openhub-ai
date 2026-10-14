@@ -24,11 +24,11 @@ import {
   type PlannedLifecycle,
 } from "../../src/index";
 import { approveAll, createHarness, plannedOf, type Harness } from "../installer/harness";
-import { REPO_ROOT, seedEntries } from "../recommendation/helpers";
+import { REPO_ROOT, seedWithNpxFixture } from "../recommendation/helpers";
 import { newScratch } from "./helpers";
 
 /** TASK-040 LifecyclePlan v1·Approval kernel·PLAN_STALE. 가짜 registry fetch와 임시 project·home만 쓴다. */
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await newScratch("lifecycle-plan-test");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 const NOW = () => new Date("2026-10-07T01:02:03.000Z");
@@ -39,7 +39,7 @@ function registry(versions: { memory?: string; postgres?: string } = {}) {
   const fetch = vi.fn(async (url: string) => {
     calls.push(url);
     const json = (doc: unknown) => new Response(JSON.stringify(doc), { status: 200 });
-    if (url === "https://registry.npmjs.org/@modelcontextprotocol%2fserver-memory/latest") return json({ name: "@modelcontextprotocol/server-memory", version: versions.memory ?? "1.2.3" });
+    if (url === "https://registry.npmjs.org/@openhub-fixture%2fnpx-mcp/latest") return json({ name: "@openhub-fixture/npx-mcp", version: versions.memory ?? "1.2.3" });
     if (url === "https://pypi.org/pypi/postgres-mcp/json") return json({ info: { name: "postgres-mcp", version: versions.postgres ?? "0.3.0" } });
     if (url.startsWith("https://ghcr.io/token")) return json({ token: "anon" });
     if (url === "https://ghcr.io/v2/github/github-mcp-server/manifests/latest") return new Response(null, { status: 200, headers: { "docker-content-digest": DIGEST } });
@@ -57,7 +57,7 @@ async function installed(h: Harness, toolId: string, targets: InstallRequest["ta
 }
 const options = (h: Harness, over: Partial<LifecyclePlanOptions> = {}): LifecyclePlanOptions => ({
   operation: "update",
-  toolId: "memory-mcp",
+  toolId: "fixture-npx-mcp",
   projectRoot: h.projectRoot,
   homeDir: h.homeDir,
   entries: seed,
@@ -78,7 +78,7 @@ async function approve(p: PlannedLifecycle, skip: readonly LifecycleApprovalRequ
 }
 async function memoryHarness() {
   const h = await createHarness(scratch, { entries: seed });
-  await installed(h, "memory-mcp", [{ client: "claude-code", scope: "project" }]);
+  await installed(h, "fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
   h.reset();
   return h;
 }
@@ -95,16 +95,16 @@ describe("REQ-040 LifecyclePlan v1·Approval·PLAN_STALE", () => {
     const h = await memoryHarness();
     const p = planned(await planLifecycle(options(h)));
     expect(p.plan.status).toBe("ready");
-    expect(p.plan.current).toMatchObject({ requested: "@modelcontextprotocol/server-memory", identity: null });
+    expect(p.plan.current).toMatchObject({ requested: "@openhub-fixture/npx-mcp", identity: null });
     expect(p.plan.target).toEqual({
-      requested: "@modelcontextprotocol/server-memory",
-      identity: { kind: "npm-package", spec: "@modelcontextprotocol/server-memory@1.2.3", version: "1.2.3", digest: null, integrity: null, source: "npm-registry" },
-      clientSpec: { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory@1.2.3"] },
+      requested: "@openhub-fixture/npx-mcp",
+      identity: { kind: "npm-package", spec: "@openhub-fixture/npx-mcp@1.2.3", version: "1.2.3", digest: null, integrity: null, source: "npm-registry" },
+      clientSpec: { command: "npx", args: ["-y", "@openhub-fixture/npx-mcp@1.2.3"] },
     });
     // v0.2.0 npx Prepare: 정확한 target 버전을 설정 교체 전에 npx cache에 받는다(run).
     expect(p.plan.steps.map((s) => s.kind)).toEqual(["run", "config-replace", "health", "state-commit"]);
-    expect(p.plan.steps[0]).toMatchObject({ id: "npx-prepare", executable: "npx", args: ["--yes", "--package=@modelcontextprotocol/server-memory@1.2.3", "--", "node", "--version"] });
-    expect(p.plan.steps[1]).toMatchObject({ path: ["mcpServers", "memory"], value: { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory@1.2.3"] } });
+    expect(p.plan.steps[0]).toMatchObject({ id: "npx-prepare", executable: "npx", args: ["--yes", "--package=@openhub-fixture/npx-mcp@1.2.3", "--", "node", "--version"] });
+    expect(p.plan.steps[1]).toMatchObject({ path: ["mcpServers", "fixture-npx"], value: { command: "npx", args: ["-y", "@openhub-fixture/npx-mcp@1.2.3"] } });
     expect(lifecyclePlanSchema.safeParse({ ...p.plan, extra: true }).success).toBe(false);
     expect(lifecyclePlanSchema.safeParse({ ...p.plan, target: { ...p.plan.target, note: "x" } }).success).toBe(false);
     expect(lifecyclePlanSchema.safeParse({ ...p.plan, targets: [{ ...p.plan.targets[0]!, file: "/home/someone/.mcp.json" }] }).success).toBe(false);
@@ -175,7 +175,7 @@ describe("REQ-040 LifecyclePlan v1·Approval·PLAN_STALE", () => {
     const approval = await approve(planned(await planLifecycle(options(h))));
     const file = path.join(h.projectRoot, ".mcp.json");
     const doc = JSON.parse(await readFile(file, "utf8"));
-    doc.mcpServers.memory.args.push("--verbose");
+    doc.mcpServers["fixture-npx"].args.push("--verbose");
     await writeFile(file, JSON.stringify(doc, null, 2) + "\n");
     const r = await verifyApprovedLifecyclePlan(approval, () => planLifecycle(options(h)));
     expect(r).toMatchObject({ ok: false, code: "PLAN_STALE" });
@@ -203,7 +203,7 @@ describe("REQ-040 LifecyclePlan v1·Approval·PLAN_STALE", () => {
     expect(skipped.warnings).toContainEqual({ code: "health-gate-skipped", message: HEALTH_GATE_SKIP_NOTICE });
 
     const user = await createHarness(scratch, { entries: seed });
-    await installed(user, "memory-mcp", [{ client: "cursor", scope: "user" }], true);
+    await installed(user, "fixture-npx-mcp", [{ client: "cursor", scope: "user" }], true);
     expect(planned(await planLifecycle(options(user, { includeUser: true }))).plan.approvalRequirements).toEqual(["base", "health-execution", "user-scope-config"]);
     expect(await planLifecycle(options(user))).toMatchObject({ ok: false, code: "NOT_MANAGED" });
 
@@ -221,7 +221,7 @@ describe("REQ-040 LifecyclePlan v1·Approval·PLAN_STALE", () => {
   it("AC-040-08 current와 target identity가 같으면 up-to-date이고 steps 0개이며 승인할 수 없다", async () => {
     const h = await memoryHarness();
     await editState(h, (e) => {
-      e["artifact"]["resolved"] = { kind: "npm-package", spec: "@modelcontextprotocol/server-memory@1.2.3", version: "1.2.3", digest: null, integrity: null, source: "npm-registry" };
+      e["artifact"]["resolved"] = { kind: "npm-package", spec: "@openhub-fixture/npx-mcp@1.2.3", version: "1.2.3", digest: null, integrity: null, source: "npm-registry" };
     });
     const p = planned(await planLifecycle(options(h)));
     expect([p.plan.status, p.plan.steps, p.plan.approvalRequirements]).toEqual(["up-to-date", [], ["base"]]);
@@ -246,7 +246,7 @@ describe("REQ-040 LifecyclePlan v1·Approval·PLAN_STALE", () => {
     const h = await memoryHarness();
     const file = path.join(h.projectRoot, ".mcp.json");
     const original = await readFile(file, "utf8");
-    await writeFile(file, original.replace("@modelcontextprotocol/server-memory", "@modelcontextprotocol/server-memory@0.9.0"));
+    await writeFile(file, original.replace("@openhub-fixture/npx-mcp", "@openhub-fixture/npx-mcp@0.9.0"));
     const net = registry();
     const drift = planned(await planLifecycle(options(h, { fetch: net.fetch })));
     expect([drift.plan.status, drift.plan.steps, drift.plan.warnings.map((w) => w.code)]).toEqual(["blocked", [], ["CONFIG_DRIFT"]]);
@@ -255,7 +255,7 @@ describe("REQ-040 LifecyclePlan v1·Approval·PLAN_STALE", () => {
 
     await writeFile(file, original);
     await mkdir(path.join(h.projectRoot, ".cursor"), { recursive: true });
-    await writeFile(path.join(h.projectRoot, ".cursor", "mcp.json"), '{ "mcpServers": { "memory": { "command": "node", "args": ["server.js"] } } }\n');
+    await writeFile(path.join(h.projectRoot, ".cursor", "mcp.json"), '{ "mcpServers": { "fixture-npx": { "command": "node", "args": ["server.js"] } } }\n');
     const foreign = planned(
       await planLifecycle(options(h, { targets: [{ client: "claude-code", scope: "project" }, { client: "cursor", scope: "project" }] })),
     );

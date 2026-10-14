@@ -8,6 +8,7 @@ import {
   createTreeKiller,
   inspectNpxEntry,
   locateWindowsNpxLauncher,
+  mcpPackageSourceCheck,
   nodeExecSpawner,
   npmChildEnv,
   npmToolArgv,
@@ -30,10 +31,12 @@ import { seedEntries } from "../recommendation/helpers";
 /**
  * v0.2.0 npx Prepare 실제 E2E(OPENHUB_E2E=1에서만). 실제 npm·npx·네트워크를 쓰고, npm cache는 매번 새 임시 디렉터리다
  * (npm_config_cache를 이 테스트 동안만 바꾼다. 사용자 cache는 쓰지 않는다). 자격증명·실제 서비스는 쓰지 않는다.
- * 대상 패키지는 OPENHUB_E2E_NPX_COMMAND로 바꿀 수 있다(예: 대형 패키지 재검증). 기본은 Memory MCP의 고정 버전이다.
- * 이 테스트는 Registry Manifest를 바꾸지 않는다. memory-mcp Manifest를 메모리에서만 고정 버전 명령으로 바꿔 쓴다.
+ * 대상 패키지는 OPENHUB_E2E_NPX_COMMAND로 바꿀 수 있다(예: 대형 패키지 재검증). 기본은 Context7의 고정 버전이다.
+ * 이 테스트는 Registry Manifest를 바꾸지 않는다. context7 Manifest를 메모리에서만(v0.2.1부터: Memory MCP는 지원 중단 #69) 고정 버전 명령으로 바꿔 쓴다.
  */
-const COMMAND = process.env["OPENHUB_E2E_NPX_COMMAND"] ?? "npx -y @modelcontextprotocol/server-memory@2026.8.31";
+// v0.2.1(#46): 제품 경로처럼 같은 원본으로 계획의 패키지 출처 digest와 Health 실행 환경을 만든다(없으면 Health가 서버를 띄우지 않는다).
+const source = () => process.env;
+const COMMAND = process.env["OPENHUB_E2E_NPX_COMMAND"] ?? "npx -y @upstash/context7-mcp@4.1.1";
 const INTERRUPT_MS = Number(process.env["OPENHUB_E2E_NPX_INTERRUPT_MS"] ?? "1500");
 const platform = process.platform === "win32" ? "windows" : "linux";
 const SPEC = COMMAND.split(" ").find((t, i) => i > 0 && !t.startsWith("-"))!;
@@ -57,7 +60,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 npx Prepare 실제 E
   it("빈 npm cache: 승인 → Prepare → 설정 기록 → Version State → Health(20 s 한도)가 통과한다", async () => {
     await withCache(async (cache) => {
       const seed = await seedEntries();
-      const entries: RegistryEntry[] = seed.map((e) => (e.manifest.name === "memory-mcp" ? { ...e, manifest: { ...e.manifest, install: { ...e.manifest.install, options: { command: COMMAND } } } } : e));
+      const entries: RegistryEntry[] = seed.map((e) => (e.manifest.name === "context7" ? { ...e, manifest: { ...e.manifest, install: { ...e.manifest.install, options: { command: COMMAND } } } } : e));
       const scratch = await mkdtemp(path.join(os.tmpdir(), "openhub-e2e-prepare-"));
       try {
         const h = await createHarness(scratch, { entries });
@@ -71,7 +74,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 npx Prepare 실제 E
           killTree: createTreeKiller({ cwd: os.tmpdir() }),
           npmChildEnv: () => npmChildEnv({ ...process.env, OPENAI_API_KEY: "sk-openhub-e2e-fake" }),
         };
-        const request = { ...h.request("memory-mcp", CLAUDE), platform } as const;
+        const request = { ...h.request("context7", CLAUDE), platform } as const;
         const planned = await plannedOf({ ...h, env }, request);
         expect(planned.plan.steps[0]).toMatchObject({ id: "npx-prepare", args: npxPrepareArgs(SPEC) });
         const started = Date.now();
@@ -82,7 +85,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 npx Prepare 실제 E
         expect(JSON.stringify(result)).not.toContain("sk-openhub-e2e-fake");
         expect(existsSync(path.join(cache, "_npx", npxCacheKey(SPEC), NPX_PREPARED_MARKER))).toBe(true);
         expect(await recordInstallInState(planned, result, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() })).toMatchObject({ ok: true });
-        const regen = () => planLifecycle({ operation: "health", toolId: "memory-mcp", projectRoot: h.projectRoot, homeDir: h.homeDir, entries, platform, includeUser: false });
+        const regen = () => planLifecycle({ operation: "health", toolId: "context7", projectRoot: h.projectRoot, homeDir: h.homeDir, entries, platform, includeUser: false, packageSource: { npx: mcpPackageSourceCheck(source, "npx"), uvx: mcpPackageSourceCheck(source, "uvx") } });
         const first = await regen();
         if (!first.ok) throw new Error(first.code);
         const outcome = await requestLifecycleApproval(first.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
@@ -90,7 +93,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 npx Prepare 실제 E
         const gate = await verifyApprovedLifecyclePlan(outcome.approval, regen);
         if (!gate.ok) throw new Error(gate.code);
         const t0 = Date.now();
-        const health = await runHealthCheck(gate.verified, { healthCheckType: "mcp-handshake", tempBase: os.tmpdir(), windowsNpx });
+        const health = await runHealthCheck(gate.verified, { healthCheckType: "mcp-handshake", tempBase: os.tmpdir(), windowsNpx, sourceEnv: source });
         console.log("health ms " + String(Date.now() - t0) + " " + JSON.stringify(health.ok ? { status: health.result.status, toolCount: health.result.toolCount } : health));
         expect(health).toMatchObject({ ok: true, result: { status: "healthy" } });
       } finally {

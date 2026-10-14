@@ -7,9 +7,12 @@ import { parseUvxArgs, pythonRequirementName } from "../process/uvx-args";
  * - 기존 사용자의 Client 설정·Version State·Journal은 지우지 않는다. 상태 조회와 Journal Recovery는 Manifest 없이 그대로 동작한다.
  * - 설치·update·rollback·health·repair·adopt·benchmark·Pinokio 계획은 TOOL_NOT_FOUND 대신 TOOL_WITHDRAWN과 이 사유를 돌려준다.
  *   판정은 Core의 계획 생성 단계에서 한다(resolveRegistryTool·withdrawnManifestOf). Registry에 같은 Manifest가 있어도(사용자 Registry,
- *   직접 넘긴 Manifest) 막는다. 이름이 달라도 identity(저장소·canonical MCP alias·PyPI 패키지)가 같으면 같은 도구로 본다.
+ *   직접 넘긴 Manifest) 막는다. 이름이 달라도 identity(전용 저장소·전용 canonical MCP alias·PyPI·npm 패키지)가 같으면 같은 도구로 본다.
  * - Registry 검증(validateRegistry)도 다시 들어온 Manifest를 거부하지만, 안전성은 이 계획 단계 판정이 보장한다.
  * - 범용 Registry 확장 기능이 아니며, 항목 추가·삭제는 코드 리뷰 대상이다.
+ * - 저장소(repositories)는 그 저장소가 이 도구만 담을 때만 쓴다. 여러 서버가 함께 쓰는 저장소(예: modelcontextprotocol/servers)는
+ *   저장소로 식별하지 않는다. alias도 그 도구만의 이름일 때만 넣는다: "memory"처럼 흔한 alias는 무관한 패키지도 쓸 수 있으므로
+ *   Memory MCP는 Tool ID와 정확한 npm 패키지로만 식별한다(v0.2.1 #72 리뷰, 다른 도구 오탐 방지).
  */
 export interface WithdrawnTool {
   readonly toolId: string;
@@ -20,14 +23,19 @@ export interface WithdrawnTool {
   readonly reasonEn: string;
   /** 재지원 추적 Issue. */
   readonly issue: string;
+  /** 사용자가 지금 할 일(선택). 안내 끝에 붙인다. */
+  readonly advice?: string;
+  readonly adviceEn?: string;
   /** 다른 이름의 Manifest를 같은 도구로 식별하는 정보(식별만 한다. 실행·설치에 쓰지 않는다). */
   readonly identity: {
-    /** GitHub owner/repo(대소문자 무시) */
+    /** GitHub owner/repo(대소문자 무시). 이 도구만 담은 저장소일 때만 넣는다. */
     readonly repositories: readonly string[];
-    /** canonical MCP alias(recommendation.identity.mcpServerNames) */
+    /** canonical MCP alias(recommendation.identity.mcpServerNames). 그 도구만 쓰는 이름일 때만 넣는다(흔한 이름은 비운다). */
     readonly mcpServerNames: readonly string[];
     /** PyPI 패키지 이름(PEP 503 정규화로 비교) */
     readonly pypiPackages: readonly string[];
+    /** npm 패키지 이름(정확히 같은 이름만, 소문자 비교). 같은 scope의 다른 패키지는 해당하지 않는다. */
+    readonly npmPackages: readonly string[];
   };
 }
 
@@ -39,7 +47,22 @@ export const WITHDRAWN_TOOLS: readonly WithdrawnTool[] = [
     reason: "실행에 필요한 의존성(proxy-tools)이 소스 빌드만 제공되고, OpenHub가 그 빌드 입력을 검증할 수 없어 검토되지 않은 빌드 코드를 실행하게 됩니다",
     reasonEn: "a dependency it needs (proxy-tools) is published only as a source distribution, and OpenHub cannot verify the inputs of that build, so it would run unreviewed build code",
     issue: "https://github.com/kanghyunsoon/openhub-ai/issues/59",
-    identity: { repositories: ["oraios/serena"], mcpServerNames: ["serena"], pypiPackages: ["serena-agent"] },
+    identity: { repositories: ["oraios/serena"], mcpServerNames: ["serena"], pypiPackages: ["serena-agent"], npmPackages: [] },
+  },
+  {
+    toolId: "memory-mcp",
+    displayName: "Memory MCP",
+    since: "0.2.1",
+    reason:
+      "기억을 저장하는 기본 파일(memory.jsonl)이 npx cache 안의 패키지 폴더에 있어, 새 버전이 나오면 그 파일이 지워지고 다른 버전으로 업데이트·롤백하면 저장한 기억이 보이지 않습니다(재현됨). 안전한 저장 경로와 승인된 데이터 이전이 준비될 때까지 OpenHub가 설치·관리하지 않습니다",
+    reasonEn:
+      "its default storage file (memory.jsonl) lives in the package folder inside the npx cache, so a new upstream version deletes it and an update or rollback to another version hides the stored memories (reproduced). OpenHub does not install or manage it until a stable storage path and an approved data copy are available",
+    issue: "https://github.com/kanghyunsoon/openhub-ai/issues/69",
+    advice: "Client(Claude Code·Codex·Cursor)는 기존 설정으로 이 서버를 계속 시작할 수 있습니다. 다음 실행 전에 memory.jsonl을 npm cache 밖으로 백업하고 MEMORY_FILE_PATH에 그 절대 경로를 지정하세요(README·알려진 문제 참고)",
+    adviceEn: "Your client (Claude Code, Codex, Cursor) can still start this server from its existing configuration. Before its next start, back up memory.jsonl outside the npm cache and set MEMORY_FILE_PATH to that absolute path (see the README and known issues)",
+    // 저장소 modelcontextprotocol/servers는 여러 MCP 서버가 함께 쓰므로 저장소로 식별하지 않는다. alias "memory"는 무관한 패키지도
+    // 쓸 수 있는 흔한 이름이라 식별에 쓰지 않는다(#72 리뷰). Tool ID memory-mcp와 실제 설치 패키지만 본다.
+    identity: { repositories: [], mcpServerNames: [], pypiPackages: [], npmPackages: ["@modelcontextprotocol/server-memory"] },
   },
 ];
 
@@ -102,7 +125,46 @@ function installPackageNames(manifest: Manifest): string[] {
 }
 
 /**
- * 이 Manifest가 지원 중단 도구인가. name, GitHub 저장소, canonical MCP alias, 설치 정보의 PyPI 패키지·git 저장소 중 하나라도 같으면 그렇다.
+ * npm spec의 패키지 이름("@scope/name@1.0.0" → "@scope/name", "name@latest" → "name"). 이름 규칙에 맞지 않으면 undefined.
+ * registry 모듈은 installer를 import하지 않으므로(CON-003) 여기서 작게 해석한다. 식별에만 쓴다.
+ */
+function npmSpecName(spec: string): string | undefined {
+  const NAME = /^[a-z0-9][a-z0-9._-]*$/u;
+  const lower = spec.toLowerCase();
+  let scope = "";
+  let rest = lower;
+  if (lower.startsWith("@")) {
+    const slash = lower.indexOf("/");
+    if (slash <= 1 || !NAME.test(lower.slice(1, slash))) return undefined;
+    scope = lower.slice(0, slash + 1);
+    rest = lower.slice(slash + 1);
+  }
+  const at = rest.indexOf("@");
+  const name = at === -1 ? rest : rest.slice(0, at);
+  return NAME.test(name) ? scope + name : undefined;
+}
+
+/**
+ * 설치 정보의 npm 패키지 이름 후보(v0.2.1 #69). 모든 문자열의 token을 npm spec으로 해석해 이름만 꺼낸다.
+ * - 옵션 값(`--package=X`, `--package X`, `-p X`)과 npx의 첫 위치 인자, fallback package가 모두 token이라 함께 본다.
+ * - npm alias(`이름@npm:실제패키지@버전`, `npm:실제패키지`)는 실제 패키지 이름으로 본다.
+ * - 이름은 정확히 비교한다(`@modelcontextprotocol/server-memory-plus`는 다른 패키지).
+ */
+function installNpmPackageNames(manifest: Manifest): string[] {
+  const names: string[] = [];
+  for (const token of installStrings(manifest).flatMap(tokensOf)) {
+    let value = token.startsWith("--") && token.includes("=") ? token.slice(token.indexOf("=") + 1) : token;
+    const alias = value.lastIndexOf("npm:");
+    if (alias !== -1) value = value.slice(alias + "npm:".length);
+    const name = npmSpecName(value);
+    if (name !== undefined) names.push(name);
+  }
+  return names;
+}
+
+/**
+ * 이 Manifest가 지원 중단 도구인가. name, GitHub 저장소(그 도구 전용일 때만), canonical MCP alias(그 도구 전용일 때만),
+ * 설치 정보의 PyPI·npm 패키지·git 저장소 중 하나라도 같으면 그렇다.
  * 결과는 사유 안내와 차단에만 쓴다.
  */
 export function withdrawnManifestOf(manifest: Manifest): WithdrawnTool | undefined {
@@ -110,11 +172,13 @@ export function withdrawnManifestOf(manifest: Manifest): WithdrawnTool | undefin
   const aliases = manifest.recommendation?.identity?.mcpServerNames ?? [];
   const tokens = installStrings(manifest).flatMap(tokensOf);
   const names = installPackageNames(manifest).map(pep503);
+  const npmNames = installNpmPackageNames(manifest);
   return WITHDRAWN_TOOLS.find((t) => {
     if (t.toolId === manifest.name) return true;
     const repos = t.identity.repositories.map((r) => r.toLowerCase());
     if (repo !== undefined && repos.includes(repo)) return true;
     if (aliases.some((a) => t.identity.mcpServerNames.includes(a))) return true;
+    if (npmNames.some((n) => t.identity.npmPackages.some((p) => p.toLowerCase() === n))) return true;
     const pkgs = t.identity.pypiPackages.map(pep503);
     if (tokens.some((token) => repos.some((r) => token.toLowerCase().includes("github.com/" + r)))) return true;
     return names.some((n) => pkgs.includes(n));
@@ -125,14 +189,18 @@ export function withdrawnManifestOf(manifest: Manifest): WithdrawnTool | undefin
 export function toolWithdrawnMessage(tool: WithdrawnTool): string {
   return (
     tool.displayName + "(" + tool.toolId + ")는 v" + tool.since + "부터 새 설치·업데이트·rollback·Health·repair·편입(adopt)·Benchmark를 지원하지 않습니다: " + tool.reason + ". " +
-    "기존 Client 설정과 Version State는 지우지 않았습니다. 중단된 작업은 openhub lifecycle recover로 복구할 수 있고, 직접 제거하려면 README의 수동 제거 절차를 따르세요. 재지원 진행: " + tool.issue
+    "기존 Client 설정과 Version State는 지우지 않았습니다. 중단된 작업은 openhub lifecycle recover로 복구할 수 있고, 직접 제거하려면 README의 수동 제거 절차를 따르세요. " +
+    (tool.advice === undefined ? "" : tool.advice + ". ") +
+    "재지원 진행: " + tool.issue
   );
 }
 
 export function toolWithdrawnMessageEn(tool: WithdrawnTool): string {
   return (
     tool.displayName + " (" + tool.toolId + ") is no longer supported for new installs, updates, rollback, Health, repair, adopt or Benchmark since v" + tool.since + ": " + tool.reasonEn + ". " +
-    "Your client configuration and Version State were not changed. An interrupted operation can still be recovered with openhub lifecycle recover; to remove the tool yourself, follow the manual removal steps in the README. Re-support: " + tool.issue
+    "Your client configuration and Version State were not changed. An interrupted operation can still be recovered with openhub lifecycle recover; to remove the tool yourself, follow the manual removal steps in the README. " +
+    (tool.adviceEn === undefined ? "" : tool.adviceEn + ". ") +
+    "Re-support: " + tool.issue
   );
 }
 
