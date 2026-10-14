@@ -69,6 +69,25 @@ describe("checkRcResult", () => {
     expect([...new Set(recorded)].sort()).toEqual([...REQUIRED_CHECKS.linux].sort());
   });
 
+  it("C4 (v0.2.1): 하네스는 명시적 테스트 응답 없이 승인하지 않고, 예상 밖 대화상자·남은 응답을 RC 오류로 남긴다", () => {
+    const harness = readFileSync(path.join(ROOT, "scripts/rc/packaged-rc.mjs"), "utf8");
+    // 대화상자 응답은 dialog-answer.mjs의 함수 소스를 그대로 주입해서 쓴다(동작은 rc-dialog-answer.test.ts). 예전 기본 승인은 없다.
+    expect(harness).toContain("const answerDialog = ${answerDialog.toString()};");
+    expect(harness).toContain("const installDialogAnswers = ${installDialogAnswers.toString()};");
+    expect(harness).not.toContain('globalThis.__rcAnswers.shift() : { action: "approve" }');
+    expect(harness).toContain("const approve = (n = 1) => answers(");
+    // 감사 결과가 results.errors에 들어가야 checkRcResult(D)로 실패한다.
+    expect(harness).toContain("results.errors.push(...dialogAuditErrors(ctx.dialogAudit));");
+    // 승인 장면마다 직전에 명시적 승인(app.approve)이 있다: 설치·Health·Update·Rollback·Repair 호출 수와 같다.
+    const approvals = [...harness.matchAll(/await app\.approve\(\);/gu)].length;
+    const approving = [...harness.matchAll(/window\.__openhub(?:Install|LifecycleRun|LifecycleUpdateTo|Repair)\(/gu)].length;
+    // 승인 대화상자가 없는 호출: 거절 확인·PLAN_STALE 확인(각자 answers로 응답을 넣음)과 같은 대상 재요청(no-op)
+    expect(approvals).toBe(approving - 3);
+    const r = pass();
+    r.errors.push("dialog audit (launch 1): 1 dialog(s) without an explicit test answer were rejected: OpenHub install approval");
+    expect(checkRcResult(r).ok).toBe(false);
+  });
+
   it("D: 오류가 기록되어 있으면 실패", () => {
     const r = pass();
     r.errors.push("Error: timeout\n    at ev (packaged-rc.mjs:1:1)");
