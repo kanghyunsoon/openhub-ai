@@ -42,7 +42,7 @@ const CLAUDE = [{ client: "claude-code" as const, scope: "project" as const }];
 const NOTES = { command: "uvx", args: ["notes-mcp==1.0.0"] };
 const TOOLS = {
   postgres: { toolId: "postgres-mcp", command: "uvx --from postgres-mcp==0.3.0 --with mcp==1.30.0 postgres-mcp --access-mode=restricted" },
-  memory: { toolId: "memory-mcp", command: "npx -y @modelcontextprotocol/server-memory@2026.8.31" },
+  context7: { toolId: "context7", command: "npx -y @upstash/context7-mcp@4.1.1" },
 } as const;
 const seed = skip ? [] : await seedEntries();
 
@@ -110,20 +110,20 @@ const valueOf = (env: Record<string, string>, name: string) => Object.entries(en
 
 describe.skipIf(skip)("v0.2.1 패키지 출처 불변성 실제 E2E(uv·npm)", () => {
   it("npx 기본 공개 registry: 준비 뒤 Health healthy", async () => {
-    const r = await installThenHealth("memory", {});
+    const r = await installThenHealth("context7", {});
     expect(r.installed.status).toBe("succeeded");
     expect(r.health).toMatchObject({ status: "health-checked", health: { status: "healthy" } });
   }, 600_000);
 
   it("npx 인증 정보 없는 사내 registry(mirror): Health가 같은 registry 값을 받고 healthy", async () => {
-    const r = await installThenHealth("memory", { npm_config_registry: NPM_MIRROR });
+    const r = await installThenHealth("context7", { npm_config_registry: NPM_MIRROR });
     expect(r.health).toMatchObject({ status: "health-checked", health: { status: "healthy" } });
     expect(r.spawned).toHaveLength(1);
     expect(valueOf(r.spawned[0]!, "NPM_CONFIG_REGISTRY")).toBe(NPM_MIRROR);
   }, 600_000);
 
   it("npx URL에 인증 정보가 든 registry: Prepare는 그 registry로 성공하지만 Health·Benchmark는 막히고 spawn 0, 값 0", async () => {
-    const r = await installThenHealth("memory", { npm_config_registry: "https://probe:" + SECRET + "@registry.npmmirror.com/" });
+    const r = await installThenHealth("context7", { npm_config_registry: "https://probe:" + SECRET + "@registry.npmmirror.com/" });
     expect(r.installed.status).toBe("succeeded");
     expect(r.plan?.status).toBe("blocked");
     expect(r.plan?.warnings.map((w) => w.code)).toContain("PACKAGE_SOURCE_UNVERIFIED");
@@ -136,22 +136,22 @@ describe.skipIf(skip)("v0.2.1 패키지 출처 불변성 실제 E2E(uv·npm)", (
     const dir = await mkdtemp(path.join(os.tmpdir(), "openhub-src-npmrc-"));
     const npmrc = path.join(dir, ".npmrc");
     await writeFile(npmrc, "registry=https://probe:" + SECRET + "@registry.npmmirror.com/\n");
-    const r = await installThenHealth("memory", { npm_config_userconfig: npmrc });
+    const r = await installThenHealth("context7", { npm_config_userconfig: npmrc });
     expect(r.health).toMatchObject({ status: "health-checked", health: { status: "healthy" } });
     expect(valueOf(r.spawned[0]!, "NPM_CONFIG_USERCONFIG")).toBe(npmrc);
     for (const text of [JSON.stringify(r.plan), JSON.stringify(r.health), r.config]) expect(text).not.toContain(SECRET);
   }, 600_000);
 
   it("npx registry 접속 실패: Prepare가 실패하고 설정은 그대로이며 공개 registry로 fallback하지 않는다", async () => {
-    const r = await installThenHealth("memory", { npm_config_registry: "http://127.0.0.1:9/", npm_config_fetch_retries: "0" });
+    const r = await installThenHealth("context7", { npm_config_registry: "http://127.0.0.1:9/", npm_config_fetch_retries: "0" });
     expect(r.installed.status).toBe("failed");
-    expect(r.config).not.toContain("server-memory");
+    expect(r.config).not.toContain("context7-mcp");
     expect(r.spawned).toEqual([]);
   }, 600_000);
 
   // #46 리뷰 경계 사례 1·2(실제 npm): 승인 뒤 인증 정보 없는 registry 주소 변경, 원본 누락.
   it("npx 사내 registry(mirror)로 승인한 뒤 다른 registry 주소로 바뀌면 PLAN_STALE이고 spawn 0이다", async () => {
-    const r = await installThenHealth("memory", { npm_config_registry: NPM_MIRROR }, { changeAfterApproval: { npm_config_registry: "https://registry.npmjs.org/" } });
+    const r = await installThenHealth("context7", { npm_config_registry: NPM_MIRROR }, { changeAfterApproval: { npm_config_registry: "https://registry.npmjs.org/" } });
     expect(r.installed.status).toBe("succeeded");
     expect(r.plan?.steps.find((s) => s.kind === "health")).toMatchObject({ packageSource: expect.stringMatching(/^sha256:/u) });
     expect(r.health).toMatchObject({ status: "stale", code: "PLAN_STALE" });
@@ -159,7 +159,7 @@ describe.skipIf(skip)("v0.2.1 패키지 출처 불변성 실제 E2E(uv·npm)", (
   }, 600_000);
 
   it("npx Health 환경 원본이 없으면(누락) 계획이 PACKAGE_SOURCE_UNVERIFIED로 막히고 spawn 0이다", async () => {
-    const r = await installThenHealth("memory", {}, { omitSource: true });
+    const r = await installThenHealth("context7", {}, { omitSource: true });
     expect(r.installed.status).toBe("succeeded");
     expect(r.plan?.status).toBe("blocked");
     expect(r.plan?.warnings.map((w) => w.code)).toContain("PACKAGE_SOURCE_UNVERIFIED");

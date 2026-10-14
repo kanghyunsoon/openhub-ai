@@ -94,25 +94,6 @@
         "platform": "linux"
       }
     },
-    "memory-mcp": {
-      "backend": "npx",
-      "launch": {
-        "args": [
-          "-y",
-          "@modelcontextprotocol/server-memory"
-        ],
-        "clientSpec": {
-          "args": [
-            "-y",
-            "@modelcontextprotocol/server-memory"
-          ],
-          "command": "npx"
-        },
-        "envNames": [],
-        "executable": "npx",
-        "platform": "linux"
-      }
-    },
     "mongodb-mcp-server": {
       "backend": "npx",
       "launch": {
@@ -289,28 +270,6 @@
             "{toolConfig}"
           ],
           "command": "node"
-        },
-        "envNames": [],
-        "executable": "npx",
-        "platform": "windows"
-      }
-    },
-    "memory-mcp": {
-      "backend": "npx",
-      "launch": {
-        "args": [
-          "-y",
-          "@modelcontextprotocol/server-memory"
-        ],
-        "clientSpec": {
-          "args": [
-            "/d",
-            "/c",
-            "npx",
-            "-y",
-            "@modelcontextprotocol/server-memory"
-          ],
-          "command": "cmd"
         },
         "envNames": [],
         "executable": "npx",

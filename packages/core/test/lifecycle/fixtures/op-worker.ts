@@ -16,11 +16,11 @@ import {
   type LifecycleRequest,
 } from "../../../src/index";
 import { approveAll, createHarness, plannedOf } from "../../installer/harness";
-import { seedEntries } from "../../recommendation/helpers";
+import { seedWithNpxFixture } from "../../recommendation/helpers";
 import { fakeNpmSpawner } from "../../process/fake-npm";
 
 const cmd = JSON.parse(process.argv[2]!) as { op: "install" | "update" | "health"; toolId: string; client: "claude-code" | "cursor" | "codex"; base: string; projectRoot: string; homeDir: string; holdDir?: string };
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const h = await createHarness(cmd.base, { entries: seed, dirs: { base: cmd.base, projectRoot: cmd.projectRoot, homeDir: cmd.homeDir } });
 const targets = [{ client: cmd.client, scope: "project" as const }];
 
@@ -44,11 +44,14 @@ if (cmd.op === "install") {
     now: () => new Date(),
     fetch: async (url: string) => {
       const json = (doc: unknown) => new Response(JSON.stringify(doc), { status: 200 });
-      if (url.endsWith("server-memory/latest")) return json({ name: "@modelcontextprotocol/server-memory", version: "1.2.3" });
+      if (url.endsWith("npx-mcp/latest")) return json({ name: "@openhub-fixture/npx-mcp", version: "1.2.3" });
       if (url === "https://pypi.org/pypi/postgres-mcp/json") return json({ info: { name: "postgres-mcp", version: "0.3.0" } });
       return new Response("missing", { status: 404 });
     },
     configFs: h.env.configFs!,
+    // v0.2.1(#46): MCP 실행 환경 원본이 없으면 npx·uvx 계획이 PACKAGE_SOURCE_UNVERIFIED로 막힌다. 이 worker의 Health는 가짜이므로
+    // 명시적인 빈 환경(출처 설정 없음 = 기본 공개 registry·index)을 넘긴다. #46 이후 이 값이 없어 이 E2E가 계획 단계에서 실패했다.
+    mcpSourceEnv: () => ({}),
     spawner: fakeNpmSpawner({ cacheRoot: path.join(cmd.base, "npm-cache-" + process.pid) }).spawner,
     runHealth: async (verified) => {
       if (cmd.holdDir !== undefined) {

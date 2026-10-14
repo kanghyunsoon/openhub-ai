@@ -24,12 +24,12 @@ import {
   type RegistryEntry,
 } from "../../src/index";
 import { approveAll, createHarness, plannedOf, type Harness } from "../installer/harness";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { newScratch } from "./helpers";
 import { fakeNpmSpawner } from "../process/fake-npm";
 
 /** TASK-044 Rollback. install → update → rollback을 실제 config·Version State로 실행한다(registry·준비·Health는 가짜). */
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await newScratch("rollback-test");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 const D1 = "sha256:" + "1".repeat(64);
@@ -44,7 +44,7 @@ interface EnvOptions {
 function envFor(h: Harness, o: EnvOptions = {}) {
   const fetch = vi.fn(async (url: string) => {
     const json = (doc: unknown) => new Response(JSON.stringify(doc), { status: 200 });
-    if (url.endsWith("server-memory/latest")) return json({ name: "@modelcontextprotocol/server-memory", version: "1.2.3" });
+    if (url.endsWith("npx-mcp/latest")) return json({ name: "@openhub-fixture/npx-mcp", version: "1.2.3" });
     if (url.startsWith("https://ghcr.io/token")) return json({ token: "anon" });
     if (url.includes("/manifests/")) return new Response(null, { status: 200, headers: { "docker-content-digest": o.digest ?? D1 } });
     return new Response("missing", { status: 404 });
@@ -117,15 +117,15 @@ const CURSOR = [{ client: "cursor" as const, scope: "project" as const }];
 
 describe("REQ-050 Rollback", () => {
   it("AC-044-01 RollbackPlan은 state.previous로 만들고 npx·uvx는 fetch 0회, docker는 이전 digest를 pull한다", async () => {
-    const { h } = await updatedHarness("memory-mcp", CLAUDE);
+    const { h } = await updatedHarness("fixture-npx-mcp", CLAUDE);
     const { env, fetch } = envFor(h);
-    const plan = (await planOf(requestOf(h, "memory-mcp", "rollback", CLAUDE), env)).plan;
+    const plan = (await planOf(requestOf(h, "fixture-npx-mcp", "rollback", CLAUDE), env)).plan;
     expect(fetch).not.toHaveBeenCalled();
     expect(plan).toMatchObject({
       operation: "rollback",
       status: "ready",
-      current: { identity: { spec: "@modelcontextprotocol/server-memory@1.2.3" } },
-      target: { requested: "@modelcontextprotocol/server-memory", identity: null, clientSpec: { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory"] } },
+      current: { identity: { spec: "@openhub-fixture/npx-mcp@1.2.3" } },
+      target: { requested: "@openhub-fixture/npx-mcp", identity: null, clientSpec: { command: "npx", args: ["-y", "@openhub-fixture/npx-mcp"] } },
     });
     expect(plan.steps.map((s) => s.kind)).toEqual(["config-replace", "health", "state-commit"]);
 
@@ -138,15 +138,15 @@ describe("REQ-050 Rollback", () => {
   });
 
   it("AC-044-02 previous snapshot이 없으면 NO_ROLLBACK_TARGET이고 Plan을 만들지 않는다", async () => {
-    const { h } = await updatedHarness("memory-mcp", CLAUDE, []);
+    const { h } = await updatedHarness("fixture-npx-mcp", CLAUDE, []);
     expect((await entry(h)).previous).toBeNull();
-    expect(await planLifecycleRequest(requestOf(h, "memory-mcp", "rollback", CLAUDE), envFor(h).env)).toMatchObject({ ok: false, code: "NO_ROLLBACK_TARGET" });
+    expect(await planLifecycleRequest(requestOf(h, "fixture-npx-mcp", "rollback", CLAUDE), envFor(h).env)).toMatchObject({ ok: false, code: "NO_ROLLBACK_TARGET" });
   });
 
   it("AC-044-03 rollback-to-previous를 포함한 별도 승인이 필요하고 update Approval로는 실행할 수 없다", async () => {
-    const { h, updates } = await updatedHarness("memory-mcp", CLAUDE);
+    const { h, updates } = await updatedHarness("fixture-npx-mcp", CLAUDE);
     const { env } = envFor(h);
-    const request = requestOf(h, "memory-mcp", "rollback", CLAUDE);
+    const request = requestOf(h, "fixture-npx-mcp", "rollback", CLAUDE);
     const planned = await planOf(request, env);
     expect(planned.plan.approvalRequirements).toEqual(["base", "health-execution", "rollback-to-previous"]);
     const usedUpdateApproval = updates[0]!.approval;
@@ -157,35 +157,35 @@ describe("REQ-050 Rollback", () => {
   });
 
   it("AC-044-04 rollback이 성공하면 revision+1이고 previous는 rollback 직전 상태가 된다", async () => {
-    const { h, original } = await updatedHarness("memory-mcp", CLAUDE);
+    const { h, original } = await updatedHarness("fixture-npx-mcp", CLAUDE);
     const before = await entry(h);
-    const { result } = await execute(requestOf(h, "memory-mcp", "rollback", CLAUDE), envFor(h).env);
-    expect(result).toMatchObject({ status: "rolled-back", artifact: { from: "@modelcontextprotocol/server-memory@1.2.3", to: null }, targets: [{ revisionBefore: 2, revisionAfter: 3 }] });
+    const { result } = await execute(requestOf(h, "fixture-npx-mcp", "rollback", CLAUDE), envFor(h).env);
+    expect(result).toMatchObject({ status: "rolled-back", artifact: { from: "@openhub-fixture/npx-mcp@1.2.3", to: null }, targets: [{ revisionBefore: 2, revisionAfter: 3 }] });
     const after = await entry(h);
     const { previous: _p, lastHealth: _h, ...beforeCore } = before;
     expect(after.revision).toBe(3);
     expect(after.previous).toEqual(beforeCore);
-    expect(after.artifact).toEqual({ requested: "@modelcontextprotocol/server-memory", resolved: null });
+    expect(after.artifact).toEqual({ requested: "@openhub-fixture/npx-mcp", resolved: null });
     expect(after.lastHealth?.status).toBe("healthy");
     expect((await readFile(path.join(h.projectRoot, ".mcp.json"))).equals(original)).toBe(true);
-    expect(after.config.entryDigest).toBe(configEntryDigest(JSON.parse(original.toString("utf8")).mcpServers.memory));
+    expect(after.config.entryDigest).toBe(configEntryDigest(JSON.parse(original.toString("utf8")).mcpServers["fixture-npx"]));
   });
 
   it("AC-044-05 rollback 후 Health가 실패하면 rollback 직전 config로 되돌리고 state는 그대로이며 health-failed다", async () => {
-    const { h } = await updatedHarness("memory-mcp", CLAUDE);
+    const { h } = await updatedHarness("fixture-npx-mcp", CLAUDE);
     const config = await readFile(path.join(h.projectRoot, ".mcp.json"));
     const state = await readFile(path.join(h.homeDir, ".openhub", "state", "lifecycle.json"));
-    const { result } = await execute(requestOf(h, "memory-mcp", "rollback", CLAUDE), envFor(h, { health: ["handshake-failed", "invalid-message"] }).env);
+    const { result } = await execute(requestOf(h, "fixture-npx-mcp", "rollback", CLAUDE), envFor(h, { health: ["handshake-failed", "invalid-message"] }).env);
     expect(result).toMatchObject({ status: "health-failed", compensated: true, stateCommitted: false });
     expect((await readFile(path.join(h.projectRoot, ".mcp.json"))).equals(config)).toBe(true);
     expect((await readFile(path.join(h.homeDir, ".openhub", "state", "lifecycle.json"))).equals(state)).toBe(true);
   });
 
   it("AC-044-06 state 이후 config가 수정됐으면 blocked(CONFIG_DRIFT)다", async () => {
-    const { h } = await updatedHarness("memory-mcp", CLAUDE);
+    const { h } = await updatedHarness("fixture-npx-mcp", CLAUDE);
     const file = path.join(h.projectRoot, ".mcp.json");
-    await writeFile(file, (await readFile(file, "utf8")).replace("server-memory@1.2.3", "server-memory@1.2.9"));
-    const plan = (await planOf(requestOf(h, "memory-mcp", "rollback", CLAUDE), envFor(h).env)).plan;
+    await writeFile(file, (await readFile(file, "utf8")).replace("npx-mcp@1.2.3", "npx-mcp@1.2.9"));
+    const plan = (await planOf(requestOf(h, "fixture-npx-mcp", "rollback", CLAUDE), envFor(h).env)).plan;
     expect([plan.status, plan.steps, plan.warnings.map((w) => w.code)]).toEqual(["blocked", [], ["CONFIG_DRIFT"]]);
   });
 
@@ -200,10 +200,10 @@ describe("REQ-050 Rollback", () => {
   });
 
   it("AC-044-04 직전 버전이 unlocked였으면 설정·launch spec·Version State만 되돌리고 정확한 artifact를 보장하지 않는다고 표시하며 Health·승인 규칙은 같다", async () => {
-    const { h } = await updatedHarness("memory-mcp", CLAUDE);
+    const { h } = await updatedHarness("fixture-npx-mcp", CLAUDE);
     expect((await entry(h)).previous?.artifact.resolved).toBeNull();
     const e = envFor(h);
-    const request = requestOf(h, "memory-mcp", "rollback", CLAUDE);
+    const request = requestOf(h, "fixture-npx-mcp", "rollback", CLAUDE);
     const planned = await planOf(request, e.env);
     expect(planned.plan.target.identity).toBeNull();
     expect(planned.plan.approvalRequirements).toEqual(["base", "health-execution", "rollback-to-previous"]);
@@ -211,7 +211,7 @@ describe("REQ-050 Rollback", () => {
     expect(planned.plan.steps.map((s) => s.kind)).toEqual(["config-replace", "health", "state-commit"]);
     expect(planned.plan.warnings).toContainEqual({ code: "rollback-artifact-unlocked", message: ROLLBACK_UNLOCKED_NOTICE });
     const preview = formatLifecyclePlanPreview(planned).join("\n");
-    expect(preview).toContain("되돌릴 버전  @modelcontextprotocol/server-memory (고정되지 않음)");
+    expect(preview).toContain("되돌릴 버전  @openhub-fixture/npx-mcp (고정되지 않음)");
     expect(preview).toContain(ROLLBACK_UNLOCKED_NOTICE);
     const result = await runLifecycleTransaction(planned, await approve(planned), request, e.env);
     expect(result).toMatchObject({ status: "rolled-back", artifact: { to: null } });
@@ -228,9 +228,9 @@ describe("REQ-050 Rollback", () => {
   });
 
   it("AC-044-08 Manifest rollback.supported가 false이면 unsupported다", async () => {
-    const { h } = await updatedHarness("memory-mcp", CLAUDE);
-    const entries = seed.map((e) => (e.manifest.name === "memory-mcp" ? { ...e, manifest: { ...e.manifest, rollback: { supported: false } } } : e));
-    const planned = await planOf(requestOf(h, "memory-mcp", "rollback", CLAUDE), envFor(h, { entries }).env);
+    const { h } = await updatedHarness("fixture-npx-mcp", CLAUDE);
+    const entries = seed.map((e) => (e.manifest.name === "fixture-npx-mcp" ? { ...e, manifest: { ...e.manifest, rollback: { supported: false } } } : e));
+    const planned = await planOf(requestOf(h, "fixture-npx-mcp", "rollback", CLAUDE), envFor(h, { entries }).env);
     expect([planned.plan.status, planned.plan.steps, planned.plan.warnings.map((w) => w.code)]).toEqual(["unsupported", [], ["ROLLBACK_UNSUPPORTED"]]);
     expect(await requestLifecycleApproval(planned, { channel: "cli-tty", confirm: async () => ["base"] })).toMatchObject({ status: "not-approvable", code: "PLAN_NOT_EXECUTABLE" });
   });

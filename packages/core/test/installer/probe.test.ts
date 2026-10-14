@@ -14,10 +14,10 @@ import {
   type ProbeEnvironment,
   type ProbeSpawner,
 } from "../../src/index";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { clientProfile, entryOf, planFor, reportFor } from "./helpers";
 
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const INSTALLER_SRC = path.resolve(import.meta.dirname, "../../src/installer");
 const PROCESS_SRC = path.resolve(import.meta.dirname, "../../src/process");
 afterEach(() => vi.useRealTimers());
@@ -153,7 +153,7 @@ describe("REQ-030 Runtime·Backend Probe", () => {
     const text = JSON.stringify(report);
     expect(containsAbsolutePath(text)).toBe(false);
     for (const leak of ["Users", "Program Files", "AppData", WIN_PATH]) expect(text).not.toContain(leak);
-    const planned = planFor(seed, reportFor(clientProfile(), seed), "memory-mcp", {
+    const planned = planFor(seed, reportFor(clientProfile(), seed), "fixture-npx-mcp", {
       backend: { adapter: "npx", selection: "preferred", skipped: [], probe: report.npx },
     });
     const plan = serializeInstallPlan(planned.plan);
@@ -199,7 +199,7 @@ describe("REQ-030 Runtime·Backend Probe", () => {
 
   it("AC-029-08 probe 결과가 RecommendContext로 들어가 backend·node runtime이 compatible/incompatible이 되고 python은 unknown이다", async () => {
     const p = clientProfile();
-    const memory = entryOf(seed, "memory-mcp").manifest;
+    const memory = entryOf(seed, "fixture-npx-mcp").manifest;
     const postgres = entryOf(seed, "postgres-mcp").manifest;
     const ok = probeToRecommendContext(await probeBackends(winEnv(WIN_FILES, recordingSpawner((f) => (/node/iu.test(f) ? "v22.11.0" : "1.0.0")))), "windows");
     expect(ok.runtimes).toEqual({ node: "22.11.0" });
@@ -220,6 +220,6 @@ describe("REQ-030 Runtime·Backend Probe", () => {
     const snap = (name: "node" | "npx" | "uvx" | "docker", available: boolean | "unknown", status: "ok" | "timeout" | "not-found" | "error") => ({ name, available, version: null, status });
     const ctx = probeToRecommendContext({ node: snap("node", "unknown", "timeout"), npx: snap("npx", false, "not-found"), uvx: snap("uvx", "unknown", "error"), docker: snap("docker", "unknown", "timeout") });
     expect(ctx).toEqual({ runtimes: {}, availableBackends: ["uvx", "docker"] });
-    expect(evaluateCompatibility(entryOf(seed, "memory-mcp").manifest, clientProfile(), ctx)).toMatchObject({ runtime: { status: "unknown" }, backend: { status: "incompatible" } });
+    expect(evaluateCompatibility(entryOf(seed, "fixture-npx-mcp").manifest, clientProfile(), ctx)).toMatchObject({ runtime: { status: "unknown" }, backend: { status: "incompatible" } });
   });
 });

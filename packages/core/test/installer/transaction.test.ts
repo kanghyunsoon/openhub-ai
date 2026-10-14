@@ -19,10 +19,10 @@ import {
   type InstallRequest,
   type PlannedInstall,
 } from "../../src/index";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { ALL_AVAILABLE } from "./helpers";
 
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await mkdtemp(path.join(os.tmpdir(), "openhub-tx-test-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 
@@ -137,7 +137,7 @@ describe("REQ-030 Install Transaction(실패 안전성·멱등성)", () => {
     const h = await harness({ failRenameFor: ".cursor/mcp.json" });
     const original = '{\n\t"mcpServers": { "keep": { "command": "x", "args": [] } }\n}';
     await writeFile(path.join(h.projectRoot, ".mcp.json"), original);
-    const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }, { client: "cursor", scope: "project" }]);
+    const request = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }, { client: "cursor", scope: "project" }]);
     const p = await planned(h, request);
     const result = await runInstallTransaction(p, await approve(p), request, h.env);
     expect(result).toMatchObject({ status: "partial-compensated", code: "CONFIG_WRITE_FAILED", failedStep: "config-cursor-project", retryable: true });
@@ -146,8 +146,8 @@ describe("REQ-030 Install Transaction(실패 안전성·멱등성)", () => {
       { id: "config-cursor-project", status: "failed", code: "CONFIG_WRITE_FAILED", excerpt: expect.any(String) },
     ]);
     expect(result.configChanges).toEqual([
-      { client: "claude-code", scope: "project", file: ".mcp.json", serverName: "memory", applied: true, restored: true },
-      { client: "cursor", scope: "project", file: ".cursor/mcp.json", serverName: "memory", applied: false, restored: false },
+      { client: "claude-code", scope: "project", file: ".mcp.json", serverName: "fixture-npx", applied: true, restored: true },
+      { client: "cursor", scope: "project", file: ".cursor/mcp.json", serverName: "fixture-npx", applied: false, restored: false },
     ]);
     expect(await readFile(path.join(h.projectRoot, ".mcp.json"), "utf8")).toBe(original);
     expect(await listing(h.projectRoot)).toEqual([".mcp.json", "package.json"]);
@@ -163,7 +163,7 @@ describe("REQ-030 Install Transaction(실패 안전성·멱등성)", () => {
     expect(failed.steps.map((s) => s.status)).toEqual(["failed", "skipped"]);
 
     const ok = await harness();
-    const req2 = ok.request("memory-mcp", [{ client: "codex", scope: "project" }]);
+    const req2 = ok.request("fixture-npx-mcp", [{ client: "codex", scope: "project" }]);
     const p2 = await planned(ok, req2);
     const succeeded = await runInstallTransaction(p2, await approve(p2), req2, ok.env);
     expect(installResultSchema.parse(succeeded)).toEqual(succeeded);
@@ -175,8 +175,8 @@ describe("REQ-030 Install Transaction(실패 안전성·멱등성)", () => {
 
   it("AC-033-04 already-installed는 spawn·파일 쓰기·probe 0회의 no-op이다", async () => {
     const h = await harness();
-    await writeFile(path.join(h.projectRoot, ".mcp.json"), '{ "mcpServers": { "memory": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"] } } }\n');
-    const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    await writeFile(path.join(h.projectRoot, ".mcp.json"), '{ "mcpServers": { "fixture-npx": { "command": "npx", "args": ["-y", "@openhub-fixture/npx-mcp"] } } }\n');
+    const request = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const p = await planned(h, request);
     expect(p.plan.status).toBe("already-installed");
     reset(h);
@@ -189,7 +189,7 @@ describe("REQ-030 Install Transaction(실패 안전성·멱등성)", () => {
 
   it("AC-033-05 같은 설치를 두 번 실행하면 두 번째는 no-op이고 파일의 서버 항목은 1개다", async () => {
     const h = await harness();
-    const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    const request = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const first = await planned(h, request);
     const approval = await approve(first);
     expect((await runInstallTransaction(first, approval, request, h.env)).status).toBe("succeeded");
@@ -198,13 +198,13 @@ describe("REQ-030 Install Transaction(실패 안전성·멱등성)", () => {
     expect(second.plan.status).toBe("already-installed");
     expect((await runInstallTransaction(second, undefined, request, h.env)).status).toBe("no-op");
     const doc = JSON.parse(await readFile(path.join(h.projectRoot, ".mcp.json"), "utf8"));
-    expect(Object.keys(doc.mcpServers)).toEqual(["memory"]);
+    expect(Object.keys(doc.mcpServers)).toEqual(["fixture-npx"]);
   });
 
   it("AC-033-06 unidentified-present는 자동 no-op하지 않고 추가 승인 없이는 실행하지 않는다", async () => {
     const h = await harness();
     await writeFile(path.join(h.projectRoot, ".mcp.json"), '{ "mcpServers": { "my-memory": { "command": "node", "args": ["mem.js"] } } }\n');
-    const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    const request = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const p = await planned(h, request);
     expect(p.plan.status).toBe("installable");
     expect(p.plan.source.recommendation.installationStatus).toBe("unidentified-present");
@@ -215,7 +215,7 @@ describe("REQ-030 Install Transaction(실패 안전성·멱등성)", () => {
     expect(h.writes).toEqual([]);
     const done = await runInstallTransaction(p, await approve(p), request, h.env);
     expect(done.status).toBe("succeeded");
-    expect(Object.keys(JSON.parse(await readFile(path.join(h.projectRoot, ".mcp.json"), "utf8")).mcpServers)).toEqual(["my-memory", "memory"]);
+    expect(Object.keys(JSON.parse(await readFile(path.join(h.projectRoot, ".mcp.json"), "utf8")).mcpServers)).toEqual(["my-memory", "fixture-npx"]);
   });
 
   it("AC-033-07 token·URL credential·절대 경로를 넣어도 InstallResult 직렬화 결과에 0건이다", async () => {

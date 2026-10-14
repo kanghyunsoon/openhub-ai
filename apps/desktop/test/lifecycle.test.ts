@@ -252,10 +252,11 @@ describe("REQ-040 REQ-043 REQ-044 REQ-050 Desktop Lifecycle", () => {
     const file = path.join(w.project, ".mcp.json");
     await writeFile(file, (await readFile(file, "utf8")).replace("--access-mode=restricted", "--access-mode=unrestricted"));
     await mkdir(path.join(w.project, ".cursor"));
-    await writeFile(path.join(w.project, ".cursor", "mcp.json"), '{ "mcpServers": { "memory": { "command": "node", "args": ["mine.js"] } } }\n');
+    // Registry alias(context7)를 쓰지만 명령이 다른 항목. Memory MCP는 v0.2.1에서 Registry에서 빠져(#69) alias로 쓰지 않는다.
+    await writeFile(path.join(w.project, ".cursor", "mcp.json"), '{ "mcpServers": { "context7": { "command": "node", "args": ["mine.js"] } } }\n');
     const list = await items(w);
     expect(list.map((i) => [i.id, i.state, i.canUpdate, i.canRollback, i.canHealth, i.warning !== null])).toEqual([
-      ["project:cursor:memory", "untracked-foreign", false, false, false, true],
+      ["project:cursor:context7", "untracked-foreign", false, false, false, true],
       [ID, "config-drift", false, false, false, true],
     ]);
     for (const op of ["update", "rollback", "health"] as const) expect((await w.plan(op, ID)).status).toBe("not-managed");

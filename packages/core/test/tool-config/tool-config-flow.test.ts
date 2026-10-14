@@ -29,7 +29,7 @@ import {
 } from "../../src/index";
 import { approveAll, createHarness, plannedOf, type Harness } from "../installer/harness";
 import { fakeNpmSpawner } from "../process/fake-npm";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { newScratch } from "../lifecycle/helpers";
 
 /**
@@ -38,7 +38,7 @@ import { newScratch } from "../lifecycle/helpers";
  */
 const scratch = await newScratch("tool-config-flow");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const entries: RegistryEntry[] = seed;
 const k8s = seed.find((e) => e.manifest.name === "kubernetes-mcp-server")!.manifest;
 
@@ -239,7 +239,7 @@ describe("v0.2.0 tool config: 설치(InstallPlan)", () => {
     expect(value?.kind === "config-patch" && value.value.command).toBe("node");
     expect(containsAbsolutePath(JSON.stringify(planned.plan))).toBe(false);
     // 일반 npx Tool의 Windows 계약(cmd 래퍼)은 그대로다.
-    const memory = await plannedOf(h, { ...h.request("memory-mcp", CLIENTS), platform: "windows" as const });
+    const memory = await plannedOf(h, { ...h.request("fixture-npx-mcp", CLIENTS), platform: "windows" as const });
     expect(memory.plan.launch?.clientSpec.command).toBe("cmd");
     // 실행 경로 없음(windowsNpx 없음) → MANUAL_SETUP_REQUIRED, 쓰기 0.
     const result = await runInstallTransaction(planned, await approveAll(planned), request, { ...h.env, windowsNpx: async () => null });

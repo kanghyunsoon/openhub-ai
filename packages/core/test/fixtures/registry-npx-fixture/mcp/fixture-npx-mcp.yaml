@@ -28,4 +28,4 @@ rollback:
 verification: community
 recommendation:
   identity: { mcpServerNames: [fixture-npx] }
-  source: { type: dedicated }
+  source: { type: shared-repo, path: src/npx-mcp }

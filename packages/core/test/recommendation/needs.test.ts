@@ -34,7 +34,8 @@ describe("REQ-020 Capability Taxonomy와 Need Rules", () => {
     const seedCapabilities = new Set(entries.flatMap((e) => e.manifest.capabilities));
     // P0-2 batch 1: kubernetes-mcp-server가 kubernetes-operations를 처음 제공한다. game-engine-editor는 아직 도구가 없다.
       // v0.2.1 #39: semantic-code-navigation·code-editing을 제공하던 serena가 지원 중단으로 Registry에서 빠졌다(taxonomy는 그대로, 도구만 없음).
-      const withoutTools = new Set(["game-engine-editor", "semantic-code-navigation", "code-editing"]);
+      // v0.2.1 #69: knowledge-graph-memory를 제공하던 memory-mcp도 지원 중단으로 빠졌다(taxonomy는 그대로, 도구만 없음).
+      const withoutTools = new Set(["game-engine-editor", "semantic-code-navigation", "code-editing", "knowledge-graph-memory"]);
       expect([...seedCapabilities].sort()).toEqual([...CAPABILITIES.map((c) => c.id).filter((id) => !withoutTools.has(id))].sort());
     for (const id of seedCapabilities) expect(isCapabilityId(id)).toBe(true);
   });

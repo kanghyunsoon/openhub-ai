@@ -7,7 +7,7 @@
     "kind": "npm-package",
     "pinned": false,
     "preparation": "launch-on-demand",
-    "spec": "@modelcontextprotocol/server-memory"
+    "spec": "@openhub-fixture/npx-mcp"
   },
   "backend": {
     "adapter": "npx",
@@ -20,16 +20,16 @@
     "selection": "preferred",
     "skipped": []
   },
-  "displayName": "Memory MCP",
+  "displayName": "Fixture NPX MCP (test only)",
   "launch": {
     "args": [
       "-y",
-      "@modelcontextprotocol/server-memory"
+      "@openhub-fixture/npx-mcp"
     ],
     "clientSpec": {
       "args": [
         "-y",
-        "@modelcontextprotocol/server-memory"
+        "@openhub-fixture/npx-mcp"
       ],
       "command": "npx"
     },
@@ -44,7 +44,7 @@
     "file-write"
   ],
   "source": {
-    "manifestDigest": "sha256:b669e396f7dcbd05e48a75440e334fe73432256cd9d249e2b253cb290ce54a1c",
+    "manifestDigest": "sha256:f12cf607a36a93a4c5f315a6d0ae486cc3919dd9a1b6716e020b68fca0e8ea3e",
     "recommendation": {
       "inspectedScopes": [
         "project"
@@ -63,13 +63,13 @@
       "kind": "config-patch",
       "path": [
         "mcpServers",
-        "memory"
+        "fixture-npx"
       ],
       "scope": "project",
       "value": {
         "args": [
           "-y",
-          "@modelcontextprotocol/server-memory"
+          "@openhub-fixture/npx-mcp"
         ],
         "command": "npx"
       }
@@ -86,10 +86,10 @@
         "keyAbsent": true
       },
       "scope": "project",
-      "serverName": "memory"
+      "serverName": "fixture-npx"
     }
   ],
-  "toolId": "memory-mcp",
+  "toolId": "fixture-npx-mcp",
   "warnings": [
     {
       "code": "floating-artifact",

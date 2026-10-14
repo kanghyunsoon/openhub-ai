@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { loadRegistry, planAdopt, type AdoptPlanOptions, type PlannedAdopt, type RegistryEntry } from "../../src/index";
 import { newScratch } from "../lifecycle/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 
 /**
  * v0.2.1 P0-6: Adopt는 package·image가 Registry와 같다는 것만으로 설정 항목을 관리 대상으로 등록하면 안 된다.
@@ -10,11 +11,12 @@ import { newScratch } from "../lifecycle/helpers";
  * 실제 registry/ Manifest를 쓴다. 임시 project·home만 쓰고 network·spawn이 없다.
  */
 const REGISTRY = path.resolve(import.meta.dirname, "../../../../registry");
-const { entries } = await loadRegistry(REGISTRY);
+// 실제 Registry + 테스트 전용 npx fixture(v0.2.1 #69: Memory MCP 지원 중단으로 버전 미고정 npx 도구 역할을 대신한다)
+const entries = await seedWithNpxFixture();
 const scratch = await newScratch("adopt-unreviewed-test");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 
-const MEMORY = "@modelcontextprotocol/server-memory";
+const MEMORY = "@openhub-fixture/npx-mcp";
 const MONGO = ["--readOnly", "--telemetry", "disabled", "--disabledTools", "export,connect,search-knowledge,list-knowledge-sources,atlas-local-connect-deployment,atlas-local-list-deployments,mongodb-logs"];
 
 async function plan(toolId: string, server: string, entry: unknown, platform: AdoptPlanOptions["platform"] = "linux"): Promise<PlannedAdopt> {
@@ -32,8 +34,8 @@ const codes = (p: PlannedAdopt) => p.plan.blockers.map((b) => b.code);
 
 describe("v0.2.1 P0-6 Adopt: 검토되지 않은 실행 옵션", () => {
   const unreviewed: [string, string, string, unknown][] = [
-    ["npm --registry로 다른 package 출처", "memory-mcp", "memory", { command: "npx", args: ["-y", "--registry=https://registry.example.test", MEMORY + "@2026.8.31"] }],
-    ["memory 뒤에 추가 인자", "memory-mcp", "memory", { command: "npx", args: ["-y", MEMORY + "@2026.8.31", "--debug"] }],
+    ["npm --registry로 다른 package 출처", "fixture-npx-mcp", "fixture-npx", { command: "npx", args: ["-y", "--registry=https://registry.example.test", MEMORY + "@2026.8.31"] }],
+    ["memory 뒤에 추가 인자", "fixture-npx-mcp", "fixture-npx", { command: "npx", args: ["-y", MEMORY + "@2026.8.31", "--debug"] }],
     ["mongodb --readOnly 없음", "mongodb-mcp-server", "mongodb", { command: "npx", args: ["-y", "mongodb-mcp-server@3.0.5", ...MONGO.slice(1)] }],
     ["mongodb 옵션 전체 없음", "mongodb-mcp-server", "mongodb", { command: "npx", args: ["-y", "mongodb-mcp-server@3.0.5"] }],
     ["mongodb 검토되지 않은 버전", "mongodb-mcp-server", "mongodb", { command: "npx", args: ["-y", "mongodb-mcp-server@3.0.4", ...MONGO] }],
@@ -59,10 +61,10 @@ describe("v0.2.1 P0-6 Adopt: 검토되지 않은 실행 옵션", () => {
   }
 
   const reviewed: [string, string, string, unknown, AdoptPlanOptions["platform"]?][] = [
-    ["memory Manifest 그대로(버전 없음)", "memory-mcp", "memory", { command: "npx", args: ["-y", MEMORY] }],
-    ["memory 정확한 버전 고정(Manifest가 버전을 고정하지 않음)", "memory-mcp", "memory", { command: "npx", args: ["-y", MEMORY + "@2026.8.31"] }],
-    ["memory Windows cmd wrapper", "memory-mcp", "memory", { command: "cmd", args: ["/d", "/c", "npx", "-y", MEMORY + "@2026.8.31"] }, "windows"],
-    ["memory Windows에서 wrapper 없는 npx", "memory-mcp", "memory", { command: "npx", args: ["-y", MEMORY + "@1.2.3"] }, "windows"],
+    ["memory Manifest 그대로(버전 없음)", "fixture-npx-mcp", "fixture-npx", { command: "npx", args: ["-y", MEMORY] }],
+    ["memory 정확한 버전 고정(Manifest가 버전을 고정하지 않음)", "fixture-npx-mcp", "fixture-npx", { command: "npx", args: ["-y", MEMORY + "@2026.8.31"] }],
+    ["memory Windows cmd wrapper", "fixture-npx-mcp", "fixture-npx", { command: "cmd", args: ["/d", "/c", "npx", "-y", MEMORY + "@2026.8.31"] }, "windows"],
+    ["memory Windows에서 wrapper 없는 npx", "fixture-npx-mcp", "fixture-npx", { command: "npx", args: ["-y", MEMORY + "@1.2.3"] }, "windows"],
     // 고정 버전 wheel-only uvx의 검토된 Client 실행 인자는 --no-build로 시작한다(#45). 없는 항목은 아래 #45 리뷰 테스트처럼 편입하지 않는다.
     ["postgres Windows", "postgres-mcp", "postgres", { command: "uvx", args: ["--no-build", "--from", "postgres-mcp==0.3.0", "--with", "mcp==1.30.0", "postgres-mcp", "--access-mode=restricted"], env: { DATABASE_URI: "${DATABASE_URI}" } }, "windows"],
     ["mongodb Manifest 그대로", "mongodb-mcp-server", "mongodb", { command: "npx", args: ["-y", "mongodb-mcp-server@3.0.5", ...MONGO], env: { MDB_MCP_CONNECTION_STRING: "${MDB_MCP_CONNECTION_STRING}" } }],

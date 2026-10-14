@@ -1,4 +1,4 @@
-Memory MCP (memory-mcp) 릴리스
+Fixture NPX MCP (test only) (fixture-npx-mcp) 릴리스
 
 버전 출처   npm · notes github-release
 현재        2025.8.4
@@ -25,4 +25,4 @@ Release notes 2025.9.25 (원문 일부, 해석하지 않음)
   | - Added search_nodes limit
   | <script>alert(1)</script>
 
-링크        https://github.com/modelcontextprotocol/servers/releases/tag/2025.9.25
+링크        https://github.com/openhub-fixture/npx-mcp/releases/tag/2025.9.25

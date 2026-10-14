@@ -53,10 +53,10 @@ function summaryOf(notes: string): ReleaseSummaryV1 {
   expect(notes.length).toBeLessThanOrEqual(NOTES_MAX);
   const snap: ReleaseSnapshotV1 = releaseSnapshotSchema.parse({
     schemaVersion: 1,
-    toolId: "memory-mcp",
+    toolId: "fixture-npx-mcp",
     versionSource: "npm",
     notesSource: "github-release",
-    current: { spec: "@modelcontextprotocol/server-memory@2.0.3", version: "2.0.3", digest: null },
+    current: { spec: "@openhub-fixture/npx-mcp@2.0.3", version: "2.0.3", digest: null },
     target: entry(notes),
     between: [entry(notes)],
     selection: { includePrerelease: false, comparable: true, skippedDrafts: 0, skippedPrereleases: 0, truncated: false },

@@ -16,12 +16,12 @@ import {
   type HealthChild,
   type HealthSpawner,
 } from "../../src/index";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { newScratch } from "../lifecycle/helpers";
 import { MEMORY, adoptOptions, mcp, newCase, plannedOf, type Case } from "../adopt/helpers";
 
 /** TASK-066 Benchmark 실행·Report v1. 가짜 MCP 서버(child)·가짜 시계만 쓴다(실제 spawn·network 없음). */
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await newScratch("benchmark-run-test");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 afterEach(() => vi.useRealTimers());
@@ -61,7 +61,7 @@ class FakeServer extends EventEmitter implements HealthChild {
   };
   react(m: Record<string, unknown>) {
     const out = (o: unknown) => this.stdout.emit("data", Buffer.from(JSON.stringify(o) + "\n"));
-    if (m["method"] === "initialize" && this.b.init !== false) out({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18", serverInfo: this.b.serverInfo ?? { name: "memory", version: "1.2.3" }, capabilities: {} } });
+    if (m["method"] === "initialize" && this.b.init !== false) out({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18", serverInfo: this.b.serverInfo ?? { name: "fixture-npx", version: "1.2.3" }, capabilities: {} } });
     if (m["method"] === "tools/list") out({ jsonrpc: "2.0", id: 2, result: { tools: [{ name: "a" }, { name: "b" }] } });
   }
   close() {
@@ -72,12 +72,12 @@ class FakeServer extends EventEmitter implements HealthChild {
 }
 
 async function managed(): Promise<Case> {
-  const c = await newCase(scratch, { ".mcp.json": mcp({ memory: { command: "npx", args: ["-y", MEMORY + "@1.2.3"] } }) });
+  const c = await newCase(scratch, { ".mcp.json": mcp({ "fixture-npx": { command: "npx", args: ["-y", MEMORY + "@1.2.3"] } }) });
   const options = adoptOptions(seed, c);
   const p = plannedOf(await planAdopt(options));
   const o = await requestAdoptApproval(p, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
   if (o.status !== "approved") throw new Error(o.status);
-  expect((await executeAdopt(o.approval, { toolId: "memory-mcp", homeDir: c.homeDir, now: NOW, regenerate: () => planAdopt(options) })).status).toBe("adopted");
+  expect((await executeAdopt(o.approval, { toolId: "fixture-npx-mcp", homeDir: c.homeDir, now: NOW, regenerate: () => planAdopt(options) })).status).toBe("adopted");
   return c;
 }
 /** 가짜 타이머를 켜기 전에 잡아 둔 실제 setTimeout(drive가 실제 시간으로 쉬는 데 쓴다). */
@@ -102,7 +102,7 @@ async function drive<T>(p: Promise<T>): Promise<T> {
 }
 async function setup(behaviours: (i: number) => Behaviour = () => ({}), over: Partial<BenchmarkRunOptions> = {}, planSource: () => Record<string, string> = () => ({})) {
   const c = await managed();
-  const regenerate = () => planBenchmark({ toolId: "memory-mcp", projectRoot: c.projectRoot, homeDir: c.homeDir, entries: seed, platform: "linux", includeUser: false, mcpSourceEnv: planSource });
+  const regenerate = () => planBenchmark({ toolId: "fixture-npx-mcp", projectRoot: c.projectRoot, homeDir: c.homeDir, entries: seed, platform: "linux", includeUser: false, mcpSourceEnv: planSource });
   const first = await regenerate();
   if (!first.ok) throw new Error(first.code);
   const o = await requestBenchmarkApproval(first.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });

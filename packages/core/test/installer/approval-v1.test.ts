@@ -15,10 +15,10 @@ import {
   type PlannedInstall,
   type RegistryEntry,
 } from "../../src/index";
-import { item, seedEntries, tool } from "../recommendation/helpers";
+import { item, seedWithNpxFixture, tool } from "../recommendation/helpers";
 import { clientProfile, entryOf, launchSpec, planFor, reportFor, target } from "./helpers";
 
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 afterEach(() => vi.unstubAllEnvs());
 
 const postgresProfile = () => clientProfile({ databases: [item("postgresql", "PostgreSQL", "dependency", { file: "pyproject.toml" })] });
@@ -68,7 +68,7 @@ const digestOf = (text: string) => "sha256:" + createHash("sha256").update(text)
 
 describe("REQ-034 Approval과 PLAN_STALE", () => {
   it("AC-028-01 승인 없이 실행하면 APPROVAL_REQUIRED이고 spawn·파일 쓰기·재생성이 0회다", async () => {
-    const { planned, build } = scenario("memory-mcp");
+    const { planned, build } = scenario("fixture-npx-mcp");
     const regenerate = vi.fn(() => build());
     for (const approval of [undefined, { planDigest: planned.planDigest, acknowledgements: planned.plan.approvalRequirements, channel: "cli-tty" } as InstallApproval]) {
       const fx = effects();
@@ -81,7 +81,7 @@ describe("REQ-034 Approval과 PLAN_STALE", () => {
   });
 
   it("AC-028-02 acknowledgements가 approvalRequirements를 정확히 덮지 않으면 APPROVAL_INCOMPLETE이고 spawn 0회다", async () => {
-    const { planned, build } = scenario("memory-mcp");
+    const { planned, build } = scenario("fixture-npx-mcp");
     expect(planned.plan.approvalRequirements).toEqual(["base", "floating-artifact"]);
     for (const answer of [["base"], ["base", "floating-artifact", "user-scope-config"]] as ApprovalRequirement[][]) {
       const approval = await approve(planned, answer);
@@ -93,13 +93,13 @@ describe("REQ-034 Approval과 PLAN_STALE", () => {
   });
 
   it("AC-028-02 사람이 거부하거나 base를 확인하지 않으면 Approval이 생기지 않는다", async () => {
-    const { planned } = scenario("memory-mcp");
+    const { planned } = scenario("fixture-npx-mcp");
     expect(await requestApproval(planned, human("rejected"))).toEqual({ status: "rejected" });
     expect(await requestApproval(planned, human(["floating-artifact"]))).toEqual({ status: "rejected" });
     // (v0.2.0 대상별 판정) 고른 대상에 같은 항목이 이미 있는 Plan은 승인할 것이 없다.
-    const memoryLaunch = launchSpec("npx", ["-y", "memory-mcp@latest"]);
+    const memoryLaunch = launchSpec("npx", ["-y", "fixture-npx-mcp@latest"]);
     const sameEntry = { exists: true, fileDigest: "sha256:" + "b".repeat(64), keyAbsent: false, entryDigest: core.entryPlanDigest(core.serverEntry("claude-code", memoryLaunch, [])) };
-    const installed = planFor(seed, reportFor(clientProfile({ aiTools: [tool("memory")] }), seed), "memory-mcp", { launch: memoryLaunch, targets: [target("claude-code", "project", { precondition: sameEntry })] });
+    const installed = planFor(seed, reportFor(clientProfile({ aiTools: [tool("fixture-npx")] }), seed), "fixture-npx-mcp", { launch: memoryLaunch, targets: [target("claude-code", "project", { precondition: sameEntry })] });
     expect(installed.plan.status).toBe("already-installed");
     const prompter = human();
     expect(await requestApproval(installed, prompter)).toMatchObject({ status: "not-approvable", code: "PLAN_NOT_EXECUTABLE" });
@@ -123,14 +123,14 @@ describe("REQ-034 Approval과 PLAN_STALE", () => {
   it("AC-028-04 승인 후 Registry에 manifest가 추가되면 PLAN_STALE{registry}다", async () => {
     const { planned, build } = scenario("postgres-mcp", uvx);
     const approval = await approve(planned);
-    const memory = entryOf(seed, "memory-mcp");
+    const memory = entryOf(seed, "fixture-npx-mcp");
     const added: RegistryEntry = { ...memory, file: "memory/extra-memory.yaml", manifest: { ...memory.manifest, name: "extra-memory", recommendation: { ...memory.manifest.recommendation!, identity: { mcpServerNames: ["extra-memory"] } } } };
     const result = await verifyApprovedPlan(approval, () => build([...seed, added]));
     expect(result).toMatchObject({ ok: false, code: "PLAN_STALE", changed: ["registry"] });
   });
 
   it("AC-028-05 승인 후 probe에서 npx가 unavailable이 되면 PLAN_STALE{backend}다", async () => {
-    const { planned, build } = scenario("memory-mcp", npx);
+    const { planned, build } = scenario("fixture-npx-mcp", npx);
     const approval = await approve(planned);
     const gone = { backend: { ...npx.backend, probe: { name: "npx", available: false, version: null, status: "not-found" as const } }, blockers: [{ code: "BACKEND_UNAVAILABLE", message: "npx를 찾지 못했습니다" }] };
     const result = await verifyApprovedPlan(approval, () => build(seed, gone));
@@ -140,14 +140,14 @@ describe("REQ-034 Approval과 PLAN_STALE", () => {
   it("AC-028-06 승인 후 대상 config 파일이 1 byte라도 바뀌면 PLAN_STALE{config-precondition}다", async () => {
     const original = '{\n  "mcpServers": {}\n}\n';
     const withFile = (text: string) => ({ targets: [target("claude-code", "project", { precondition: { exists: true, fileDigest: digestOf(text), keyAbsent: true } })] });
-    const { planned, build } = scenario("memory-mcp", withFile(original));
+    const { planned, build } = scenario("fixture-npx-mcp", withFile(original));
     const approval = await approve(planned);
     const result = await verifyApprovedPlan(approval, () => build(seed, withFile(original + " ")));
     expect(result).toMatchObject({ ok: false, code: "PLAN_STALE", changed: ["config-precondition"] });
   });
 
   it("AC-028-07 대상 client가 바뀌면 target, requiredEnv 이름이 바뀌면 env-names로 stale 판정한다", async () => {
-    const first = scenario("memory-mcp");
+    const first = scenario("fixture-npx-mcp");
     const clientChange = await verifyApprovedPlan(await approve(first.planned), () => first.build(seed, { targets: [target("cursor")] }));
     expect(clientChange).toMatchObject({ ok: false, code: "PLAN_STALE" });
     expect(clientChange.ok === false && clientChange.changed).toContain("target");
@@ -161,7 +161,7 @@ describe("REQ-034 Approval과 PLAN_STALE", () => {
   });
 
   it("AC-028-08 Approval은 1회 사용이고 두 번째 실행은 APPROVAL_CONSUMED다(PLAN_STALE도 소모한다)", async () => {
-    const { planned, build } = scenario("memory-mcp");
+    const { planned, build } = scenario("fixture-npx-mcp");
     const approval = await approve(planned);
     const fx = effects();
     const first = await executeWithApproval(approval, () => build(), fx.effect);
@@ -176,7 +176,7 @@ describe("REQ-034 Approval과 PLAN_STALE", () => {
   });
 
   it("AC-028-08 검증을 통과한 Plan만 VerifiedPlan이고 승인한 Plan과 byte가 같다", async () => {
-    const { planned, build } = scenario("memory-mcp");
+    const { planned, build } = scenario("fixture-npx-mcp");
     const result = await verifyApprovedPlan(await approve(planned), () => build());
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -190,7 +190,7 @@ describe("REQ-034 Approval과 PLAN_STALE", () => {
     const forbidden = Object.keys(core).filter((name) => /^(?:create|make|issue|grant|forge|auto|force|skip)\w*Approv|autoApprove|approveDigest|yes/iu.test(name));
     expect(forbidden).toEqual([]);
     // M6 TASK-058(D-028): M1 approvePlan은 삭제했다. Core가 발급하지 않은(직접 만든) 승인 객체로는 M4 실행 게이트를 통과할 수 없다.
-    const { planned, build } = scenario("memory-mcp");
+    const { planned, build } = scenario("fixture-npx-mcp");
     const m1 = { planDigest: planned.planDigest, approvedBy: "someone", approvedAt: new Date(0).toISOString() } as unknown as InstallApproval;
     expect(await verifyApprovedPlan(m1, () => build())).toMatchObject({ code: "APPROVAL_REQUIRED" });
     const lookalike = { planDigest: planned.planDigest, acknowledgements: ["base", "floating-artifact"], channel: "cli-tty" } as unknown as InstallApproval;

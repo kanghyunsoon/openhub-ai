@@ -117,10 +117,10 @@ describe("URL credential 패턴: 긴 입력에서 선형 시간", () => {
   });
 
   it("npm deprecated가 1 MiB에 가까워도 ReleaseSnapshot 수집이 끝나고 300자로 잘린다(외부 입력 경로)", async () => {
-    const latest = "https://registry.npmjs.org/@modelcontextprotocol%2fserver-memory/latest";
-    const doc = JSON.stringify({ name: "@modelcontextprotocol/server-memory", version: "2.1.0", engines: { node: ">=20" }, deprecated: "A".repeat(1024 * 1024 - 200) });
+    const latest = "https://registry.npmjs.org/@openhub-fixture%2fnpx-mcp/latest";
+    const doc = JSON.stringify({ name: "@openhub-fixture/npx-mcp", version: "2.1.0", engines: { node: ">=20" }, deprecated: "A".repeat(1024 * 1024 - 200) });
     expect(doc.length).toBeLessThan(1024 * 1024);
-    const request: ReleaseRequest = { toolId: "memory-mcp", versionSource: "npm", backend: "npx", requested: "@modelcontextprotocol/server-memory", resolved: null };
+    const request: ReleaseRequest = { toolId: "fixture-npx-mcp", versionSource: "npm", backend: "npx", requested: "@openhub-fixture/npx-mcp", resolved: null };
     const fetch = async (url: string) => (url === latest ? new Response(doc, { status: 200, headers: { "content-type": "application/json" } }) : new Response("missing", { status: 404 }));
     const r = await collectReleaseSnapshot(request, { fetch, now: () => new Date("2026-10-07T00:00:00.000Z") });
     if (!r.ok) throw new Error(r.code);

@@ -24,4 +24,4 @@ Warnings
   - [base] 위 설치 계획(실행 명령, 쓰는 설정 파일, 네트워크 사용)을 확인했고 이대로 실행하는 데 동의합니다.
   - [client-env-parse-risk] Claude Code가 실행되는 환경에 필요한 환경변수를 직접 준비해야 합니다. OpenHub는 값이나 존재 여부를 확인하지 않습니다.
 
-Plan digest  sha256:140d9105a13be081cdafb9d22c039e84844442fee0316b7767219c747968a5e6
+Plan digest  sha256:34027d1a9620151159503163333871c6102a92c8483f13135ab1f934e2fe54ea

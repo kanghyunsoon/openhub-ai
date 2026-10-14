@@ -3,10 +3,10 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { readConfiguredEntry, recommend, runInstallTransaction, serializeInstallResult, type ConfigFs } from "../../src/index";
-import { seedEntries } from "../recommendation/helpers";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 import { approveAll, createHarness, listing, newScratch, plannedOf } from "./harness";
 
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const scratch = await newScratch("verify-test");
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 afterEach(() => vi.unstubAllGlobals());
@@ -15,7 +15,7 @@ describe("REQ-035 Post-install Verification", () => {
   it("AC-034-01 Prepared: floating npx는 spawn 0회로 launch-on-demand, 정확한 버전 uvx는 uvx Prepare 뒤 cached, docker는 pull 성공 시 pulled", async () => {
     {
       const h = await createHarness(scratch, { entries: seed });
-      const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+      const request = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
       const p = await plannedOf(h, request);
       const result = await runInstallTransaction(p, await approveAll(p), request, h.env);
       expect(result.verification?.prepared).toBe("launch-on-demand");
@@ -66,7 +66,7 @@ describe("REQ-035 Post-install Verification", () => {
 
   it("AC-034-03 Detected: analyzeProject 재실행 후 resolver가 해당 toolId로 resolved하고 user scope면 host를 포함한다", async () => {
     const h = await createHarness(scratch, { entries: seed });
-    const project = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    const project = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const p1 = await plannedOf(h, project);
     h.reset();
     expect((await runInstallTransaction(p1, await approveAll(p1), project, h.env)).verification?.detected).toBe(true);
@@ -119,7 +119,7 @@ describe("REQ-035 Post-install Verification", () => {
     const file = path.join(h.projectRoot, ".mcp.json");
     const original = '{ "mcpServers": { "keep": { "command": "x", "args": [] } } }\n';
     await writeFile(file, original);
-    const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    const request = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const p = await plannedOf(h, request);
     const approval = await approveAll(p);
     let verifying = false;
@@ -131,7 +131,7 @@ describe("REQ-035 Post-install Verification", () => {
       readFile: async (f) => {
         if (verifying && tamperOnce && f.endsWith(".mcp.json")) {
           tamperOnce = false;
-          return Buffer.from('{ "mcpServers": { "memory": { "command": "other", "args": [] } } }');
+          return Buffer.from('{ "mcpServers": { "fixture-npx": { "command": "other", "args": [] } } }');
         }
         return h.env.configFs!.readFile(f);
       },
@@ -142,7 +142,7 @@ describe("REQ-035 Post-install Verification", () => {
     expect(await readFile(file, "utf8")).toBe(original);
 
     const d = await createHarness(scratch, { entries: seed });
-    const req2 = d.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    const req2 = d.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const p2 = await plannedOf(d, req2);
     const approval2 = await approveAll(p2);
     let phase = "";
@@ -150,16 +150,16 @@ describe("REQ-035 Post-install Verification", () => {
     const undetected = await runInstallTransaction(p2, approval2, req2, blind);
     expect(undetected).toMatchObject({ status: "succeeded", verification: { prepared: "launch-on-demand", configured: true, detected: false } });
     expect(undetected.warnings.map((w) => w.code)).toEqual(["configured-not-detected"]);
-    expect(JSON.parse(await readFile(path.join(d.projectRoot, ".mcp.json"), "utf8")).mcpServers.memory.command).toBe("npx");
+    expect(JSON.parse(await readFile(path.join(d.projectRoot, ".mcp.json"), "utf8")).mcpServers["fixture-npx"].command).toBe("npx");
   });
 
   it("v0.2.0 복구 직전 파일이 이번에 쓴 byte와 다르면(다른 프로세스가 바꿨으면) 덮어쓰지 않고 COMPENSATION_INCOMPLETE로 실패한다", async () => {
     const h = await createHarness(scratch, { entries: seed });
     const file = path.join(h.projectRoot, ".mcp.json");
     await writeFile(file, '{ "mcpServers": { "keep": { "command": "x", "args": [] } } }\n');
-    const request = h.request("memory-mcp", [{ client: "claude-code", scope: "project" }]);
+    const request = h.request("fixture-npx-mcp", [{ client: "claude-code", scope: "project" }]);
     const p = await plannedOf(h, request);
-    const external = '{ "mcpServers": { "memory": { "command": "someone-else", "args": [] } } }\n';
+    const external = '{ "mcpServers": { "fixture-npx": { "command": "someone-else", "args": [] } } }\n';
     // 확인 단계에 들어가면 다른 프로세스가 파일을 바꾼 것처럼 실제 파일을 바꾸고, 확인은 실패하게 한다.
     const verify = async () => {
       writeFileSync(file, external);

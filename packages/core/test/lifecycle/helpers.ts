@@ -30,12 +30,12 @@ export const DIGEST_B = "sha256:" + "b".repeat(64);
 
 export function toolState(over: Partial<ToolState> = {}): ToolState {
   return {
-    toolId: "memory-mcp",
+    toolId: "fixture-npx-mcp",
     backend: "npx",
     revision: 1,
-    target: { client: "claude-code", scope: "project", file: ".mcp.json", serverName: "memory", projectName: "demo", projectKey: "0123456789abcdef" },
-    artifact: { requested: "@modelcontextprotocol/server-memory", resolved: null },
-    launch: { platform: "linux", clientSpec: { command: "npx", args: ["-y", "@modelcontextprotocol/server-memory"] } },
+    target: { client: "claude-code", scope: "project", file: ".mcp.json", serverName: "fixture-npx", projectName: "demo", projectKey: "0123456789abcdef" },
+    artifact: { requested: "@openhub-fixture/npx-mcp", resolved: null },
+    launch: { platform: "linux", clientSpec: { command: "npx", args: ["-y", "@openhub-fixture/npx-mcp"] } },
     config: { entryDigest: DIGEST_A, tomlBlockDigest: null },
     appliedPlanDigest: DIGEST_B,
     committedAt: "2026-10-07T00:00:00.000Z",

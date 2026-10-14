@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { loadRegistry, runInstallTransaction, type InstallClient } from "../../src/index";
 import { ConfigWriteError, configTargetFor, nodeConfigFs, resolveInside } from "../../src/installer/config-writer";
 import { approveAll, createHarness, plannedOf } from "./harness";
+import { seedWithNpxFixture } from "../recommendation/helpers";
 
 /**
  * v0.2.1 P0-2 재현: project 범위 대상 파일이 (realpath 기준으로) 같은 Client의 사용자 설정 파일과 같으면
@@ -12,7 +13,8 @@ import { approveAll, createHarness, plannedOf } from "./harness";
  * Cursor(~/.cursor/mcp.json)·Codex(~/.codex/config.toml)는 겹칠 수 있고, Claude Code는 project .mcp.json / user ~/.claude.json이라 겹치지 않는다.
  */
 const REGISTRY = path.resolve(import.meta.dirname, "../../../../registry");
-const { entries } = await loadRegistry(REGISTRY);
+// 실제 Registry + 테스트 전용 npx fixture(v0.2.1 #69: Memory MCP 지원 중단으로 버전 미고정 npx 도구 역할을 대신한다)
+const entries = await seedWithNpxFixture();
 const scratch = await mkdtemp(path.join(tmpdir(), "openhub-v021-scope-"));
 afterAll(() => rm(scratch, { recursive: true, force: true }));
 const USER_FILE = { cursor: path.join(".cursor", "mcp.json"), codex: path.join(".codex", "config.toml") } as const;
@@ -31,7 +33,7 @@ async function overlapping(client: "cursor" | "codex", how: "same-dir" | "symlin
   } else {
     await writeFile(path.join(h.homeDir, "package.json"), '{ "name": "api", "dependencies": { "pg": "^8.13.0" } }\n');
   }
-  const request = { ...h.request("memory-mcp", [{ client: client as InstallClient, scope: "project" as const }]), projectRoot };
+  const request = { ...h.request("fixture-npx-mcp", [{ client: client as InstallClient, scope: "project" as const }]), projectRoot };
   return { h, request, userFile: path.join(h.homeDir, USER_FILE[client]) };
 }
 
@@ -71,7 +73,7 @@ describe("v0.2.1 P0-2 project 범위 대상이 사용자 설정 파일과 같을
 
   it("겹치지 않는 일반 프로젝트는 영향이 없다", async () => {
     const h = await createHarness(scratch, { entries });
-    const planned = await plannedOf(h, h.request("memory-mcp", [{ client: "cursor", scope: "project" }]));
+    const planned = await plannedOf(h, h.request("fixture-npx-mcp", [{ client: "cursor", scope: "project" }]));
     expect(planned.plan.warnings.map((w) => w.code)).not.toContain("PROJECT_TARGET_IS_USER_CONFIG");
     expect(planned.plan.status).toBe("installable");
   });
@@ -79,7 +81,7 @@ describe("v0.2.1 P0-2 project 범위 대상이 사용자 설정 파일과 같을
   it("Claude Code(.mcp.json)는 home을 프로젝트로 골라도 사용자 설정(~/.claude.json)과 겹치지 않아 그대로 계획된다", async () => {
     const h = await createHarness(scratch, { entries });
     await writeFile(path.join(h.homeDir, ".claude.json"), '{ "keep": true }\n');
-    const request = { ...h.request("memory-mcp", [{ client: "claude-code" as const, scope: "project" as const }]), projectRoot: h.homeDir };
+    const request = { ...h.request("fixture-npx-mcp", [{ client: "claude-code" as const, scope: "project" as const }]), projectRoot: h.homeDir };
     const planned = await plannedOf(h, request);
     expect(planned.plan.warnings.map((w) => w.code)).not.toContain("PROJECT_TARGET_IS_USER_CONFIG");
     expect(planned.plan.status).toBe("installable");

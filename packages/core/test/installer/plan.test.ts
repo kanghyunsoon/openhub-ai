@@ -15,10 +15,10 @@ import {
   type InstallPlanV1,
   type RegistryEntry,
 } from "../../src/index";
-import { fixtureProfile, item, seedEntries, shuffleProfile, shuffled, tool } from "../recommendation/helpers";
+import { fixtureProfile, item, seedWithNpxFixture, shuffleProfile, shuffled, tool } from "../recommendation/helpers";
 import { assemblyInput, clientProfile, entryOf, launchSpec, planFor, reportFor, target } from "./helpers";
 
-const seed = await seedEntries();
+const seed = await seedWithNpxFixture();
 const postgresProfile = () => clientProfile({ databases: [item("postgresql", "PostgreSQL", "dependency", { file: "pyproject.toml" })] });
 const uvxPostgres = {
   backend: { adapter: "uvx" as const, selection: "preferred" as const, skipped: [], probe: { name: "uvx", available: true, version: "0.5.0", status: "ok" as const } },
@@ -30,7 +30,7 @@ const valid = (plan: unknown) => installPlanSchema.safeParse(plan).success;
 
 describe("REQ-034 InstallPlan v1 계약과 canonical digest", () => {
   it("AC-027-01 installPlanSchema는 strict이고 schemaVersion 1만 받으며 모르는 key를 거부한다", () => {
-    const { plan } = planFor(seed, reportFor(clientProfile(), seed), "memory-mcp");
+    const { plan } = planFor(seed, reportFor(clientProfile(), seed), "fixture-npx-mcp");
     expect(installPlanSchema.parse(plan)).toEqual(plan);
     expect(plan.schemaVersion).toBe(1);
     expect(valid({ ...plan, schemaVersion: 2 })).toBe(false);
@@ -73,7 +73,7 @@ describe("REQ-034 InstallPlan v1 계약과 canonical digest", () => {
   });
 
   it("AC-027-04 Plan에는 시각 필드가 없고 approvedAt은 Plan에 들어갈 수 없어 digest에 영향을 주지 않는다", () => {
-    const { plan, planDigest } = planFor(seed, reportFor(clientProfile(), seed), "memory-mcp");
+    const { plan, planDigest } = planFor(seed, reportFor(clientProfile(), seed), "fixture-npx-mcp");
     const keys: string[] = [];
     const walk = (v: unknown) => {
       if (Array.isArray(v)) v.forEach(walk);
@@ -128,7 +128,7 @@ describe("REQ-034 InstallPlan v1 계약과 canonical digest", () => {
   });
 
   it("AC-027-06 env가 없는 Tool도 유효한 Plan이 된다", () => {
-    const { plan } = planFor(seed, reportFor(clientProfile(), seed), "memory-mcp");
+    const { plan } = planFor(seed, reportFor(clientProfile(), seed), "fixture-npx-mcp");
     expect(plan.requiredEnv).toEqual([]);
     expect(plan.status).toBe("installable");
     expect(valid(plan)).toBe(true);
@@ -136,7 +136,7 @@ describe("REQ-034 InstallPlan v1 계약과 canonical digest", () => {
 
   it("AC-027-07 절대 경로·token·URL credential은 schema가 거부하고 config 대상은 논리 경로만 쓴다", () => {
     const report = reportFor(clientProfile(), seed);
-    const { plan } = planFor(seed, report, "memory-mcp", { targets: [target("claude-code"), target("cursor", "user"), target("codex", "user")] });
+    const { plan } = planFor(seed, report, "fixture-npx-mcp", { targets: [target("claude-code"), target("cursor", "user"), target("codex", "user")] });
     expect(plan.targets.map((t) => t.file)).toEqual([".mcp.json", "~/.codex/config.toml", "~/.cursor/mcp.json"]);
     const mutate = (fn: (p: InstallPlanV1) => void) => {
       const p = clone(plan);
@@ -147,12 +147,12 @@ describe("REQ-034 InstallPlan v1 계약과 canonical digest", () => {
     expect(mutate((p) => (p.targets[0]!.file = "/home/someone/.cursor/mcp.json"))).toBe(false);
     expect(mutate((p) => p.launch!.args.push("ghp_" + "a".repeat(36)))).toBe(false);
     expect(mutate((p) => p.warnings.push({ code: "x", message: "https://user:pw@example.com/repo" }))).toBe(false);
-    expect(() => planFor(seed, report, "memory-mcp", { targets: [target("claude-code", "project", { file: "C:\\work\\app\\.mcp.json" })] })).toThrow();
+    expect(() => planFor(seed, report, "fixture-npx-mcp", { targets: [target("claude-code", "project", { file: "C:\\work\\app\\.mcp.json" })] })).toThrow();
   });
 
   it("AC-027-08 설치 상태에 따라 base / installation-unknown / unidentified-present가 정확히 정해진다", () => {
-    const pinned = { artifact: { kind: "npm-package" as const, spec: "memory-mcp@1.2.3", pinned: true, preparation: "launch-on-demand" as const } };
-    const req = (p: ReturnType<typeof clientProfile>) => planFor(seed, reportFor(p, seed), "memory-mcp", pinned).plan.approvalRequirements;
+    const pinned = { artifact: { kind: "npm-package" as const, spec: "fixture-npx-mcp@1.2.3", pinned: true, preparation: "launch-on-demand" as const } };
+    const req = (p: ReturnType<typeof clientProfile>) => planFor(seed, reportFor(p, seed), "fixture-npx-mcp", pinned).plan.approvalRequirements;
     expect(req(clientProfile())).toEqual(["base"]);
     expect(req(clientProfile({ detectors: { "ai-environment": "partial" } }))).toEqual(["base", "installation-unknown"]);
     expect(req(clientProfile({ aiTools: [tool("my-memory")] }))).toEqual(["base", "unidentified-present"]);
@@ -171,7 +171,7 @@ describe("REQ-034 InstallPlan v1 계약과 canonical digest", () => {
     const floatingPlan = planFor(seed, report, "postgres-mcp", { ...uvxPostgres, targets: [target("claude-code")] }).plan;
     expect(floatingPlan.warnings.find((w) => w.code === "floating-artifact")?.message).toBe(FLOATING_ARTIFACT_NOTICE);
     // env 없는 Tool은 Claude Code 대상이어도 client-env-parse-risk가 없다. Claude Code user(manual)는 쓰지 않으므로 user-scope-config도 없다.
-    const memory = planFor(seed, reportFor(clientProfile(), seed), "memory-mcp", { artifact: base.artifact, targets: [target("claude-code"), target("claude-code", "user")] }).plan;
+    const memory = planFor(seed, reportFor(clientProfile(), seed), "fixture-npx-mcp", { artifact: base.artifact, targets: [target("claude-code"), target("claude-code", "user")] }).plan;
     expect(memory.approvalRequirements).toEqual(["base"]);
     expect(memory.warnings.map((w) => w.code)).toContain("manual-setup-required");
   });

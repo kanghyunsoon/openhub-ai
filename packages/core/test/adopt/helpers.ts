@@ -3,7 +3,7 @@ import path from "node:path";
 import type { AdoptPlanOptions, AdoptPlanResult, PlannedAdopt, RegistryEntry } from "../../src/index";
 
 /** adopt 테스트 공용 도우미. 임시 project·home만 쓴다(실제 home·process.env·network 없음). */
-export const MEMORY = "@modelcontextprotocol/server-memory";
+export const MEMORY = "@openhub-fixture/npx-mcp";
 export interface Case {
   projectRoot: string;
   homeDir: string;
@@ -24,7 +24,7 @@ export async function newCase(scratch: string, files: Record<string, unknown> = 
 }
 export const mcp = (servers: Record<string, unknown>) => ({ mcpServers: servers });
 export const adoptOptions = (entries: readonly RegistryEntry[], c: Case, over: Partial<AdoptPlanOptions> = {}): AdoptPlanOptions => ({
-  toolId: "memory-mcp",
+  toolId: "fixture-npx-mcp",
   projectRoot: c.projectRoot,
   homeDir: c.homeDir,
   entries,
