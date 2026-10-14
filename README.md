@@ -113,7 +113,7 @@ Pinokio support targets pterm 0.0.25. Default tests use a fake pinokiod; real Pi
 
 ## Known Issues
 
-Read the [known issues for v0.2.0](docs/known-issues-v0.2.0.md) before you start: switching projects during install, interrupted updates, Postgres MCP Pro on a new machine, and the slow first start of uvx tools on Windows.
+Read the [known issues for v0.2.0](docs/known-issues-v0.2.0.md) before you start: switching projects during install, interrupted updates, Postgres MCP Pro on a new machine, and the slow first start of uvx tools on Windows. The limits of the unreleased code on `main` are in the [v0.2.1 known issues](docs/known-issues-v0.2.1.md).
 
 The download is v0.2.0. This README also describes the code on `main`, which is not released yet. Differences:
 
@@ -125,7 +125,8 @@ The download is v0.2.0. This README also describes the code on `main`, which is 
 | Environment passed to MCP servers during Health and Benchmark | Your whole environment | Only OS and path variables, proxy/CA and the backend's own settings, and the variables the tool declares. If a package index or registry setting in your environment cannot be passed as-is (for example a URL with credentials), Health and Benchmark do not run; put it in `uv.toml` or `.npmrc` instead ([security model](docs/security-model.md)) |
 | First start of Postgres MCP Pro on Windows | Can hit the Health time limit | The exact version (`postgres-mcp==0.3.0`, `mcp==1.30.0`, wheels only) is prepared before the configuration is written; the client also runs it with `--no-build` |
 | Serena | Installable; the client builds a dependency (`proxy-tools`) from source on first start | **No new installs, updates, rollback, Health, repair, adopt or Benchmark**: that build cannot be verified. An existing Serena entry and its Version State are kept and shown as withdrawn; an interrupted operation can still be recovered; remove it with [the manual steps](#removing-a-tool-or-openhub) if you want. Re-support: [#59](https://github.com/kanghyunsoon/openhub-ai/issues/59) |
-| Memory MCP | Installable; memories are stored in `memory.jsonl` inside the npx cache by default | **No new installs, updates, rollback, Health, repair, adopt or Benchmark**: a new upstream version deletes that file, and another version starts without the earlier memories. An existing entry, its Version State and the memory file are kept and shown as withdrawn; an interrupted operation can still be recovered. Your client can still start it, so back up `memory.jsonl` first ([known issues](docs/known-issues-v0.2.1.md)). Storage fix: [#69](https://github.com/kanghyunsoon/openhub-ai/issues/69) |
+| Memory MCP | Installable; memories are stored in `memory.jsonl` inside the npx cache by default | **No new installs, updates, rollback, Health, repair, adopt or Benchmark**: a new upstream version deletes that file, and another version starts without the earlier memories. An existing entry, its Version State and the memory file are kept and shown as withdrawn; an interrupted operation can still be recovered. Your client can still start it and OpenHub does not protect the file for you: back up `memory.jsonl` and set `MEMORY_FILE_PATH` to an absolute path outside the npm cache ([known issues](docs/known-issues-v0.2.1.md)). Storage fix: [#69](https://github.com/kanghyunsoon/openhub-ai/issues/69) |
+| First Health of unpinned npx tools (Context7, Chrome DevTools MCP, Playwright MCP) | Downloads the package within the 20 s startup limit | Unchanged; Context7 took about 15.8 s on one Windows PC with an empty npm cache, the other two were not measured. Run Health again after `startup-timeout` ([known issues](docs/known-issues-v0.2.1.md), [#70](https://github.com/kanghyunsoon/openhub-ai/issues/70)) |
 
 ## Demo
 

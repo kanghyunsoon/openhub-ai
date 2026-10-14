@@ -1,14 +1,15 @@
 # v0.2.1 알려진 문제
 
-v0.2.1은 **아직 릴리스되지 않았습니다**. 이 문서는 v0.2.1에 들어갈 main `3599e80`(2026-10-13) 코드의 제한을 설명합니다. 공개된 v0.2.0의 문제와 수정 상태는 [v0.2.0 알려진 문제](known-issues-v0.2.0.ko.md)에, 이번 릴리스 범위는 [v0.2.1 릴리스 노트](release-notes/v0.2.1.md)(영어)에 있습니다.
+v0.2.1은 **아직 릴리스되지 않았습니다**. 이 문서는 v0.2.1에 들어갈 main 코드의 제한을 설명하며, 코드와 함께 갱신합니다. 공개된 v0.2.0의 문제와 수정 상태는 [v0.2.0 알려진 문제](known-issues-v0.2.0.ko.md)에, 이번 릴리스 범위는 [v0.2.1 릴리스 노트](release-notes/v0.2.1.md)(영어)에 있습니다.
 
 ## 요약
 
 | 문제 | 상태 | 할 수 있는 일 |
 | --- | --- | --- |
 | Serena 신규 설치 불가 | v0.2.1 정책, 재지원은 #59 | 기존 항목은 유지하거나 직접 제거. 복구는 가능 |
-| Memory MCP 신규 설치 불가 | v0.2.1 정책, 저장 경로 해결은 #69 | Client가 다시 시작하기 전에 `memory.jsonl` 백업. 복구는 가능 |
+| Memory MCP 신규 설치 불가 | v0.2.1 정책, 저장 경로 해결은 #69 | Client가 다시 시작하기 전에 `memory.jsonl` 백업, `MEMORY_FILE_PATH`에 절대 경로 지정. 복구는 가능 |
 | Windows에서 Postgres MCP Pro 첫 Health가 시간 제한에 가까움 | 미수정, 20초 중 약 15초 측정 | Health 다시 실행 |
+| 버전 고정 안 된 npx 도구(Context7, Chrome DevTools MCP, Playwright MCP)는 첫 Health에서 패키지를 내려받음 | 알려진 제한. Context7만 Windows PC 1대에서 20초 중 약 15.8초 측정, 나머지 둘은 미측정. #70에서 추적 | Health 다시 실행 |
 | 중단된 작업 복구는 CLI만 | v0.2.1 정책 | INSTALLED에 보이는 명령 실행 |
 | Health·Benchmark 환경 제한은 sandbox가 아님 | 알려진 제한 | 아래 참고 |
 | npm 설정(`.npmrc`의 `node-options`)으로 Node.js 옵션이 더해질 수 있음 | 알려진 제한, #63에서 추적 | `npm config get node-options` 확인 |
@@ -31,6 +32,12 @@ v0.2.1은 **아직 릴리스되지 않았습니다**. 이 문서는 v0.2.1에 �
 - **내용:** Memory MCP는 `MEMORY_FILE_PATH`를 지정하지 않으면 npx cache 안의 패키지 폴더에 있는 `memory.jsonl`에 기억을 저장합니다. 고정되지 않은 명령에서 새 버전이 나오면 그 폴더가 바뀌면서 파일이 지워지고, 다른 버전으로 업데이트·롤백하면 이전 기억 없이 서버가 시작됩니다(둘 다 재현함). 그래서 Memory MCP를 Verified Registry에서 뺐습니다. 설치·업데이트·롤백·Health·repair·adopt·benchmark는 이 사유와 함께 거부합니다. 사용자 Registry나 이름이 다른 Manifest가 npm 패키지 `@modelcontextprotocol/server-memory`를 설치하려 해도 마찬가지입니다. 같은 `modelcontextprotocol/servers` 저장소의 다른 서버는 영향을 받지 않습니다.
 - **이미 Memory MCP를 쓰는 경우:** Client 설정, Version State, 기억 파일은 바꾸거나 옮기거나 지우지 않습니다. `openhub lifecycle status`에 지원 중단 표시와 #69 링크가 나옵니다. OpenHub는 더 이상 이 서버를 실행하지 않지만 Client는 실행할 수 있고, OpenHub는 그 실행을 통제하지 않습니다. 다음 실행 전에 `memory.jsonl`을 백업하세요. 이미 지워진 파일은 OpenHub가 복구할 수 없습니다.
 - **중단된 Memory MCP 작업:** `openhub lifecycle recover memory-mcp`는 Registry 항목 없이도 동작합니다.
+- **기억은 직접 보호해야 합니다.** v0.2.1은 기억 파일을 옮기거나 복사하거나 보호하지 않으며, Client는 기존 설정으로 Memory MCP를 계속 시작합니다. 아무것도 하지 않으면 같은 손실이 여전히 일어날 수 있습니다. Client가 다시 시작하기 전에:
+  1. 파일 찾기: `<npm cache>/_npx/<폴더>/node_modules/@modelcontextprotocol/server-memory/dist/` 아래의 `memory.jsonl`(`npm config get cache`로 npm cache 폴더 확인). 명령 형식·버전마다 폴더가 따로라 파일이 여러 개일 수 있습니다.
+  2. npm cache 밖의 폴더로 복사합니다.
+  3. 이 서버의 `MEMORY_FILE_PATH`에 복사본의 **절대 경로**를 지정합니다. 2026.x와 1.0.0은 절대 경로의 같은 파일을 읽고 씁니다. `~`(1.0.0 이전 버전은 확장하지 않음)나 상대 경로(버전마다 바뀌는 패키지 폴더 기준으로 해석됨)는 쓰지 마세요.
+- **이미 지워진 파일:** 새 버전이나 npm cache 정리 등으로 이미 지워진 기억 파일은 OpenHub가 복구할 수 없습니다.
+- **Client 항목에 `MEMORY_FILE_PATH`를 넣은 뒤:** `openhub lifecycle status`가 지원 중단 안내와 함께 `config-drift`를 표시합니다. 정상입니다. OpenHub는 이 도구를 더 이상 업데이트·repair하지 않으며 설정을 덮어쓰지 않습니다.
 - **제거:** README의 수동 제거 절차를 따르세요(Client 설정 파일을 먼저 백업). Client 항목을 지워도 기억 파일은 지워지지 않습니다.
 - **상태:** npm cache 밖의 안정적인 저장 경로와 승인을 거친 기존 기억 복사는 [#69](https://github.com/kanghyunsoon/openhub-ai/issues/69)에서 다룹니다.
 
@@ -40,6 +47,14 @@ v0.2.1은 **아직 릴리스되지 않았습니다**. 이 문서는 v0.2.1에 �
 - **할 수 있는 일:** Health를 다시 실행하세요(INSTALLED → Health Check 또는 `openhub lifecycle health postgres-mcp`). 패키지는 설정을 쓰기 전에 준비돼 있어서 다음 실행은 더 빠릅니다(같은 측정에서 약 6.5초).
 - **업데이트·롤백:** 다른 버전은 시작 시간이 따로 있습니다. 시험한 이전 버전(0.2.1)은 Windows에서 약 31초가 걸려 Health가 실패했고, OpenHub가 이전 설정과 Version State를 되돌렸습니다. 의도된 안전 동작이며 데이터 손실이 아닙니다.
 - **상태:** 미수정. 20초 제한을 늘려서 감추지 않습니다.
+
+## 버전 고정 안 된 npx 도구: 첫 Health가 패키지를 내려받음
+
+- **대상:** Context7(`@upstash/context7-mcp`), Chrome DevTools MCP(`chrome-devtools-mcp@latest`), Playwright MCP(`@playwright/mcp@latest`). Registry 명령에 정확한 버전이 없어 설치 때 내려받지 않습니다(계획에 "launch-on-demand"와 `floating-artifact`가 표시됨).
+- **내용:** 첫 Health(Client의 첫 실행도 같음)에서 npx가 최신 버전을 찾고 의존성과 함께 npx cache에 받은 뒤 서버를 시작합니다. 이 시간이 모두 20초 시작 제한에 들어갑니다.
+- **측정:** Context7만 측정했습니다. 빈 npm cache에서 첫 시작이 Windows 개발 PC 1대에서 약 15.8초, Linux에서 6.4~8.2초였고, 이미 받은 뒤에는 Linux에서 약 0.7초였습니다. CI runner의 패키징 RC 실행에서는 플랫폼마다 1회 통과했지만, 얼마나 자주 실패할 수 있는지는 알 수 없습니다. Chrome DevTools MCP와 Playwright MCP는 **측정하지 않았습니다**. 느린 네트워크·디스크·백신 검사는 `startup-timeout` 가능성을 높입니다.
+- **할 수 있는 일:** Health를 다시 실행하세요. 단독 Health 실패는 설정을 바꾸지 않고, 업데이트 중 Health 실패는 이전 설정과 Version State를 되돌립니다. 다음 시작부터는 받은 패키지를 쓰지만, 버전이 고정되지 않아 새 버전이 나오면 다시 받습니다.
+- **상태:** 준비·고정 전략은 [#70](https://github.com/kanghyunsoon/openhub-ai/issues/70)에서 다룹니다. 20초 제한은 늘리지 않습니다.
 
 ## 복구는 CLI만
 

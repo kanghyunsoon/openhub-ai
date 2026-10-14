@@ -1,14 +1,15 @@
 # Known issues in v0.2.1
 
-v0.2.1 is **not released yet**. This page describes the limits of the code on main `3599e80` (2026-10-13) that is planned for v0.2.1. Issues of the published v0.2.0 and their fixes are in the [v0.2.0 known issues](known-issues-v0.2.0.md); the scope of this release is in the [v0.2.1 release notes](release-notes/v0.2.1.md).
+v0.2.1 is **not released yet**. This page describes the limits of the code on main that is planned for v0.2.1 and is updated together with that code. Issues of the published v0.2.0 and their fixes are in the [v0.2.0 known issues](known-issues-v0.2.0.md); the scope of this release is in the [v0.2.1 release notes](release-notes/v0.2.1.md).
 
 ## Summary
 
 | Issue | Status | What you can do |
 | --- | --- | --- |
 | Serena: no new installs | By design in v0.2.1; re-support tracked in #59 | Keep or remove your existing entry; recovery still works |
-| Memory MCP: no new installs | By design in v0.2.1; storage fix tracked in #69 | Back up `memory.jsonl` before your client starts it again; recovery still works |
+| Memory MCP: no new installs | By design in v0.2.1; storage fix tracked in #69 | Before your client starts it again, back up `memory.jsonl` and set `MEMORY_FILE_PATH` to an absolute path; recovery still works |
 | Postgres MCP Pro: first Health on Windows is close to the time limit | Not fixed; measured about 15 s of 20 s | Run Health again |
+| Unpinned npx tools (Context7, Chrome DevTools MCP, Playwright MCP) download the package during their first Health | Known limit; Context7 measured about 15.8 s of 20 s on one Windows PC, the other two not measured; tracked in #70 | Run Health again |
 | Recovery of interrupted operations is CLI only | By design in v0.2.1 | Run the command the Installed view shows |
 | Environment limits during Health and benchmark are not a sandbox | Known limit | See below |
 | npm configuration (`node-options` in `.npmrc`) can still add Node.js options | Known limit; tracked in #63 | Check `npm config get node-options` |
@@ -30,6 +31,12 @@ v0.2.1 is **not released yet**. This page describes the limits of the code on ma
 
 - **What happens:** Memory MCP stores memories in `memory.jsonl` inside its package folder in the npx cache unless `MEMORY_FILE_PATH` is set. A new upstream version under the unpinned command replaces that folder and deletes the file, and an update or rollback to another version starts the server without the earlier memories (both reproduced). Memory MCP was removed from the Verified Registry. Install, update, rollback, Health, repair, adopt and benchmark refuse it with this reason, also when a custom Registry or a Manifest with another name installs the npm package `@modelcontextprotocol/server-memory`. Other servers from the shared `modelcontextprotocol/servers` repository are not affected.
 - **If you already use Memory MCP:** your client configuration, Version State and memory file are not changed, moved or deleted. `openhub lifecycle status` shows the entry as withdrawn with a link to #69. OpenHub does not start the server any more, but your client can, and OpenHub does not control that. Back up `memory.jsonl` before the next start. A file that was already deleted cannot be recovered by OpenHub.
+- **Protect your memories yourself.** Nothing in v0.2.1 moves, copies or protects the file for you, and your client still starts Memory MCP with the old configuration, so the same loss can still happen if you do nothing. Before your client starts it again:
+  1. Find the file: `memory.jsonl` under `<npm cache>/_npx/<folder>/node_modules/@modelcontextprotocol/server-memory/dist/` (`npm config get cache` prints the npm cache folder). Each command form and version has its own folder, so there can be more than one file.
+  2. Copy it to a folder outside the npm cache.
+  3. Set `MEMORY_FILE_PATH` for this server to the **absolute** path of the copy. Versions 2026.x and 1.0.0 read and write the same file at an absolute path. Do not use `~` (versions before 1.0.0 do not expand it) or a relative path (it is resolved inside the package folder, which changes with the version).
+- **Already deleted files:** a memory file that was already deleted (for example by a new upstream version or by clearing the npm cache) cannot be recovered by OpenHub.
+- **After you set `MEMORY_FILE_PATH` in the client entry:** `openhub lifecycle status` shows the entry as `config-drift` next to the withdrawn notice. This is expected: OpenHub does not update or repair this tool any more and does not overwrite your setting.
 - **Interrupted Memory MCP operation:** `openhub lifecycle recover memory-mcp` still works; it does not need the Registry entry.
 - **Removing it:** follow the manual removal steps in the README (back up the client configuration file first). Removing the client entry does not delete the memory file.
 - **Status:** a stable storage path outside the npm cache and an approved copy of existing memories are tracked in [#69](https://github.com/kanghyunsoon/openhub-ai/issues/69).
@@ -40,6 +47,14 @@ v0.2.1 is **not released yet**. This page describes the limits of the code on ma
 - **What you can do:** run Health again (Installed → Health Check, or `openhub lifecycle health postgres-mcp`). The packages were prepared before the configuration was written, so later starts are faster (about 6.5 seconds in the same measurement).
 - **Update and rollback:** a different version has its own startup time. In our test an older version (0.2.1) needed about 31 seconds on Windows, so its Health check failed and OpenHub restored the previous configuration and Version State. This is the intended safe behavior, not data loss.
 - **Status:** not fixed. The 20 second limit is not raised to hide this.
+
+## Unpinned npx tools: the first Health downloads the package
+
+- **Which tools:** Context7 (`@upstash/context7-mcp`), Chrome DevTools MCP (`chrome-devtools-mcp@latest`) and Playwright MCP (`@playwright/mcp@latest`). Their Registry command has no exact version, so OpenHub does not download them at install (the plan says "launch-on-demand" and shows `floating-artifact`).
+- **What happens:** the first Health check (like the first start by your client) runs npx, which looks up the newest version, downloads it with its dependencies into the npx cache and then starts the server. All of this counts against the 20 second startup limit.
+- **Measured:** Context7 only. With an empty npm cache its first start took about 15.8 seconds on one Windows development PC and 6.4–8.2 seconds on Linux; with the package already downloaded about 0.7 seconds on Linux. In packaged release-candidate runs on CI runners its first Health passed, one run per platform, which does not show how often it can fail. Chrome DevTools MCP and Playwright MCP were **not measured**. A slow network, disk or antivirus scan makes `startup-timeout` more likely.
+- **What you can do:** run Health again. A failed standalone Health check changes no configuration; a failed Health during an update restores the previous configuration and Version State. Later starts use the downloaded package, but an unpinned tool downloads again whenever a newer version is published.
+- **Status:** a strategy for preparing or pinning these tools is tracked in [#70](https://github.com/kanghyunsoon/openhub-ai/issues/70). The 20 second limit is not raised.
 
 ## Recovery is CLI only
 
