@@ -8,6 +8,7 @@ import {
   createTreeKiller,
   inspectNpxEntry,
   locateWindowsNpxLauncher,
+  mcpPackageSourceCheck,
   nodeExecSpawner,
   npmChildEnv,
   npmToolArgv,
@@ -33,6 +34,8 @@ import { seedEntries } from "../recommendation/helpers";
  * 대상 패키지는 OPENHUB_E2E_NPX_COMMAND로 바꿀 수 있다(예: 대형 패키지 재검증). 기본은 Context7의 고정 버전이다.
  * 이 테스트는 Registry Manifest를 바꾸지 않는다. context7 Manifest를 메모리에서만(v0.2.1부터: Memory MCP는 지원 중단 #69) 고정 버전 명령으로 바꿔 쓴다.
  */
+// v0.2.1(#46): 제품 경로처럼 같은 원본으로 계획의 패키지 출처 digest와 Health 실행 환경을 만든다(없으면 Health가 서버를 띄우지 않는다).
+const source = () => process.env;
 const COMMAND = process.env["OPENHUB_E2E_NPX_COMMAND"] ?? "npx -y @upstash/context7-mcp@4.1.1";
 const INTERRUPT_MS = Number(process.env["OPENHUB_E2E_NPX_INTERRUPT_MS"] ?? "1500");
 const platform = process.platform === "win32" ? "windows" : "linux";
@@ -82,7 +85,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 npx Prepare 실제 E
         expect(JSON.stringify(result)).not.toContain("sk-openhub-e2e-fake");
         expect(existsSync(path.join(cache, "_npx", npxCacheKey(SPEC), NPX_PREPARED_MARKER))).toBe(true);
         expect(await recordInstallInState(planned, result, { projectRoot: h.projectRoot, homeDir: h.homeDir, now: () => new Date() })).toMatchObject({ ok: true });
-        const regen = () => planLifecycle({ operation: "health", toolId: "context7", projectRoot: h.projectRoot, homeDir: h.homeDir, entries, platform, includeUser: false });
+        const regen = () => planLifecycle({ operation: "health", toolId: "context7", projectRoot: h.projectRoot, homeDir: h.homeDir, entries, platform, includeUser: false, packageSource: { npx: mcpPackageSourceCheck(source, "npx"), uvx: mcpPackageSourceCheck(source, "uvx") } });
         const first = await regen();
         if (!first.ok) throw new Error(first.code);
         const outcome = await requestLifecycleApproval(first.planned, { channel: "cli-tty", confirm: async (r) => r.requirements.map((x) => x.id) });
@@ -90,7 +93,7 @@ describe.skipIf(process.env["OPENHUB_E2E"] !== "1")("v0.2.0 npx Prepare 실제 E
         const gate = await verifyApprovedLifecyclePlan(outcome.approval, regen);
         if (!gate.ok) throw new Error(gate.code);
         const t0 = Date.now();
-        const health = await runHealthCheck(gate.verified, { healthCheckType: "mcp-handshake", tempBase: os.tmpdir(), windowsNpx });
+        const health = await runHealthCheck(gate.verified, { healthCheckType: "mcp-handshake", tempBase: os.tmpdir(), windowsNpx, sourceEnv: source });
         console.log("health ms " + String(Date.now() - t0) + " " + JSON.stringify(health.ok ? { status: health.result.status, toolCount: health.result.toolCount } : health));
         expect(health).toMatchObject({ ok: true, result: { status: "healthy" } });
       } finally {
