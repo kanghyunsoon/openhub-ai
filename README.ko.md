@@ -1,5 +1,7 @@
 # OpenHub AI
 
+> **배포 안전 안내(2026년 10월):** 현재 공개된 최신 릴리스는 v0.2.0입니다. `main`의 v0.2.1 변경은 **아직 배포되지 않았으므로** v0.2.0 설치본을 보호한다고 생각하면 안 됩니다. 설치·업데이트 전에 [v0.2.0 알려진 문제](docs/known-issues-v0.2.0.ko.md), 특히 기존 Client 설정과 중단된 업데이트의 위험을 확인하세요. Memory MCP는 기본적으로 npm cache 안에 데이터를 저장합니다. 버전을 바꾸거나 cache를 지우기 전에 `memory.jsonl`을 백업하세요([데이터 손실 보고](https://github.com/kanghyunsoon/openhub-ai/issues/69)). OpenHub는 승인 후 외부 MCP 코드를 사용자 계정 권한으로 실행하며, 승인 및 환경변수 제한은 OS sandbox가 아닙니다. 민감한 프로젝트나 자격증명과 함께 사용하기 전에 이 한계를 평가하세요. 보안 문제의 공격 세부 내용은 공개 Issue가 아니라 [비공개 신고 경로](SECURITY.md)로 알려 주세요.
+
 OpenHub AI는 프로젝트를 살펴보고 AI 코딩 Client(Claude Code·Codex·Cursor)에 맞는 MCP 서버를 추천한 뒤, 무엇이 바뀌는지 직접 확인·승인하면 대신 설치해 주는 데스크톱 앱(및 CLI)입니다. 설치한 서버가 실제로 시작되는지 확인하고, 업데이트·롤백하고, 무엇을 바꿨는지 보여 줍니다.
 
 ![DISCOVER·PROJECT·FOR YOU·INSTALLED 구역이 보이는 OpenHub AI 데스크톱 앱](docs/images/desktop.png)

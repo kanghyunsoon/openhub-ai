@@ -8,6 +8,8 @@
 | 0.1.x | no |
 | older | no |
 
+The support table does not mean that every known issue in a published build has been fixed. v0.2.0 is the latest public release; v0.2.1 changes on `main` are unreleased. Read the [v0.2.0 known issues](docs/known-issues-v0.2.0.md) before installation or upgrade. In particular, protect existing MCP configuration and back up Memory MCP data before changing its version or clearing the npm cache ([#69](https://github.com/kanghyunsoon/openhub-ai/issues/69)). OpenHub's approval and environment filtering do not sandbox third-party MCP code.
+
 ## Reporting a vulnerability
 
 Please report vulnerabilities **privately** through GitHub Security Advisories: open the repository's **Security** tab and choose **Report a vulnerability**. Do not open a public issue for a security problem.
